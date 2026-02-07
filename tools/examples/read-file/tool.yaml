@@ -1,0 +1,36 @@
+name: read-file
+version: "1.0.0"
+description: Read the contents of a file from the workspace
+runner: internal
+input_schema:
+  type: object
+  required:
+    - path
+  properties:
+    path:
+      type: string
+      description: Relative path to the file within the workspace
+  additionalProperties: false
+output_schema:
+  type: object
+  required:
+    - content
+    - exists
+  properties:
+    content:
+      type: string
+    exists:
+      type: boolean
+    size_bytes:
+      type: number
+  additionalProperties: false
+permissions:
+  - "filesystem:read:workspace"
+timeout_ms: 10000
+supports:
+  mock: true
+  dry_run: true
+mock_responses:
+  - content: "# Example file content\nThis is a mock response."
+    exists: true
+    size_bytes: 48

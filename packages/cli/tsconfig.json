@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist", "**/*.test.ts"],
+  "references": [
+    { "path": "../schemas" },
+    { "path": "../kernel" },
+    { "path": "../journal" },
+    { "path": "../tools" },
+    { "path": "../permissions" },
+    { "path": "../planner" },
+    { "path": "../memory" },
+    { "path": "../api" }
+  ]
+}

@@ -1,0 +1,36 @@
+name: write-file
+version: "1.0.0"
+description: Write content to a file in the workspace
+runner: internal
+input_schema:
+  type: object
+  required:
+    - path
+    - content
+  properties:
+    path:
+      type: string
+      description: Relative path to the file within the workspace
+    content:
+      type: string
+      description: Content to write to the file
+  additionalProperties: false
+output_schema:
+  type: object
+  required:
+    - written
+  properties:
+    written:
+      type: boolean
+    bytes_written:
+      type: number
+  additionalProperties: false
+permissions:
+  - "filesystem:write:workspace"
+timeout_ms: 10000
+supports:
+  mock: true
+  dry_run: true
+mock_responses:
+  - written: true
+    bytes_written: 128

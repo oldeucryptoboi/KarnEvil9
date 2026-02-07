@@ -1,0 +1,54 @@
+name: http-request
+version: "1.0.0"
+description: Make an HTTP request to an allowed endpoint
+runner: http
+input_schema:
+  type: object
+  required:
+    - url
+    - method
+  properties:
+    url:
+      type: string
+      description: The URL to request
+    method:
+      type: string
+      enum:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+    headers:
+      type: object
+      additionalProperties:
+        type: string
+    body:
+      type: string
+  additionalProperties: false
+output_schema:
+  type: object
+  required:
+    - status
+    - body
+  properties:
+    status:
+      type: number
+    body:
+      type: string
+    headers:
+      type: object
+      additionalProperties:
+        type: string
+  additionalProperties: false
+permissions:
+  - "network:request:https"
+timeout_ms: 30000
+supports:
+  mock: true
+  dry_run: true
+mock_responses:
+  - status: 200
+    body: "{\"ok\": true}"
+    headers:
+      content-type: "application/json"

@@ -1,0 +1,40 @@
+name: shell-exec
+version: "1.0.0"
+description: Execute a shell command within the workspace directory
+runner: shell
+input_schema:
+  type: object
+  required:
+    - command
+  properties:
+    command:
+      type: string
+      description: The shell command to execute
+    cwd:
+      type: string
+      description: Working directory (relative to workspace root)
+  additionalProperties: false
+output_schema:
+  type: object
+  required:
+    - exit_code
+    - stdout
+    - stderr
+  properties:
+    exit_code:
+      type: number
+    stdout:
+      type: string
+    stderr:
+      type: string
+  additionalProperties: false
+permissions:
+  - "shell:exec:workspace"
+timeout_ms: 60000
+supports:
+  mock: true
+  dry_run: true
+mock_responses:
+  - exit_code: 0
+    stdout: "mock command output"
+    stderr: ""

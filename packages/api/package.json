@@ -1,0 +1,24 @@
+{
+  "name": "@openflaw/api",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@openflaw/schemas": "workspace:*",
+    "@openflaw/kernel": "workspace:*",
+    "@openflaw/tools": "workspace:*",
+    "@openflaw/journal": "workspace:*",
+    "express": "^5.0.0",
+    "uuid": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0"
+  }
+}

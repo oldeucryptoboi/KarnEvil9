@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/schemas" },
+    { "path": "packages/journal" },
+    { "path": "packages/permissions" },
+    { "path": "packages/memory" },
+    { "path": "packages/tools" },
+    { "path": "packages/planner" },
+    { "path": "packages/kernel" },
+    { "path": "packages/api" },
+    { "path": "packages/cli" }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@openflaw/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "openflaw": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@openflaw/schemas": "workspace:*",
+    "@openflaw/kernel": "workspace:*",
+    "@openflaw/journal": "workspace:*",
+    "@openflaw/tools": "workspace:*",
+    "@openflaw/permissions": "workspace:*",
+    "@openflaw/planner": "workspace:*",
+    "@openflaw/memory": "workspace:*",
+    "@openflaw/api": "workspace:*",
+    "commander": "^13.0.0",
+    "uuid": "^11.0.0"
+  }
+}

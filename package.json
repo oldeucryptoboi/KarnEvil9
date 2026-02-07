@@ -1,0 +1,23 @@
+{
+  "name": "openflaw-monorepo",
+  "private": true,
+  "description": "OpenFlaw — Deterministic agent runtime with explicit plans, typed tools, permissions, and replay",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "clean": "pnpm -r clean",
+    "dev": "pnpm -r --parallel dev",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^3.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

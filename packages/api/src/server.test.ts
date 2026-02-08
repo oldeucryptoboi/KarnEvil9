@@ -65,7 +65,7 @@ describe("ApiServer (legacy constructor)", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     registry.register(testTool);
@@ -282,7 +282,7 @@ describe("ApiServer (full config constructor)", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     registry.register(testTool);
@@ -467,7 +467,7 @@ describe("ApiServer concurrency limits", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     registry.register(testTool);
@@ -525,7 +525,7 @@ describe("ApiServer recovery", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     registry.register(testTool);
@@ -666,7 +666,7 @@ describe("ApiServer plugin integration", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     registry.register(testTool);
@@ -798,7 +798,7 @@ describe("ApiServer authentication", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     registry.register(testTool);
@@ -878,7 +878,7 @@ describe("ApiServer rate limiting", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     registry.register(testTool);
@@ -927,7 +927,7 @@ describe("ApiServer journal pagination", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     registry.register(testTool);
@@ -1014,7 +1014,7 @@ describe("ApiServer security hardening", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     registry.register(testTool);
@@ -1128,13 +1128,416 @@ describe("ApiServer security hardening", () => {
   });
 });
 
+describe("ApiServer approval timeout", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let apiServer: ApiServer;
+  let httpServer: ReturnType<typeof createServer>;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    registry = new ToolRegistry();
+    registry.register(testTool);
+    apiServer = new ApiServer({
+      toolRegistry: registry,
+      journal,
+      insecure: true,
+      approvalTimeoutMs: 50, // Very short timeout for testing
+    });
+
+    await new Promise<void>((resolve) => {
+      httpServer = createServer(apiServer.getExpressApp());
+      httpServer.listen(0, () => {
+        const addr = httpServer.address() as AddressInfo;
+        baseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("auto-denies pending approval after timeout", async () => {
+    let resolvedDecision: ApprovalDecision | null = null;
+    apiServer.registerApproval("timeout-req", { tool: "test" }, (decision) => {
+      resolvedDecision = decision;
+    });
+
+    // Wait for the timeout to expire
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Should have been auto-denied
+    expect(resolvedDecision).toBe("deny");
+
+    // Should no longer be in pending list
+    const res = await fetch(`${baseUrl}/api/approvals`);
+    const body = await res.json();
+    expect(body.pending).toHaveLength(0);
+  });
+
+  it("resolving before timeout clears the timer", async () => {
+    let resolvedDecision: ApprovalDecision | null = null;
+    apiServer.registerApproval("early-req", { tool: "test" }, (decision) => {
+      resolvedDecision = decision;
+    });
+
+    // Resolve immediately
+    const res = await fetch(`${baseUrl}/api/approvals/early-req`, {
+      method: "POST",
+      body: { decision: "allow_once" },
+    });
+    expect(res.status).toBe(200);
+    expect(resolvedDecision).toBe("allow_once");
+
+    // Wait past the timeout to ensure no double-resolve
+    await new Promise((r) => setTimeout(r, 100));
+    // Should still be allow_once, not overwritten to deny
+    expect(resolvedDecision).toBe("allow_once");
+  });
+});
+
+describe("ApiServer constructor validation", () => {
+  it("throws when no apiToken and insecure is not set", async () => {
+    const journal = new Journal(resolve(TEST_DIR, "ctor-test.jsonl"), { fsync: false, lock: false });
+    await journal.init();
+    const registry = new ToolRegistry();
+
+    expect(() => new ApiServer({
+      toolRegistry: registry,
+      journal,
+      // No apiToken, no insecure
+    })).toThrow(/API token is required/);
+
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("allows insecure: true without apiToken", async () => {
+    const journal = new Journal(resolve(TEST_DIR, "ctor-test2.jsonl"), { fsync: false, lock: false });
+    await journal.init();
+    const registry = new ToolRegistry();
+
+    expect(() => new ApiServer({
+      toolRegistry: registry,
+      journal,
+      insecure: true,
+    })).not.toThrow();
+
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+});
+
+describe("ApiServer compact input validation", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let apiServer: ApiServer;
+  let httpServer: ReturnType<typeof createServer>;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    registry = new ToolRegistry();
+    apiServer = new ApiServer(registry, journal);
+
+    await new Promise<void>((resolve) => {
+      httpServer = createServer(apiServer.getExpressApp());
+      httpServer.listen(0, () => {
+        const addr = httpServer.address() as AddressInfo;
+        baseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("rejects non-object body", async () => {
+    const res = await fetch(`${baseUrl}/api/journal/compact`, {
+      method: "POST",
+      body: "not an object" as any,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects non-array retain_sessions", async () => {
+    const res = await fetch(`${baseUrl}/api/journal/compact`, {
+      method: "POST",
+      body: { retain_sessions: "not-an-array" },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("retain_sessions must be an array");
+  });
+
+  it("rejects retain_sessions with non-string elements", async () => {
+    const res = await fetch(`${baseUrl}/api/journal/compact`, {
+      method: "POST",
+      body: { retain_sessions: [123, true] },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("strings");
+  });
+
+  it("accepts valid compact request without retain_sessions", async () => {
+    await journal.emit("s1", "session.created", {});
+    const res = await fetch(`${baseUrl}/api/journal/compact`, {
+      method: "POST",
+      body: {},
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("ApiServer CORS", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let apiServer: ApiServer;
+  let httpServer: ReturnType<typeof createServer>;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    registry = new ToolRegistry();
+    registry.register(testTool);
+    apiServer = new ApiServer({
+      toolRegistry: registry,
+      journal,
+      insecure: true,
+      corsOrigins: ["http://localhost:3000", "http://example.com"],
+    });
+
+    await new Promise<void>((resolve) => {
+      httpServer = createServer(apiServer.getExpressApp());
+      httpServer.listen(0, () => {
+        const addr = httpServer.address() as AddressInfo;
+        baseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("sets CORS headers for allowed origin", async () => {
+    const res = await new Promise<{ headers: Record<string, string>; status: number }>((resolve, reject) => {
+      const parsed = new URL(`${baseUrl}/api/health`);
+      require("node:http").request(parsed, { headers: { Origin: "http://localhost:3000" } }, (res: any) => {
+        let data = "";
+        res.on("data", (chunk: string) => { data += chunk; });
+        res.on("end", () => { resolve({ headers: res.headers, status: res.statusCode }); });
+      }).on("error", reject).end();
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:3000");
+  });
+
+  it("does not set CORS headers for disallowed origin", async () => {
+    const res = await new Promise<{ headers: Record<string, string>; status: number }>((resolve, reject) => {
+      const parsed = new URL(`${baseUrl}/api/health`);
+      require("node:http").request(parsed, { headers: { Origin: "http://evil.com" } }, (res: any) => {
+        let data = "";
+        res.on("data", (chunk: string) => { data += chunk; });
+        res.on("end", () => { resolve({ headers: res.headers, status: res.statusCode }); });
+      }).on("error", reject).end();
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("handles OPTIONS preflight for allowed origin", async () => {
+    const res = await new Promise<{ headers: Record<string, string>; status: number }>((resolve, reject) => {
+      const parsed = new URL(`${baseUrl}/api/tools`);
+      require("node:http").request(parsed, {
+        method: "OPTIONS",
+        headers: { Origin: "http://example.com" },
+      }, (res: any) => {
+        let data = "";
+        res.on("data", (chunk: string) => { data += chunk; });
+        res.on("end", () => { resolve({ headers: res.headers, status: res.statusCode }); });
+      }).on("error", reject).end();
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe("http://example.com");
+    expect(res.headers["access-control-allow-methods"]).toContain("GET");
+  });
+});
+
+describe("ApiServer session input validation edge cases", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let apiServer: ApiServer;
+  let httpServer: ReturnType<typeof createServer>;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    registry = new ToolRegistry();
+    registry.register(testTool);
+    apiServer = new ApiServer(registry, journal);
+
+    await new Promise<void>((resolve) => {
+      httpServer = createServer(apiServer.getExpressApp());
+      httpServer.listen(0, () => {
+        const addr = httpServer.address() as AddressInfo;
+        baseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("rejects text exceeding MAX_TEXT_LENGTH", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: { text: "x".repeat(10001) },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("10000");
+  });
+
+  it("rejects submitted_by exceeding MAX_SUBMITTED_BY_LENGTH", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: { text: "valid", submitted_by: "x".repeat(201) },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("submitted_by");
+  });
+
+  it("rejects non-object constraints", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: { text: "valid", constraints: "not-an-object" },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("constraints");
+  });
+
+  it("rejects array constraints", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: { text: "valid", constraints: [1, 2, 3] },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects non-number submitted_by", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: { text: "valid", submitted_by: 12345 },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects limits with zero value", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions`, {
+      method: "POST",
+      body: { text: "valid", limits: { max_steps: 0 } },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("max_steps");
+  });
+
+  it("accepts valid object approval decision", async () => {
+    let resolvedDecision: any = null;
+    apiServer.registerApproval("obj-req", { tool: "test" }, (decision) => {
+      resolvedDecision = decision;
+    });
+
+    const res = await fetch(`${baseUrl}/api/approvals/obj-req`, {
+      method: "POST",
+      body: { decision: { type: "allow_constrained", constraints: {} } },
+    });
+    expect(res.status).toBe(200);
+    expect(resolvedDecision).toEqual({ type: "allow_constrained", constraints: {} });
+  });
+
+  it("rejects approval with invalid object decision type", async () => {
+    apiServer.registerApproval("bad-obj-req", { tool: "test" }, () => {});
+    const res = await fetch(`${baseUrl}/api/approvals/bad-obj-req`, {
+      method: "POST",
+      body: { decision: { type: "invalid_type" } },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("Invalid decision type");
+  });
+
+  it("rejects approval with non-string/non-object decision", async () => {
+    apiServer.registerApproval("num-req", { tool: "test" }, () => {});
+    const res = await fetch(`${baseUrl}/api/approvals/num-req`, {
+      method: "POST",
+      body: { decision: 42 },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("string or object");
+  });
+
+  it("rejects approval with missing decision field", async () => {
+    apiServer.registerApproval("no-dec-req", { tool: "test" }, () => {});
+    const res = await fetch(`${baseUrl}/api/approvals/no-dec-req`, {
+      method: "POST",
+      body: {},
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("decision is required");
+  });
+});
+
+describe("ApiServer shutdown cleans pending approvals", () => {
+  it("shutdown auto-denies all pending approvals", async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    const registry = new ToolRegistry();
+    const apiServer = new ApiServer(registry, journal);
+
+    const decisions: ApprovalDecision[] = [];
+    apiServer.registerApproval("a1", {}, (d) => decisions.push(d));
+    apiServer.registerApproval("a2", {}, (d) => decisions.push(d));
+
+    await apiServer.shutdown();
+
+    expect(decisions).toEqual(["deny", "deny"]);
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+});
+
 describe("ApiServer H7: metrics behind auth", () => {
   const API_TOKEN = "metrics-auth-token";
 
   it("metrics endpoint requires auth when API token is set", async () => {
     const journalFile = resolve(TEST_DIR, "metrics-auth-journal.jsonl");
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    const journal = new Journal(journalFile, { fsync: false });
+    const journal = new Journal(journalFile, { fsync: false, lock: false });
     await journal.init();
     const registry = new ToolRegistry();
     registry.register(testTool);
@@ -1172,7 +1575,7 @@ describe("ApiServer H7: metrics behind auth", () => {
 describe("ApiServer H8: shutdown aborts running kernels", () => {
   it("shutdown() aborts active kernel sessions", async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const registry = new ToolRegistry();
     registry.register(testTool);
@@ -1227,7 +1630,7 @@ describe("ApiServer H8: shutdown aborts running kernels", () => {
 describe("ApiServer H1: /recover respects concurrency limit", () => {
   it("POST /sessions/:id/recover returns 429 when at max concurrent sessions", async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const registry = new ToolRegistry();
     registry.register(testTool);
@@ -1298,7 +1701,7 @@ describe("ApiServer M3: journal listener cleanup on shutdown", () => {
   it("shutdown() unsubscribes journal listener (no broadcast after shutdown)", async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
     const journalFile = resolve(TEST_DIR, "m3-journal.jsonl");
-    const journal = new Journal(journalFile, { fsync: false });
+    const journal = new Journal(journalFile, { fsync: false, lock: false });
     await journal.init();
     const registry = new ToolRegistry();
     registry.register(testTool);
@@ -1326,7 +1729,7 @@ describe("ApiServer M3: journal listener cleanup on shutdown", () => {
 describe("ApiServer B3: session timer cleanup", () => {
   it("session timer is cleaned up on normal completion", async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const registry = new ToolRegistry();
     registry.register(testTool);

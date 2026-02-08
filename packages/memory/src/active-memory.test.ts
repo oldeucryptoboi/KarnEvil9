@@ -245,4 +245,115 @@ describe("extractLesson", () => {
     const lesson = extractLesson(longText, plan, stepResults, "completed");
     expect(lesson!.task_summary.length).toBe(200);
   });
+
+  it("returns null for running session status", () => {
+    const plan = makePlan(["read-file"]);
+    expect(extractLesson("task", plan, [], "running")).toBeNull();
+  });
+
+  it("returns null for created session status", () => {
+    const plan = makePlan(["read-file"]);
+    expect(extractLesson("task", plan, [], "created")).toBeNull();
+  });
+
+  it("returns null for planning session status", () => {
+    const plan = makePlan(["read-file"]);
+    expect(extractLesson("task", plan, [], "planning")).toBeNull();
+  });
+
+  it("redacts Bearer tokens from task summary", () => {
+    const plan = makePlan(["http-request"]);
+    const results: StepResult[] = [{
+      step_id: "step-0", status: "succeeded",
+      started_at: new Date().toISOString(), attempts: 1,
+    }];
+
+    const lesson = extractLesson(
+      "Fetch data with Bearer abc123secret from API",
+      plan, results, "completed"
+    );
+    expect(lesson!.task_summary).toContain("[REDACTED]");
+    expect(lesson!.task_summary).not.toContain("abc123secret");
+  });
+
+  it("redacts GitHub personal access tokens", () => {
+    const plan = makePlan(["http-request"]);
+    const results: StepResult[] = [{
+      step_id: "step-0", status: "succeeded",
+      started_at: new Date().toISOString(), attempts: 1,
+    }];
+
+    const lesson = extractLesson(
+      "Clone repo with ghp_1234567890abcdef token",
+      plan, results, "completed"
+    );
+    expect(lesson!.task_summary).toContain("[REDACTED]");
+    expect(lesson!.task_summary).not.toContain("ghp_");
+  });
+
+  it("redacts OpenAI/Anthropic sk- keys", () => {
+    const plan = makePlan(["http-request"]);
+    const results: StepResult[] = [{
+      step_id: "step-0", status: "succeeded",
+      started_at: new Date().toISOString(), attempts: 1,
+    }];
+
+    const lesson = extractLesson(
+      "Call API with sk-proj-abcdefghijklmnop key",
+      plan, results, "completed"
+    );
+    expect(lesson!.task_summary).toContain("[REDACTED]");
+    expect(lesson!.task_summary).not.toContain("sk-proj");
+  });
+
+  it("redacts AWS access key IDs", () => {
+    const plan = makePlan(["http-request"]);
+    const results: StepResult[] = [{
+      step_id: "step-0", status: "succeeded",
+      started_at: new Date().toISOString(), attempts: 1,
+    }];
+
+    const lesson = extractLesson(
+      "Upload to S3 with AKIAIOSFODNN7EXAMPLE credentials",
+      plan, results, "completed"
+    );
+    expect(lesson!.task_summary).toContain("[REDACTED]");
+    expect(lesson!.task_summary).not.toContain("AKIAIOSFODNN7EXAMPLE");
+  });
+
+  it("failed lesson with no error messages uses fallback", () => {
+    const plan = makePlan(["write-file"]);
+    const results: StepResult[] = [{
+      step_id: "step-0", status: "failed",
+      started_at: new Date().toISOString(), attempts: 1,
+      // No error property
+    }];
+
+    const lesson = extractLesson("Write task", plan, results, "failed");
+    expect(lesson!.outcome).toBe("failed");
+    expect(lesson!.lesson).toContain("1 failed step(s)");
+    expect(lesson!.lesson).toContain("write-file");
+  });
+
+  it("uses sessionId when provided", () => {
+    const plan = makePlan(["read-file"]);
+    const results: StepResult[] = [{
+      step_id: "step-0", status: "succeeded",
+      started_at: new Date().toISOString(), attempts: 1,
+    }];
+
+    const lesson = extractLesson("task", plan, results, "completed", "custom-session-id");
+    expect(lesson!.session_id).toBe("custom-session-id");
+  });
+
+  it("falls back to plan_id when sessionId not provided", () => {
+    const plan = makePlan(["read-file"]);
+    const results: StepResult[] = [{
+      step_id: "step-0", status: "succeeded",
+      started_at: new Date().toISOString(), attempts: 1,
+    }];
+
+    const lesson = extractLesson("task", plan, results, "completed");
+    expect(lesson!.session_id).toBe(plan.plan_id);
+  });
 });

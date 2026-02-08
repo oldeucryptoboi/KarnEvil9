@@ -236,3 +236,84 @@ describe("assertEndpointAllowedAsync — DNS rebinding protection", () => {
     ).rejects.toThrow(PolicyViolationError);
   });
 });
+
+describe("assertPathAllowed — edge cases", () => {
+  it("handles exact path match (file, not directory)", () => {
+    expect(() => assertPathAllowed("/workspace/file.ts", ["/workspace/file.ts"])).not.toThrow();
+  });
+
+  it("rejects path that is a prefix substring but not a child", () => {
+    // /workspace-backup should NOT match /workspace
+    expect(() => assertPathAllowed("/workspace-backup/file.ts", ["/workspace"])).toThrow(PolicyViolationError);
+  });
+
+  it("handles nested allowed paths", () => {
+    expect(() => assertPathAllowed("/workspace/src/deep/file.ts", ["/workspace"])).not.toThrow();
+  });
+
+  it("handles trailing slash in allowed path", () => {
+    // resolve() normalizes trailing slashes
+    expect(() => assertPathAllowed("/workspace/file.ts", ["/workspace/"])).not.toThrow();
+  });
+});
+
+describe("assertCommandAllowed — edge cases", () => {
+  it("extracts binary from command with leading whitespace", () => {
+    expect(() => assertCommandAllowed("  ls -la", ["ls"])).not.toThrow();
+  });
+
+  it("rejects when command matches as substring of allowed binary", () => {
+    // "git-rebase" should not match allowlist ["git"]
+    expect(() => assertCommandAllowed("git-rebase --interactive", ["git"])).toThrow(PolicyViolationError);
+  });
+
+  it("exact binary match required", () => {
+    expect(() => assertCommandAllowed("gitx status", ["git"])).toThrow(PolicyViolationError);
+  });
+});
+
+describe("assertEndpointAllowed — URL edge cases", () => {
+  it("blocks javascript: protocol", () => {
+    expect(() => assertEndpointAllowed("javascript:alert(1)", [])).toThrow(SsrfError);
+  });
+
+  it("blocks data: protocol", () => {
+    expect(() => assertEndpointAllowed("data:text/html,<script>alert(1)</script>", [])).toThrow(SsrfError);
+  });
+
+  it("handles URL with auth info in hostname", () => {
+    // user:pass@host — the hostname should be "evil.com" not the auth part
+    expect(() => assertEndpointAllowed("http://user:pass@evil.com:80/path", ["evil.com"])).not.toThrow();
+  });
+
+  it("blocks http to metadata endpoint (169.254.169.254)", () => {
+    expect(() => assertEndpointAllowed("http://169.254.169.254/latest/meta-data/", [])).toThrow(SsrfError);
+  });
+
+  it("allows default port when not specified (https → 443)", () => {
+    expect(() => assertEndpointAllowed("https://example.com/path", [])).not.toThrow();
+  });
+
+  it("allows default port when not specified (http → 80)", () => {
+    expect(() => assertEndpointAllowed("http://example.com/path", [])).not.toThrow();
+  });
+});
+
+describe("isPrivateIP — additional edge cases", () => {
+  it("detects 172.15.x.x as NOT private (just below range)", () => {
+    expect(isPrivateIP("172.15.0.1")).toBe(false);
+  });
+
+  it("detects 172.32.x.x as NOT private (just above range)", () => {
+    expect(isPrivateIP("172.32.0.1")).toBe(false);
+  });
+
+  it("handles non-IP strings as not private", () => {
+    expect(isPrivateIP("example.com")).toBe(false);
+    expect(isPrivateIP("not-an-ip")).toBe(false);
+  });
+
+  it("handles empty string", () => {
+    expect(isPrivateIP("")).toBe(false);
+  });
+});

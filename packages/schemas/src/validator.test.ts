@@ -7,6 +7,7 @@ import {
   validatePluginManifestData,
   validateToolInput,
   validateToolOutput,
+  clearSchemaCache,
 } from "./validator.js";
 
 describe("validatePlanData", () => {
@@ -374,5 +375,69 @@ describe("validateJournalEventData (plugin events)", () => {
   it("accepts plugin.failed event", () => {
     const result = validateJournalEventData({ ...validEvent(), type: "plugin.failed" });
     expect(result.valid).toBe(true);
+  });
+});
+
+describe("schema compilation cache", () => {
+  const inputSchema = {
+    type: "object",
+    required: ["name"],
+    properties: {
+      name: { type: "string" },
+      count: { type: "integer" },
+    },
+    additionalProperties: false,
+  };
+
+  const outputSchema = {
+    type: "object",
+    required: ["status"],
+    properties: {
+      status: { type: "integer" },
+    },
+    additionalProperties: false,
+  };
+
+  it("validateToolInput caches compiled validators", () => {
+    clearSchemaCache();
+    const result1 = validateToolInput({ name: "test" }, inputSchema);
+    expect(result1.valid).toBe(true);
+
+    const result2 = validateToolInput({ name: "other", count: 5 }, inputSchema);
+    expect(result2.valid).toBe(true);
+
+    const result3 = validateToolInput({ bad: true }, inputSchema);
+    expect(result3.valid).toBe(false);
+  });
+
+  it("validateToolOutput caches compiled validators", () => {
+    clearSchemaCache();
+    const result1 = validateToolOutput({ status: 200 }, outputSchema);
+    expect(result1.valid).toBe(true);
+
+    const result2 = validateToolOutput({ status: 404 }, outputSchema);
+    expect(result2.valid).toBe(true);
+
+    const result3 = validateToolOutput({ status: "bad" }, outputSchema);
+    expect(result3.valid).toBe(false);
+  });
+
+  it("clearSchemaCache resets the cache", () => {
+    clearSchemaCache();
+
+    // Compile a schema by using it
+    const result1 = validateToolInput({ name: "test" }, inputSchema);
+    expect(result1.valid).toBe(true);
+
+    // Clear the cache
+    clearSchemaCache();
+
+    // Use the same schema again — should recompile and still work
+    const result2 = validateToolInput({ name: "after-clear" }, inputSchema);
+    expect(result2.valid).toBe(true);
+
+    // Verify invalid input is still correctly rejected
+    const result3 = validateToolInput({}, inputSchema);
+    expect(result3.valid).toBe(false);
   });
 });

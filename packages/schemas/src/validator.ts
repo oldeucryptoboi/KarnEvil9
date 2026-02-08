@@ -1,4 +1,4 @@
-import Ajv, { type ErrorObject } from "ajv";
+import Ajv, { type ErrorObject, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import { PlanSchema } from "./plan.schema.js";
 import { ToolManifestSchema } from "./tool-manifest.schema.js";
@@ -7,6 +7,22 @@ import { PluginManifestSchema } from "./plugin-manifest.schema.js";
 
 const ajv = new (Ajv.default ?? Ajv)({ allErrors: true, strict: false });
 ((addFormats as any).default ?? addFormats)(ajv);
+
+const schemaCache = new Map<string, ValidateFunction>();
+
+function getOrCompile(schema: Record<string, unknown>): ValidateFunction {
+  const key = JSON.stringify(schema);
+  let validate = schemaCache.get(key);
+  if (!validate) {
+    validate = ajv.compile(schema);
+    schemaCache.set(key, validate);
+  }
+  return validate;
+}
+
+export function clearSchemaCache(): void {
+  schemaCache.clear();
+}
 
 const validatePlan = ajv.compile(PlanSchema);
 const validateToolManifest = ajv.compile(ToolManifestSchema);
@@ -50,7 +66,7 @@ export function validateToolInput(
   input: unknown,
   inputSchema: Record<string, unknown>
 ): ValidationResult {
-  const validate = ajv.compile(inputSchema);
+  const validate = getOrCompile(inputSchema);
   const valid = validate(input);
   return toResult(valid, validate.errors);
 }
@@ -59,7 +75,7 @@ export function validateToolOutput(
   output: unknown,
   outputSchema: Record<string, unknown>
 ): ValidationResult {
-  const validate = ajv.compile(outputSchema);
+  const validate = getOrCompile(outputSchema);
   const valid = validate(output);
   return toResult(valid, validate.errors);
 }

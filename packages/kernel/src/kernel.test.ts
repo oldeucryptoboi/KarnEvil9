@@ -56,7 +56,7 @@ describe("Kernel E2E", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_JOURNAL); } catch { /* may not exist */ }
-    journal = new Journal(TEST_JOURNAL, { fsync: false });
+    journal = new Journal(TEST_JOURNAL, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     permissions = new PermissionEngine(journal, autoApprove);
@@ -716,7 +716,7 @@ describe("Kernel E2E", () => {
     // Now create a second journal with incomplete session events (simulate crash)
     const RESUME_JOURNAL = resolve(import.meta.dirname ?? ".", "../../.test-resume-journal.jsonl");
     try { await rm(RESUME_JOURNAL); } catch { /* ok */ }
-    const journal2 = new Journal(RESUME_JOURNAL, { fsync: false });
+    const journal2 = new Journal(RESUME_JOURNAL, { fsync: false, lock: false });
     await journal2.init();
 
     // Get original events to find plan

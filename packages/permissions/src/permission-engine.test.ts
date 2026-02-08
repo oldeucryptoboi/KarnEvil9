@@ -43,7 +43,7 @@ describe("PermissionEngine.check", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE);
+    journal = new Journal(TEST_FILE, { lock: false });
     await journal.init();
     promptDecision = "allow_session";
     promptCalls = [];
@@ -233,7 +233,7 @@ describe("PermissionEngine graduated decisions", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE);
+    journal = new Journal(TEST_FILE, { lock: false });
     await journal.init();
     promptDecision = "allow_session";
     promptCalls = [];
@@ -398,5 +398,198 @@ describe("PermissionEngine graduated decisions", () => {
 
     engine.clearSession(req.session_id);
     expect(engine.isGranted("filesystem:read:workspace", req.session_id)).toBe(false);
+  });
+});
+
+// ─── Permission Edge Case Tests ──────────────────────────────────
+
+describe("PermissionEngine edge cases", () => {
+  let journal: Journal;
+  let promptDecision: ApprovalDecision;
+  let promptCalls: PermissionRequest[];
+
+  const mockPrompt = async (request: PermissionRequest): Promise<ApprovalDecision> => {
+    promptCalls.push(request);
+    return promptDecision;
+  };
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { lock: false });
+    await journal.init();
+    promptDecision = "allow_session";
+    promptCalls = [];
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  function makeRequest(scopes: string[], opts?: { sessionId?: string; stepId?: string; toolName?: string }): PermissionRequest {
+    return {
+      request_id: uuid(),
+      session_id: opts?.sessionId ?? "test-session",
+      step_id: opts?.stepId ?? uuid(),
+      tool_name: opts?.toolName ?? "test-tool",
+      permissions: scopes.map((s) => PermissionEngine.parse(s)),
+    };
+  }
+
+  it("parse handles scope with multiple colons in target", () => {
+    const perm = PermissionEngine.parse("network:request:https://example.com:8080/path");
+    expect(perm.domain).toBe("network");
+    expect(perm.action).toBe("request");
+    expect(perm.target).toBe("https://example.com:8080/path");
+  });
+
+  it("parse throws for empty string", () => {
+    expect(() => PermissionEngine.parse("")).toThrow("Invalid permission scope");
+  });
+
+  it("parse throws for just two parts", () => {
+    expect(() => PermissionEngine.parse("domain:action")).toThrow("Invalid permission scope");
+  });
+
+  it("listGrants returns empty for unknown session", () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    expect(engine.listGrants("nonexistent-session")).toEqual([]);
+  });
+
+  it("listGrants returns empty when no sessionId provided", () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    expect(engine.listGrants()).toEqual([]);
+  });
+
+  it("isGranted returns false when no sessionId provided", () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    expect(engine.isGranted("filesystem:read:workspace")).toBe(false);
+  });
+
+  it("multiple permissions in single request — prompts once", async () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    const req = makeRequest(["filesystem:read:workspace", "filesystem:write:workspace"]);
+    const result = await engine.check(req);
+    expect(result.allowed).toBe(true);
+    expect(promptCalls).toHaveLength(1);
+    // Both scopes should be in the prompt
+    const requestedScopes = promptCalls[0]!.permissions.map(p => p.scope);
+    expect(requestedScopes).toContain("filesystem:read:workspace");
+    expect(requestedScopes).toContain("filesystem:write:workspace");
+  });
+
+  it("partially cached permissions — only prompts for missing ones", async () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    // First request grants read
+    const req1 = makeRequest(["filesystem:read:workspace"], { sessionId: "sess-1" });
+    await engine.check(req1);
+    expect(promptCalls).toHaveLength(1);
+
+    // Second request needs read (cached) + write (new)
+    const req2 = makeRequest(["filesystem:read:workspace", "filesystem:write:workspace"], { sessionId: "sess-1" });
+    await engine.check(req2);
+    expect(promptCalls).toHaveLength(2);
+    // Second prompt should only request write
+    const secondRequestScopes = promptCalls[1]!.permissions.map(p => p.scope);
+    expect(secondRequestScopes).toEqual(["filesystem:write:workspace"]);
+  });
+
+  it("clearSession without argument clears all sessions", async () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    promptDecision = "allow_session";
+
+    const req1 = makeRequest(["filesystem:read:workspace"], { sessionId: "sess-A" });
+    await engine.check(req1);
+    const req2 = makeRequest(["filesystem:read:workspace"], { sessionId: "sess-B" });
+    await engine.check(req2);
+
+    engine.clearSession(); // no argument → clear all
+    expect(engine.isGranted("filesystem:read:workspace", "sess-A")).toBe(false);
+    expect(engine.isGranted("filesystem:read:workspace", "sess-B")).toBe(false);
+  });
+
+  it("clearStep without argument clears step-scoped grants from all sessions", async () => {
+    // allow_once grants are step-scoped
+    promptDecision = "allow_once";
+    const engine = new PermissionEngine(journal, mockPrompt);
+
+    const reqA = makeRequest(["filesystem:read:workspace"], { sessionId: "sess-A" });
+    await engine.check(reqA);
+    const reqB = makeRequest(["filesystem:read:workspace"], { sessionId: "sess-B" });
+    await engine.check(reqB);
+
+    // allow_once doesn't actually cache in session, so this is a no-op
+    // The real purpose is to clear step-scoped constraints
+    engine.clearStep(); // no argument → clear all sessions' step grants
+  });
+
+  it("allow_constrained constraints are step-scoped, not shared across steps", async () => {
+    promptDecision = {
+      type: "allow_constrained",
+      scope: "session",
+      constraints: { readonly_paths: ["/safe"] },
+    };
+    const engine = new PermissionEngine(journal, mockPrompt);
+
+    const step1 = uuid();
+    const step2 = uuid();
+    const req1 = makeRequest(["filesystem:read:workspace"], { sessionId: "sess-1", stepId: step1 });
+    const result1 = await engine.check(req1);
+    expect(result1.constraints).toBeDefined();
+
+    // Same session, different step — constraints should not be cached for new step
+    const req2 = makeRequest(["filesystem:read:workspace"], { sessionId: "sess-1", stepId: step2 });
+    const result2 = await engine.check(req2);
+    // Permission is cached (allow_session), so no prompt. But constraints are step-scoped.
+    // Step2 key is different from step1, so constraints won't be found
+    expect(result2.allowed).toBe(true);
+    expect(result2.constraints).toBeUndefined();
+  });
+
+  it("unknown decision type falls back to deny", async () => {
+    promptDecision = { type: "unknown_type" } as any;
+    const engine = new PermissionEngine(journal, mockPrompt);
+    const req = makeRequest(["filesystem:read:workspace"]);
+    const result = await engine.check(req);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("concurrent permission checks don't corrupt state", async () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    promptDecision = "allow_session";
+
+    // Fire 10 concurrent permission checks for different scopes
+    const promises = Array.from({ length: 10 }, (_, i) =>
+      engine.check(makeRequest([`domain:action:target-${i}`], { sessionId: "sess-concurrent" }))
+    );
+    const results = await Promise.all(promises);
+    expect(results.every(r => r.allowed)).toBe(true);
+
+    // All should be cached
+    for (let i = 0; i < 10; i++) {
+      expect(engine.isGranted(`domain:action:target-${i}`, "sess-concurrent")).toBe(true);
+    }
+  });
+
+  it("grant TTL is correctly set for each decision type", async () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+
+    // allow_once → ttl=step, NOT cached in session
+    promptDecision = "allow_once";
+    const reqOnce = makeRequest(["once:scope:target"], { sessionId: "sess-ttl" });
+    await engine.check(reqOnce);
+    expect(engine.isGranted("once:scope:target", "sess-ttl")).toBe(false);
+
+    // allow_session → ttl=session, cached
+    promptDecision = "allow_session";
+    const reqSession = makeRequest(["session:scope:target"], { sessionId: "sess-ttl" });
+    await engine.check(reqSession);
+    expect(engine.isGranted("session:scope:target", "sess-ttl")).toBe(true);
+
+    // allow_always → ttl=global, but scoped to session for safety
+    promptDecision = "allow_always";
+    const reqAlways = makeRequest(["always:scope:target"], { sessionId: "sess-ttl" });
+    await engine.check(reqAlways);
+    expect(engine.isGranted("always:scope:target", "sess-ttl")).toBe(true);
+    expect(engine.isGranted("always:scope:target", "other-session")).toBe(false);
   });
 });

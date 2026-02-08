@@ -15,7 +15,7 @@ describe("HookRunner", () => {
   beforeEach(async () => {
     testDir = join(tmpdir(), `jarvis-test-${uuid()}`);
     await mkdir(testDir, { recursive: true });
-    journal = new Journal(join(testDir, "journal.jsonl"), { fsync: false, redact: false });
+    journal = new Journal(join(testDir, "journal.jsonl"), { fsync: false, redact: false, lock: false });
     await journal.init();
     runner = new HookRunner(journal);
   });

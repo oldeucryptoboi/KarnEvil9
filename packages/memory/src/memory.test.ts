@@ -199,4 +199,46 @@ describe("LongTermMemory", () => {
     expect(ltm.read("key")!.value).toBe("new");
     expect(ltm.list()).toHaveLength(1);
   });
+
+  it("size returns count of items", () => {
+    const ltm = new LongTermMemory();
+    expect(ltm.size).toBe(0);
+    ltm.write("a", 1, "s");
+    expect(ltm.size).toBe(1);
+    ltm.write("b", 2, "s");
+    expect(ltm.size).toBe(2);
+  });
+
+  it("evicts oldest item when maxItems exceeded", () => {
+    const ltm = new LongTermMemory(3);
+    // Write 3 items with spaced-out timestamps
+    ltm.write("first", "val1", "s");
+    ltm.write("second", "val2", "s");
+    ltm.write("third", "val3", "s");
+    expect(ltm.size).toBe(3);
+
+    // Writing a 4th should evict the oldest (first)
+    ltm.write("fourth", "val4", "s");
+    expect(ltm.size).toBe(3);
+    expect(ltm.read("first")).toBeUndefined();
+    expect(ltm.read("second")).toBeDefined();
+    expect(ltm.read("fourth")).toBeDefined();
+  });
+
+  it("overwriting existing key does not trigger eviction", () => {
+    const ltm = new LongTermMemory(2);
+    ltm.write("a", "v1", "s");
+    ltm.write("b", "v2", "s");
+    // Overwrite "a" — should NOT evict since key already exists
+    ltm.write("a", "v3", "s");
+    expect(ltm.size).toBe(2);
+    expect(ltm.read("a")!.value).toBe("v3");
+    expect(ltm.read("b")).toBeDefined();
+  });
+
+  it("search returns empty for no matches", () => {
+    const ltm = new LongTermMemory();
+    ltm.write("key", "value", "s");
+    expect(ltm.search("nonexistent")).toHaveLength(0);
+  });
 });

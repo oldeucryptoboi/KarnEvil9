@@ -17,7 +17,7 @@ describe("Journal", () => {
   });
 
   it("creates directory and file on init + emit", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const event = await journal.emit("sess-1", "session.created", { task: "test" });
     expect(event.event_id).toBeTruthy();
@@ -28,7 +28,7 @@ describe("Journal", () => {
   });
 
   it("reads all events", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-1", "session.started", {});
@@ -39,7 +39,7 @@ describe("Journal", () => {
   });
 
   it("reads events filtered by session", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-2", "session.created", {});
@@ -51,7 +51,7 @@ describe("Journal", () => {
   });
 
   it("maintains hash chain integrity", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const e1 = await journal.emit("sess-1", "session.created", {});
     const e2 = await journal.emit("sess-1", "session.started", {});
@@ -64,7 +64,7 @@ describe("Journal", () => {
   });
 
   it("detects broken hash chain", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-1", "session.started", {});
@@ -78,20 +78,20 @@ describe("Journal", () => {
     lines[1] = JSON.stringify(parsed);
     await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
 
-    const journal2 = new Journal(TEST_FILE, { fsync: false });
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
     // init() now verifies hash chain and throws on tampering (C3 fix)
     await expect(journal2.init()).rejects.toThrow("Journal integrity violation at event 2");
   });
 
   it("returns valid integrity for empty journal", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const integrity = await journal.verifyIntegrity();
     expect(integrity.valid).toBe(true);
   });
 
   it("notifies listeners on emit", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const received: string[] = [];
     journal.on((event) => { received.push(event.type); });
@@ -101,7 +101,7 @@ describe("Journal", () => {
   });
 
   it("supports removing listeners", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const received: string[] = [];
     const unsub = journal.on((event) => { received.push(event.type); });
@@ -112,7 +112,7 @@ describe("Journal", () => {
   });
 
   it("continues when a listener throws", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const received: string[] = [];
     journal.on(() => { throw new Error("boom"); });
@@ -122,13 +122,13 @@ describe("Journal", () => {
   });
 
   it("resumes hash chain from existing file", async () => {
-    const journal1 = new Journal(TEST_FILE, { fsync: false });
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal1.init();
     await journal1.emit("sess-1", "session.created", {});
     await journal1.emit("sess-1", "session.started", {});
 
     // Create a new journal instance pointing to the same file
-    const journal2 = new Journal(TEST_FILE, { fsync: false });
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal2.init();
     await journal2.emit("sess-1", "session.completed", {});
 
@@ -139,14 +139,14 @@ describe("Journal", () => {
   });
 
   it("returns empty array for readAll on nonexistent file", async () => {
-    const journal = new Journal(resolve(TEST_DIR, "nonexistent.jsonl"));
+    const journal = new Journal(resolve(TEST_DIR, "nonexistent.jsonl"), { lock: false });
     await journal.init();
     const events = await journal.readAll();
     expect(events).toEqual([]);
   });
 
   it("concurrent emits don't corrupt hash chain", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
 
     // Fire 20 concurrent emits from different sessions
@@ -165,7 +165,7 @@ describe("Journal", () => {
   // ─── Sequence Number Tests ────────────────────────────────────────
 
   it("assigns monotonically increasing seq numbers", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const e1 = await journal.emit("sess-1", "session.created", {});
     const e2 = await journal.emit("sess-1", "session.started", {});
@@ -177,12 +177,12 @@ describe("Journal", () => {
   });
 
   it("resumes seq from max on init (re-open existing journal)", async () => {
-    const journal1 = new Journal(TEST_FILE, { fsync: false });
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal1.init();
     await journal1.emit("sess-1", "session.created", {});
     await journal1.emit("sess-1", "session.started", {});
 
-    const journal2 = new Journal(TEST_FILE, { fsync: false });
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal2.init();
     const e3 = await journal2.emit("sess-1", "session.completed", {});
     expect(e3.seq).toBe(2);
@@ -201,7 +201,7 @@ describe("Journal", () => {
     });
     await writeFile(TEST_FILE, legacyEvent + "\n", "utf-8");
 
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const events = await journal.readSession("sess-old");
     expect(events).toHaveLength(1);
@@ -215,7 +215,7 @@ describe("Journal", () => {
   // ─── Session Index Tests ──────────────────────────────────────────
 
   it("readSession returns correct events after emit (via index)", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-2", "session.created", {});
@@ -232,7 +232,7 @@ describe("Journal", () => {
   });
 
   it("readSession with offset/limit paginates correctly", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-1", "session.started", {});
@@ -249,7 +249,7 @@ describe("Journal", () => {
   });
 
   it("getSessionEventCount returns correct count", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     expect(journal.getSessionEventCount("sess-1")).toBe(0);
 
@@ -265,7 +265,7 @@ describe("Journal", () => {
   // ─── Compaction Tests ─────────────────────────────────────────────
 
   it("compaction removes events for non-retained sessions", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-2", "session.created", {});
@@ -282,7 +282,7 @@ describe("Journal", () => {
   });
 
   it("hash chain is valid after compaction", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-2", "session.created", {});
@@ -294,7 +294,7 @@ describe("Journal", () => {
   });
 
   it("index is correct after compaction", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-2", "session.created", {});
@@ -309,7 +309,7 @@ describe("Journal", () => {
   });
 
   it("compaction returns before/after counts", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-2", "session.created", {});
@@ -319,7 +319,7 @@ describe("Journal", () => {
   });
 
   it("index survives compaction", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-2", "session.created", {});
@@ -336,7 +336,7 @@ describe("Journal", () => {
   });
 
   it("compaction without retainSessionIds is a no-op (keeps all)", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-2", "session.created", {});
@@ -347,7 +347,7 @@ describe("Journal", () => {
   });
 
   it("seq numbers are rebuilt after compaction", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     await journal.emit("sess-2", "session.created", {});
@@ -366,7 +366,7 @@ describe("Journal", () => {
   // ─── Health Check Tests ───────────────────────────────────────────
 
   it("checkHealth returns writable for accessible journal", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     const health = await journal.checkHealth();
@@ -374,21 +374,21 @@ describe("Journal", () => {
   });
 
   it("checkHealth returns not writable for nonexistent file", async () => {
-    const journal = new Journal(resolve(TEST_DIR, "nonexistent-dir", "nope.jsonl"));
+    const journal = new Journal(resolve(TEST_DIR, "nonexistent-dir", "nope.jsonl"), { lock: false });
     // Don't init — file doesn't exist
     const health = await journal.checkHealth();
     expect(health.writable).toBe(false);
   });
 
   it("getFilePath returns the configured path", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     expect(journal.getFilePath()).toBe(TEST_FILE);
   });
 
   // ─── Redaction Tests ────────────────────────────────────────────────
 
   it("redacts sensitive payload fields on emit", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const event = await journal.emit("sess-1", "session.created", {
       authorization: "Bearer secret-token-123",
@@ -404,7 +404,7 @@ describe("Journal", () => {
   });
 
   it("preserves payload when redaction is disabled", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false, redact: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, redact: false, lock: false });
     await journal.init();
     const event = await journal.emit("sess-1", "session.created", {
       authorization: "Bearer secret-token-123",
@@ -415,7 +415,7 @@ describe("Journal", () => {
   // ─── Fsync Option Tests ─────────────────────────────────────────────
 
   it("disabling fsync works for tests", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", { test: true });
     const events = await journal.readAll();
@@ -423,7 +423,7 @@ describe("Journal", () => {
   });
 
   it("enabling fsync does not crash", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: true });
+    const journal = new Journal(TEST_FILE, { fsync: true, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", { test: true });
     const events = await journal.readAll();
@@ -433,7 +433,7 @@ describe("Journal", () => {
   // ─── tryEmit Tests ──────────────────────────────────────────────────
 
   it("tryEmit returns event on success", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     const event = await journal.tryEmit("sess-1", "session.created", { test: true });
     expect(event).not.toBeNull();
@@ -441,7 +441,7 @@ describe("Journal", () => {
   });
 
   it("tryEmit returns null on failure", async () => {
-    const journal = new Journal(resolve(TEST_DIR, "nonexistent-dir", "sub", "test.jsonl"), { fsync: false });
+    const journal = new Journal(resolve(TEST_DIR, "nonexistent-dir", "sub", "test.jsonl"), { fsync: false, lock: false });
     // Don't init — directory doesn't exist, emit will fail
     const event = await journal.tryEmit("sess-1", "session.created", {});
     expect(event).toBeNull();
@@ -450,7 +450,7 @@ describe("Journal", () => {
   // ─── getDiskUsage Tests ─────────────────────────────────────────────
 
   it("getDiskUsage returns disk stats", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     const usage = await journal.getDiskUsage();
@@ -462,7 +462,7 @@ describe("Journal", () => {
   });
 
   it("checkHealth includes disk_usage", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
     const health = await journal.checkHealth();
@@ -474,7 +474,7 @@ describe("Journal", () => {
   // ─── close() Tests ─────────────────────────────────────────────────
 
   it("close() waits for pending writes to flush", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
 
     // Fire multiple writes concurrently
@@ -494,7 +494,7 @@ describe("Journal", () => {
   });
 
   it("close() is safe to call multiple times", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     await journal.emit("sess-1", "session.created", {});
 
@@ -505,10 +505,194 @@ describe("Journal", () => {
   });
 
   it("close() resolves immediately when no writes pending", async () => {
-    const journal = new Journal(TEST_FILE, { fsync: false });
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
 
     // No writes — close should resolve instantly
     await journal.close();
+  });
+
+  // ─── M1: Advisory Lockfile Tests ────────────────────────────────────
+
+  it("acquires lockfile on init", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: true });
+    await journal.init();
+
+    expect(existsSync(TEST_FILE + ".lock")).toBe(true);
+
+    // Read the lock file to verify it contains our PID
+    const lockContent = await readFile(TEST_FILE + ".lock", "utf-8");
+    expect(parseInt(lockContent.trim(), 10)).toBe(process.pid);
+
+    await journal.close();
+  });
+
+  it("second init on same file throws when locked", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: true });
+    await journal1.init();
+
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: true });
+    await expect(journal2.init()).rejects.toThrow(/Journal is locked by process/);
+
+    await journal1.close();
+  });
+
+  it("cleans up stale lockfile on init", async () => {
+    // Create a lockfile with a PID that doesn't exist
+    const { mkdirSync } = await import("node:fs");
+    if (!existsSync(TEST_DIR)) mkdirSync(TEST_DIR, { recursive: true });
+
+    // Use a very high PID that is extremely unlikely to exist
+    const fakePid = 2147483647;
+    await writeFile(TEST_FILE + ".lock", String(fakePid), "utf-8");
+
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: true });
+    // Should succeed because the stale lock is cleaned up
+    await journal.init();
+
+    // Lock should now be acquired by our process
+    const lockContent = await readFile(TEST_FILE + ".lock", "utf-8");
+    expect(parseInt(lockContent.trim(), 10)).toBe(process.pid);
+
+    await journal.close();
+  });
+
+  it("releases lockfile on close", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: true });
+    await journal.init();
+    expect(existsSync(TEST_FILE + ".lock")).toBe(true);
+
+    await journal.close();
+    expect(existsSync(TEST_FILE + ".lock")).toBe(false);
+  });
+
+  it("lockfile not created when lock=false", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    await journal.emit("sess-1", "session.created", {});
+
+    expect(existsSync(TEST_FILE + ".lock")).toBe(false);
+
+    await journal.close();
+  });
+
+  // ─── M4: readAll Guard Tests ────────────────────────────────────────
+
+  it("readAll with limit returns last N events", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    await journal.emit("sess-1", "session.created", {});
+    await journal.emit("sess-1", "session.started", {});
+    await journal.emit("sess-1", "session.completed", {});
+
+    const last2 = await journal.readAll({ limit: 2 });
+    expect(last2).toHaveLength(2);
+    expect(last2[0]!.type).toBe("session.started");
+    expect(last2[1]!.type).toBe("session.completed");
+  });
+
+  it("readAll without limit returns all events", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    await journal.emit("sess-1", "session.created", {});
+    await journal.emit("sess-1", "session.started", {});
+    await journal.emit("sess-1", "session.completed", {});
+
+    const all = await journal.readAll();
+    expect(all).toHaveLength(3);
+  });
+
+  it("readAll with limit larger than event count returns all", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    await journal.emit("sess-1", "session.created", {});
+    await journal.emit("sess-1", "session.started", {});
+
+    const all = await journal.readAll({ limit: 100 });
+    expect(all).toHaveLength(2);
+  });
+
+  it("readAllStream yields events one at a time", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    await journal.emit("sess-1", "session.created", {});
+    await journal.emit("sess-1", "session.started", {});
+    await journal.emit("sess-1", "session.completed", {});
+
+    const events = [];
+    for await (const event of journal.readAllStream()) {
+      events.push(event);
+    }
+    expect(events).toHaveLength(3);
+    expect(events[0]!.type).toBe("session.created");
+    expect(events[2]!.type).toBe("session.completed");
+  });
+
+  it("readAllStream returns empty for nonexistent file", async () => {
+    const journal = new Journal(resolve(TEST_DIR, "nonexistent-stream.jsonl"), { lock: false });
+    await journal.init();
+
+    const events = [];
+    for await (const event of journal.readAllStream()) {
+      events.push(event);
+    }
+    expect(events).toHaveLength(0);
+  });
+
+  // ─── M5: sessionIndex LRU Cap Tests ────────────────────────────────
+
+  it("evicts oldest session when maxSessionsIndexed exceeded", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false, maxSessionsIndexed: 3 });
+    await journal.init();
+
+    // Add events for 4 sessions (max is 3)
+    await journal.emit("sess-1", "session.created", {});
+    await journal.emit("sess-2", "session.created", {});
+    await journal.emit("sess-3", "session.created", {});
+    await journal.emit("sess-4", "session.created", {});
+
+    // sess-1 should have been evicted (oldest)
+    expect(journal.getSessionEventCount("sess-1")).toBe(0);
+
+    // sess-2, sess-3, sess-4 should still be indexed
+    expect(journal.getSessionEventCount("sess-2")).toBe(1);
+    expect(journal.getSessionEventCount("sess-3")).toBe(1);
+    expect(journal.getSessionEventCount("sess-4")).toBe(1);
+  });
+
+  it("readSession refreshes session in LRU order", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false, maxSessionsIndexed: 3 });
+    await journal.init();
+
+    await journal.emit("sess-1", "session.created", {});
+    await journal.emit("sess-2", "session.created", {});
+    await journal.emit("sess-3", "session.created", {});
+
+    // Access sess-1 to refresh it (moves it to most-recently-used)
+    await journal.readSession("sess-1");
+
+    // Now add sess-4 — sess-2 should be evicted (it's now the oldest)
+    await journal.emit("sess-4", "session.created", {});
+
+    expect(journal.getSessionEventCount("sess-1")).toBe(1); // still present (was refreshed)
+    expect(journal.getSessionEventCount("sess-2")).toBe(0); // evicted
+    expect(journal.getSessionEventCount("sess-3")).toBe(1);
+    expect(journal.getSessionEventCount("sess-4")).toBe(1);
+  });
+
+  it("default maxSessionsIndexed is 10000", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+
+    // Verify we can add many sessions without eviction
+    // (just testing that default is large, not creating 10000 sessions)
+    for (let i = 0; i < 50; i++) {
+      await journal.emit(`sess-${i}`, "session.created", {});
+    }
+
+    // All 50 should still be indexed
+    for (let i = 0; i < 50; i++) {
+      expect(journal.getSessionEventCount(`sess-${i}`)).toBe(1);
+    }
   });
 });

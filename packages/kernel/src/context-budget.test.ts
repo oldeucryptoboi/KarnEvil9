@@ -245,6 +245,116 @@ describe("ContextBudgetMonitor", () => {
     const v = monitor.recordIteration(makeIteration({ iteration: 2, cumulativeTokens: 9000, maxTokens: 10000 }));
     expect(v.action).toBe("summarize");
   });
+
+  // ─── Token Velocity Edge Cases ───────────────────────────────────
+
+  it("velocity window slides (only last 5 iterations count)", () => {
+    const monitor = new ContextBudgetMonitor({
+      delegateThreshold: 0.95,  // High so direct delegation won't fire
+      checkpointThreshold: 0.95,
+      summarizeThreshold: 0.99,
+      highBurnMultiplier: 2.5,
+      minIterationsBeforeAction: 2,
+    });
+
+    // 6 iterations with decreasing token usage
+    // First 3: high burn (3000 each), last 3: low burn (100 each)
+    for (let i = 1; i <= 3; i++) {
+      monitor.recordIteration(makeIteration({
+        iteration: i,
+        tokensUsedThisIteration: 3000,
+        cumulativeTokens: i * 3000,
+        maxTokens: 100000,
+        toolsUsed: ["browser"],
+      }));
+    }
+    for (let i = 4; i <= 6; i++) {
+      monitor.recordIteration(makeIteration({
+        iteration: i,
+        tokensUsedThisIteration: 100,
+        cumulativeTokens: 9000 + (i - 3) * 100,
+        maxTokens: 100000,
+        toolsUsed: ["browser"],
+      }));
+    }
+    // With low velocity, projection should not trigger
+    const v = monitor.recordIteration(makeIteration({
+      iteration: 7,
+      tokensUsedThisIteration: 100,
+      cumulativeTokens: 9400,
+      maxTokens: 100000,
+      toolsUsed: ["browser"],
+    }));
+    expect(v.action).toBe("continue");
+  });
+
+  it("delegation includes task description from plan goal", () => {
+    const monitor = new ContextBudgetMonitor({
+      delegateThreshold: 0.70,
+      checkpointThreshold: 0.95,
+      summarizeThreshold: 0.99,
+      minIterationsBeforeAction: 1,
+    });
+
+    monitor.recordIteration(makeIteration({ iteration: 1, tokensUsedThisIteration: 500, cumulativeTokens: 3000, toolsUsed: ["browser"] }));
+    const v = monitor.recordIteration(makeIteration({
+      iteration: 2,
+      tokensUsedThisIteration: 500,
+      cumulativeTokens: 7500,
+      maxTokens: 10000,
+      toolsUsed: ["browser"],
+      planGoal: "Scrape product data from 5 websites",
+    }));
+    expect(v.action).toBe("delegate");
+    expect((v as any).taskDescription).toContain("Scrape product data");
+  });
+
+  it("multiple high-burn tools all detected", () => {
+    const monitor = new ContextBudgetMonitor({
+      delegateThreshold: 0.70,
+      checkpointThreshold: 0.95,
+      summarizeThreshold: 0.99,
+      minIterationsBeforeAction: 1,
+    });
+
+    monitor.recordIteration(makeIteration({ iteration: 1, tokensUsedThisIteration: 500, cumulativeTokens: 3000, toolsUsed: ["browser", "http-request"] }));
+    const v = monitor.recordIteration(makeIteration({
+      iteration: 2,
+      tokensUsedThisIteration: 500,
+      cumulativeTokens: 7500,
+      maxTokens: 10000,
+      toolsUsed: ["browser", "http-request"],
+    }));
+    expect(v.action).toBe("delegate");
+    expect((v as any).reason).toContain("browser");
+    expect((v as any).reason).toContain("http-request");
+  });
+
+  it("custom high burn tools are respected", () => {
+    const monitor = new ContextBudgetMonitor({
+      delegateThreshold: 0.70,
+      checkpointThreshold: 0.95,
+      summarizeThreshold: 0.99,
+      highBurnTools: ["custom-scraper"],
+      minIterationsBeforeAction: 1,
+    });
+
+    monitor.recordIteration(makeIteration({ iteration: 1, tokensUsedThisIteration: 500, cumulativeTokens: 3000, toolsUsed: ["custom-scraper"] }));
+    const v = monitor.recordIteration(makeIteration({
+      iteration: 2,
+      tokensUsedThisIteration: 500,
+      cumulativeTokens: 7500,
+      maxTokens: 10000,
+      toolsUsed: ["custom-scraper"],
+    }));
+    expect(v.action).toBe("delegate");
+  });
+
+  it("negative maxTokens returns continue", () => {
+    const monitor = new ContextBudgetMonitor({ minIterationsBeforeAction: 0 });
+    const v = monitor.recordIteration(makeIteration({ maxTokens: -1, cumulativeTokens: 99999 }));
+    expect(v.action).toBe("continue");
+  });
 });
 
 // ─── buildCheckpoint ────────────────────────────────────────────────

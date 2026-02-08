@@ -17,7 +17,7 @@ describe("Plugin System Integration", () => {
     testDir = join(tmpdir(), `jarvis-test-${uuid()}`);
     pluginsDir = join(testDir, "plugins");
     await mkdir(pluginsDir, { recursive: true });
-    journal = new Journal(join(testDir, "journal.jsonl"), { fsync: false, redact: false });
+    journal = new Journal(join(testDir, "journal.jsonl"), { fsync: false, redact: false, lock: false });
     await journal.init();
     toolRegistry = new ToolRegistry();
   });

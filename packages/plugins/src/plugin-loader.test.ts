@@ -19,7 +19,7 @@ describe("PluginLoader", () => {
     testDir = join(tmpdir(), `jarvis-test-${uuid()}`);
     await mkdir(testDir, { recursive: true });
     journalPath = join(testDir, "journal.jsonl");
-    journal = new Journal(journalPath, { fsync: false, redact: false });
+    journal = new Journal(journalPath, { fsync: false, redact: false, lock: false });
     await journal.init();
   });
 

@@ -68,7 +68,7 @@ describe("ToolRuntime", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     promptDecision = "allow_session";
     permissions = new PermissionEngine(journal, async () => promptDecision);
@@ -265,7 +265,7 @@ describe("ToolRuntime graduated permissions", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     registry.register(testTool);
@@ -416,7 +416,7 @@ describe("ToolRuntime circuit breaker integration", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     permissions = new PermissionEngine(journal, async () => "allow_session" as ApprovalDecision);
     registry = new ToolRegistry();
@@ -474,6 +474,214 @@ describe("ToolRuntime circuit breaker integration", () => {
   });
 });
 
+describe("CircuitBreaker half-open edge cases", () => {
+  it("half-open → failure → re-trips the breaker", () => {
+    const breaker = new CircuitBreaker(3, 10); // 10ms cooldown
+    breaker.recordFailure("tool-x");
+    breaker.recordFailure("tool-x");
+    breaker.recordFailure("tool-x");
+    expect(breaker.isOpen("tool-x")).toBe(true);
+
+    // Wait for cooldown
+    const start = Date.now();
+    while (Date.now() - start < 15) { /* busy wait */ }
+
+    // Half-open: allows one attempt
+    expect(breaker.isOpen("tool-x")).toBe(false);
+
+    // That attempt fails — should immediately re-trip
+    breaker.recordFailure("tool-x");
+    expect(breaker.isOpen("tool-x")).toBe(true);
+  });
+
+  it("half-open window resets trippedAt so next isOpen blocks", () => {
+    const breaker = new CircuitBreaker(2, 10);
+    breaker.recordFailure("t");
+    breaker.recordFailure("t");
+
+    const start = Date.now();
+    while (Date.now() - start < 15) { /* busy wait */ }
+
+    // First call after cooldown: half-open (returns false but resets timer)
+    expect(breaker.isOpen("t")).toBe(false);
+
+    // Immediately after, should be open again (trippedAt was just reset)
+    expect(breaker.isOpen("t")).toBe(true);
+  });
+});
+
+describe("ToolRuntime handler registration", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let permissions: PermissionEngine;
+  let runtime: ToolRuntime;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    permissions = new PermissionEngine(journal, async () => "allow_session" as ApprovalDecision);
+    registry = new ToolRegistry();
+    registry.register(testTool);
+    registry.register(noPermTool);
+    runtime = new ToolRuntime(registry, permissions, journal);
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("registerHandler throws on duplicate registration", () => {
+    runtime.registerHandler("echo-tool", async () => ({ echo: "first" }));
+    expect(() => runtime.registerHandler("echo-tool", async () => ({ echo: "second" }))).toThrow(
+      /Handler already registered/
+    );
+  });
+
+  it("unregisterHandler allows re-registration", () => {
+    runtime.registerHandler("echo-tool", async () => ({ echo: "first" }));
+    runtime.unregisterHandler("echo-tool");
+    expect(() => runtime.registerHandler("echo-tool", async () => ({ echo: "second" }))).not.toThrow();
+  });
+
+  it("unregisterHandler for non-existent handler is a no-op", () => {
+    expect(() => runtime.unregisterHandler("nonexistent")).not.toThrow();
+  });
+
+  it("mock mode returns empty object when mock_responses is empty array", async () => {
+    const noMockTool: ToolManifest = {
+      name: "no-mock-tool",
+      version: "1.0.0",
+      description: "No mocks",
+      runner: "internal",
+      input_schema: { type: "object", additionalProperties: false },
+      output_schema: { type: "object", additionalProperties: false },
+      permissions: [],
+      timeout_ms: 5000,
+      supports: { mock: true, dry_run: false },
+      mock_responses: [],
+    };
+    registry.register(noMockTool);
+
+    const req = makeRequest("no-mock-tool", {});
+    const result = await runtime.execute(req);
+    expect(result.ok).toBe(true);
+    expect(result.result).toEqual({});
+  });
+
+  it("output redaction via constraints redacts specified fields", async () => {
+    const constrainedDecision: ApprovalDecision = {
+      type: "allow_constrained",
+      scope: "session",
+      constraints: {
+        output_redact_fields: ["secret"],
+      },
+    };
+    const redactPermissions = new PermissionEngine(journal, async () => constrainedDecision);
+    const redactTool: ToolManifest = {
+      name: "secret-tool",
+      version: "1.0.0",
+      description: "Returns secrets",
+      runner: "internal",
+      input_schema: { type: "object", additionalProperties: false },
+      output_schema: {
+        type: "object",
+        properties: { data: { type: "string" }, secret: { type: "string" } },
+        additionalProperties: false,
+      },
+      permissions: ["filesystem:read:workspace"],
+      timeout_ms: 5000,
+      supports: { mock: true, dry_run: false },
+    };
+    registry.register(redactTool);
+    const redactRuntime = new ToolRuntime(registry, redactPermissions, journal);
+    redactRuntime.registerHandler("secret-tool", async () => ({
+      data: "visible",
+      secret: "hunter2",
+    }));
+
+    const req = makeRequest("secret-tool", {}, "real");
+    const result = await redactRuntime.execute(req);
+    expect(result.ok).toBe(true);
+    expect((result.result as any).data).toBe("visible");
+    expect((result.result as any).secret).toBe("[REDACTED]");
+  });
+
+  it("path constraints from permissions override policy", async () => {
+    const constrainedDecision: ApprovalDecision = {
+      type: "allow_constrained",
+      scope: "session",
+      constraints: {
+        readonly_paths: ["/safe/readonly"],
+        writable_paths: ["/safe/writable"],
+      },
+    };
+    const pathPermissions = new PermissionEngine(journal, async () => constrainedDecision);
+    const pathRuntime = new ToolRuntime(registry, pathPermissions, journal, {
+      allowed_paths: ["/original"],
+      allowed_endpoints: [],
+      allowed_commands: [],
+      require_approval_for_writes: false,
+    });
+    let receivedPolicy: any;
+    pathRuntime.registerHandler("echo-tool", async (_input, _mode, policy) => {
+      receivedPolicy = policy;
+      return { echo: "test" };
+    });
+
+    const req = makeRequest("echo-tool", { message: "test" }, "real");
+    await pathRuntime.execute(req);
+    expect(receivedPolicy.readonly_paths).toEqual(["/safe/readonly"]);
+    expect(receivedPolicy.writable_paths).toEqual(["/safe/writable"]);
+    // Original allowed_paths should still be there
+    expect(receivedPolicy.allowed_paths).toEqual(["/original"]);
+  });
+
+  it("input_overrides that violate schema are rejected", async () => {
+    const badConstraintDecision: ApprovalDecision = {
+      type: "allow_constrained",
+      scope: "session",
+      constraints: {
+        input_overrides: { extra_field: "not allowed" },
+      },
+    };
+    const badPermissions = new PermissionEngine(journal, async () => badConstraintDecision);
+    const badRuntime = new ToolRuntime(registry, badPermissions, journal);
+    badRuntime.registerHandler("echo-tool", async (input) => ({ echo: String((input as any).message) }));
+
+    const req = makeRequest("echo-tool", { message: "test" }, "real");
+    const result = await badRuntime.execute(req);
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("INVALID_INPUT");
+    expect(result.error?.message).toContain("constraint overrides");
+  });
+
+  it("handler uses manifest timeout_ms for execution", async () => {
+    const timedTool: ToolManifest = {
+      name: "timed-tool",
+      version: "1.0.0",
+      description: "Timed tool",
+      runner: "internal",
+      input_schema: { type: "object", additionalProperties: false },
+      output_schema: { type: "object", properties: { done: { type: "boolean" } }, additionalProperties: false },
+      permissions: [],
+      timeout_ms: 100,
+      supports: { mock: true, dry_run: false },
+    };
+    registry.register(timedTool);
+    runtime.registerHandler("timed-tool", async () => {
+      await new Promise((r) => setTimeout(r, 200)); // Exceeds timeout
+      return { done: true };
+    });
+
+    const req = makeRequest("timed-tool", {}, "real");
+    const result = await runtime.execute(req);
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("EXECUTION_ERROR");
+    expect(result.error?.message).toContain("timed out");
+  });
+});
+
 describe("B3: Timer leak fix in executeWithTimeout", () => {
   let journal: Journal;
   let registry: ToolRegistry;
@@ -483,7 +691,7 @@ describe("B3: Timer leak fix in executeWithTimeout", () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
     const { mkdirSync } = await import("node:fs");
     try { mkdirSync(TEST_DIR, { recursive: true }); } catch { /* ok */ }
-    journal = new Journal(TEST_FILE, { fsync: false });
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     permissions = new PermissionEngine(journal, async () => "allow_session" as ApprovalDecision);

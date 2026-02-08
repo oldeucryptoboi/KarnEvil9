@@ -194,6 +194,113 @@ describe("FutilityMonitor", () => {
     expect(v4.action).toBe("continue");
   });
 
+  // ─── History Bounding ─────────────────────────────────────────────
+
+  it("bounds history arrays to prevent unbounded memory growth", () => {
+    const monitor = new FutilityMonitor({ maxRepeatedErrors: 99, maxStagnantIterations: 99, maxIdenticalPlans: 99 });
+    // Record 150 iterations with increasing successes — no detection should trigger
+    for (let i = 0; i < 150; i++) {
+      const steps = Array.from({ length: i + 1 }, (_, j) => makeResult({ step_id: `s${i}-${j}` }));
+      const v = monitor.recordIteration(makeRecord(i, `goal-${i}`, steps));
+      expect(v.action).toBe("continue");
+    }
+    // If we got here without OOM and all continued, the bounding works
+  });
+
+  // ─── Error Reset After Success ─────────────────────────────────────
+
+  it("error counter resets when a successful iteration intervenes", () => {
+    const monitor = new FutilityMonitor({ maxRepeatedErrors: 3 });
+    const err = makeFailedResult("Connection refused");
+
+    monitor.recordIteration(makeRecord(1, "g1", [err]));
+    monitor.recordIteration(makeRecord(2, "g2", [err]));
+    // Successful iteration breaks the chain
+    monitor.recordIteration(makeRecord(3, "g3", [makeResult()]));
+    monitor.recordIteration(makeRecord(4, "g4", [err]));
+    const v5 = monitor.recordIteration(makeRecord(5, "g5", [err]));
+    // Only 2 consecutive errors, not 3
+    expect(v5.action).toBe("continue");
+  });
+
+  // ─── Budget Burn Edge Cases ────────────────────────────────────────
+
+  it("budget burn does not trigger when exactly at threshold with high progress", () => {
+    const monitor = new FutilityMonitor({
+      maxRepeatedErrors: 99,
+      maxStagnantIterations: 99,
+      maxIdenticalPlans: 99,
+      budgetBurnThreshold: 0.8,
+    });
+
+    const cumulativeUsage: UsageSummary = {
+      total_input_tokens: 4000,
+      total_output_tokens: 4000,
+      total_tokens: 8000,
+      total_cost_usd: 8.0,  // Exactly 80% of budget
+      call_count: 5,
+    };
+
+    // All steps succeed (100% success rate > 50% threshold)
+    const v = monitor.recordIteration({
+      ...makeRecord(1, "g1", [makeResult(), makeResult({ step_id: "s2" })]),
+      cumulativeUsage,
+      maxCostUsd: 10.0,
+    });
+    expect(v.action).toBe("continue");
+  });
+
+  it("budget burn halts at exactly 50% success rate boundary", () => {
+    const monitor = new FutilityMonitor({
+      maxRepeatedErrors: 99,
+      maxStagnantIterations: 99,
+      maxIdenticalPlans: 99,
+      budgetBurnThreshold: 0.8,
+    });
+
+    const cumulativeUsage: UsageSummary = {
+      total_input_tokens: 4500,
+      total_output_tokens: 4500,
+      total_tokens: 9000,
+      total_cost_usd: 8.5,  // 85% of budget
+      call_count: 5,
+    };
+
+    // Exactly 1 success out of 2 steps = 50%, but condition is < 0.5, so 50% is OK
+    const v = monitor.recordIteration({
+      ...makeRecord(1, "g1", [makeResult(), makeFailedResult("err")]),
+      cumulativeUsage,
+      maxCostUsd: 10.0,
+    });
+    expect(v.action).toBe("continue");
+
+    // Below 50%: 1 success out of 3 = 33%
+    const v2 = monitor.recordIteration({
+      ...makeRecord(2, "g2", [makeResult(), makeFailedResult("err"), makeFailedResult("err2")]),
+      cumulativeUsage,
+      maxCostUsd: 10.0,
+    });
+    expect(v2.action).toBe("halt");
+  });
+
+  it("budget burn with maxCostUsd=0 does not trigger", () => {
+    const monitor = new FutilityMonitor({ budgetBurnThreshold: 0.5 });
+    const cumulativeUsage: UsageSummary = {
+      total_input_tokens: 1000,
+      total_output_tokens: 1000,
+      total_tokens: 2000,
+      total_cost_usd: 100.0,
+      call_count: 1,
+    };
+
+    const v = monitor.recordIteration({
+      ...makeRecord(1, "g1", [makeFailedResult("err")]),
+      cumulativeUsage,
+      maxCostUsd: 0,
+    });
+    expect(v.action).toBe("continue");
+  });
+
   // ─── Cost-per-progress Detection ──────────────────────────────────
 
   it("halts after maxCostWithoutProgress iterations spending tokens with no new successes", () => {

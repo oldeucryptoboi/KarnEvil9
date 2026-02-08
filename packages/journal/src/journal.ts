@@ -10,6 +10,10 @@ import { redactPayload } from "./redact.js";
 export interface JournalOptions {
   fsync?: boolean;
   redact?: boolean;
+  /** If true, acquire an advisory lockfile to prevent multi-process corruption. Default: true */
+  lock?: boolean;
+  /** Maximum number of sessions to keep in the in-memory index (LRU eviction). Default: 10000 */
+  maxSessionsIndexed?: number;
 }
 
 export type JournalListener = (event: JournalEvent) => void;
@@ -20,20 +24,31 @@ export class Journal {
   private listeners: JournalListener[] = [];
   private writeLock: Promise<void> = Promise.resolve();
   private sessionIndex = new Map<string, JournalEvent[]>();
+  private sessionAccessOrder: string[] = [];
+  private maxSessionsIndexed: number;
   private nextSeq = 0;
   private fsync: boolean;
   private redact: boolean;
+  private lockEnabled: boolean;
+  private lockPath: string;
+  private locked = false;
 
   constructor(filePath: string, options?: JournalOptions) {
     this.filePath = filePath;
     this.fsync = options?.fsync ?? true;
     this.redact = options?.redact ?? true;
+    this.lockEnabled = options?.lock ?? true;
+    this.lockPath = `${filePath}.lock`;
+    this.maxSessionsIndexed = options?.maxSessionsIndexed ?? 10000;
   }
 
   async init(): Promise<void> {
     const dir = dirname(this.filePath);
     if (!existsSync(dir)) {
       await mkdir(dir, { recursive: true });
+    }
+    if (this.lockEnabled) {
+      await this.acquireLock();
     }
     if (existsSync(this.filePath)) {
       const content = await readFile(this.filePath, "utf-8");
@@ -64,6 +79,7 @@ export class Journal {
       }
       // Only commit to in-memory state after successful validation
       for (const [sid, events] of tempIndex) {
+        this.trackSessionAccess(sid);
         this.sessionIndex.set(sid, events);
       }
       this.nextSeq = maxSeq + 1;
@@ -128,8 +144,13 @@ export class Journal {
       this.lastHash = this.hash(line);
 
       const bucket = this.sessionIndex.get(sessionId);
-      if (bucket) bucket.push(event);
-      else this.sessionIndex.set(sessionId, [event]);
+      if (bucket) {
+        bucket.push(event);
+      } else {
+        this.sessionIndex.set(sessionId, [event]);
+      }
+      this.trackSessionAccess(sessionId);
+      this.evictSessionsIfNeeded();
 
       for (const listener of this.listeners) {
         try { listener(event); } catch { /* listeners must not break the journal */ }
@@ -153,15 +174,31 @@ export class Journal {
     }
   }
 
-  async readAll(): Promise<JournalEvent[]> {
+  async readAll(options?: { limit?: number }): Promise<JournalEvent[]> {
     if (!existsSync(this.filePath)) return [];
     const content = await readFile(this.filePath, "utf-8");
-    return content.trim().split("\n").filter(Boolean)
+    const events = content.trim().split("\n").filter(Boolean)
       .map((line) => JSON.parse(line) as JournalEvent);
+    if (options?.limit !== undefined && options.limit < events.length) {
+      return events.slice(events.length - options.limit);
+    }
+    return events;
+  }
+
+  async *readAllStream(): AsyncGenerator<JournalEvent, void, undefined> {
+    if (!existsSync(this.filePath)) return;
+    const content = await readFile(this.filePath, "utf-8");
+    const lines = content.trim().split("\n").filter(Boolean);
+    for (const line of lines) {
+      yield JSON.parse(line) as JournalEvent;
+    }
   }
 
   async readSession(sessionId: string, options?: { offset?: number; limit?: number }): Promise<JournalEvent[]> {
     const events = this.sessionIndex.get(sessionId) ?? [];
+    if (events.length > 0) {
+      this.trackSessionAccess(sessionId);
+    }
     if (!options) return events;
     const start = options.offset ?? 0;
     const end = options.limit !== undefined ? start + options.limit : undefined;
@@ -215,11 +252,16 @@ export class Journal {
       this.lastHash = prevHash;
       this.nextSeq = seq;
       this.sessionIndex.clear();
+      this.sessionAccessOrder = [];
       for (const line of lines) {
         const event = JSON.parse(line) as JournalEvent;
         const bucket = this.sessionIndex.get(event.session_id);
-        if (bucket) bucket.push(event);
-        else this.sessionIndex.set(event.session_id, [event]);
+        if (bucket) {
+          bucket.push(event);
+        } else {
+          this.sessionIndex.set(event.session_id, [event]);
+          this.trackSessionAccess(event.session_id);
+        }
       }
 
       return { before, after: filtered.length };
@@ -285,6 +327,9 @@ export class Journal {
    */
   async close(): Promise<void> {
     await this.writeLock;
+    if (this.lockEnabled && this.locked) {
+      await this.releaseLock();
+    }
   }
 
   getFilePath(): string {
@@ -293,5 +338,81 @@ export class Journal {
 
   private hash(data: string): string {
     return createHash("sha256").update(data).digest("hex");
+  }
+
+  private async acquireLock(): Promise<void> {
+    try {
+      const fh = await open(this.lockPath, "wx");
+      await fh.write(String(process.pid), undefined, "utf-8");
+      await fh.close();
+      this.locked = true;
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        // Lock file exists — check if the owning process is still alive
+        let pid: number;
+        try {
+          const content = await readFile(this.lockPath, "utf-8");
+          pid = parseInt(content.trim(), 10);
+        } catch {
+          // Can't read the lockfile — remove it and retry
+          await this.removeStaleLock();
+          return this.acquireLock();
+        }
+
+        if (isNaN(pid)) {
+          // Invalid PID in lockfile — treat as stale
+          await this.removeStaleLock();
+          return this.acquireLock();
+        }
+
+        // Check if process is still running
+        try {
+          process.kill(pid, 0);
+          // Process is alive — lock is held
+          throw new Error(`Journal is locked by process ${pid} (lockfile: ${this.lockPath})`);
+        } catch (killErr: unknown) {
+          if ((killErr as NodeJS.ErrnoException).code === "ESRCH") {
+            // Process is dead — stale lock
+            await this.removeStaleLock();
+            return this.acquireLock();
+          }
+          // Re-throw if it's our custom error or an unexpected error
+          throw killErr;
+        }
+      }
+      throw err;
+    }
+  }
+
+  private async releaseLock(): Promise<void> {
+    try {
+      await unlink(this.lockPath);
+    } catch {
+      // Lockfile may already be gone
+    }
+    this.locked = false;
+  }
+
+  private async removeStaleLock(): Promise<void> {
+    try {
+      await unlink(this.lockPath);
+    } catch {
+      // May have been cleaned up by another process
+    }
+  }
+
+  private trackSessionAccess(sessionId: string): void {
+    const idx = this.sessionAccessOrder.indexOf(sessionId);
+    if (idx !== -1) {
+      this.sessionAccessOrder.splice(idx, 1);
+    }
+    this.sessionAccessOrder.push(sessionId);
+  }
+
+  private evictSessionsIfNeeded(): void {
+    while (this.sessionIndex.size > this.maxSessionsIndexed && this.sessionAccessOrder.length > 0) {
+      const oldest = this.sessionAccessOrder.shift()!;
+      this.sessionIndex.delete(oldest);
+    }
   }
 }

@@ -420,6 +420,140 @@ describe("LLMPlanner prompt injection mitigations", () => {
   });
 });
 
+describe("LLMPlanner response guard", () => {
+  it("rejects response exceeding MAX_RESPONSE_SIZE (500k)", async () => {
+    const hugeResponse = "x".repeat(600_000);
+    const callModel = async () => ({ text: hugeResponse });
+    const planner = new LLMPlanner(callModel);
+    await expect(planner.generatePlan(makeTask(), toolSchemas, {}, {}))
+      .rejects.toThrow(/too large/);
+  });
+});
+
+describe("LLMPlanner agentic done signal", () => {
+  it("agentic planner accepts empty steps (done signal) without schema validation", async () => {
+    const donePlan = {
+      plan_id: uuid(),
+      schema_version: "0.1",
+      goal: "Task complete",
+      assumptions: [],
+      steps: [], // Empty steps = done
+      created_at: new Date().toISOString(),
+    };
+    const callModel = async () => ({ text: JSON.stringify(donePlan) });
+    const planner = new LLMPlanner(callModel, { agentic: true });
+    const { plan } = await planner.generatePlan(makeTask(), toolSchemas, {}, {});
+    expect(plan.steps).toHaveLength(0);
+    expect(plan.goal).toBe("Task complete");
+  });
+
+  it("non-agentic planner rejects empty steps (validates schema)", async () => {
+    const donePlan = {
+      plan_id: uuid(),
+      schema_version: "0.1",
+      goal: "Should fail",
+      assumptions: [],
+      steps: [], // Empty steps in non-agentic = schema violation
+      created_at: new Date().toISOString(),
+    };
+    const callModel = async () => ({ text: JSON.stringify(donePlan) });
+    const planner = new LLMPlanner(callModel, { agentic: false });
+    await expect(planner.generatePlan(makeTask(), toolSchemas, {}, {}))
+      .rejects.toThrow(/invalid plan/);
+  });
+});
+
+describe("LLMPlanner agentic prompt content", () => {
+  it("includes subagent findings in agentic prompt", async () => {
+    let capturedPrompt = "";
+    const callModel = async (_system: string, user: string) => {
+      capturedPrompt = user;
+      return { text: JSON.stringify({
+        plan_id: uuid(), schema_version: "0.1", goal: "Done",
+        assumptions: [], steps: [], created_at: new Date().toISOString(),
+      }) };
+    };
+    const planner = new LLMPlanner(callModel, { agentic: true });
+    await planner.generatePlan(makeTask(), toolSchemas, {
+      subagent_findings: [
+        { step_title: "Research APIs", tool_name: "http-request", status: "succeeded", summary: "Found 3 endpoints" },
+      ],
+    }, {});
+    expect(capturedPrompt).toContain("Research Results");
+    expect(capturedPrompt).toContain("Research APIs");
+    expect(capturedPrompt).toContain("Found 3 endpoints");
+  });
+
+  it("includes checkpoint resumption info in agentic prompt", async () => {
+    let capturedPrompt = "";
+    const callModel = async (_system: string, user: string) => {
+      capturedPrompt = user;
+      return { text: JSON.stringify({
+        plan_id: uuid(), schema_version: "0.1", goal: "Continue",
+        assumptions: [], steps: [{
+          step_id: uuid(), title: "Next", tool_ref: { name: "read-file" },
+          input: { path: "x" }, success_criteria: ["done"],
+          failure_policy: "abort", timeout_ms: 5000, max_retries: 0,
+        }], created_at: new Date().toISOString(),
+      }) };
+    };
+    const planner = new LLMPlanner(callModel, { agentic: true });
+    await planner.generatePlan(makeTask(), toolSchemas, {
+      checkpoint: {
+        last_plan_goal: "Read all configs",
+        findings: [{ step_title: "Read config", tool_name: "read-file", status: "succeeded", summary: "Read 5 files" }],
+        next_steps: ["Process config values", "Generate report"],
+        open_questions: ["Which format should the report use?"],
+      },
+    }, {});
+    expect(capturedPrompt).toContain("Resuming from Checkpoint");
+    expect(capturedPrompt).toContain("Read all configs");
+    expect(capturedPrompt).toContain("Read config");
+    expect(capturedPrompt).toContain("Process config values");
+    expect(capturedPrompt).toContain("Which format should the report use?");
+    expect(capturedPrompt).toContain("Continue from where the previous session left off");
+  });
+
+  it("includes execution history with failed step errors", async () => {
+    let capturedPrompt = "";
+    const callModel = async (_system: string, user: string) => {
+      capturedPrompt = user;
+      return { text: JSON.stringify({
+        plan_id: uuid(), schema_version: "0.1", goal: "Done",
+        assumptions: [], steps: [], created_at: new Date().toISOString(),
+      }) };
+    };
+    const planner = new LLMPlanner(callModel, { agentic: true });
+    await planner.generatePlan(makeTask(), toolSchemas, {
+      has_plan: true,
+      step_results: {
+        "s1": { status: "failed", error: { code: "TIMEOUT", message: "Tool timed out" } },
+      },
+      step_titles: { "s1": "Slow operation" },
+    }, {});
+    expect(capturedPrompt).toContain("Execution History");
+    expect(capturedPrompt).toContain("Slow operation");
+    expect(capturedPrompt).toContain("failed");
+    expect(capturedPrompt).toContain("Tool timed out");
+  });
+
+  it("uses agentic system prompt with iterative instructions", async () => {
+    let capturedSystem = "";
+    const callModel = async (system: string, _user: string) => {
+      capturedSystem = system;
+      return { text: JSON.stringify({
+        plan_id: uuid(), schema_version: "0.1", goal: "Done",
+        assumptions: [], steps: [], created_at: new Date().toISOString(),
+      }) };
+    };
+    const planner = new LLMPlanner(callModel, { agentic: true });
+    await planner.generatePlan(makeTask(), toolSchemas, {}, {});
+    expect(capturedSystem).toContain("iterative execution planner");
+    expect(capturedSystem).toContain("1-3 steps per iteration");
+    expect(capturedSystem).toContain('return an empty steps array');
+  });
+});
+
 describe("LLMPlanner", () => {
   it("parses valid JSON response from model", async () => {
     const mockPlan = {

@@ -31,7 +31,7 @@ describe("runSubagent", () => {
 
   beforeEach(async () => {
     try { await rm(TEST_JOURNAL); } catch { /* may not exist */ }
-    journal = new Journal(TEST_JOURNAL, { fsync: false });
+    journal = new Journal(TEST_JOURNAL, { fsync: false, lock: false });
     await journal.init();
     registry = new ToolRegistry();
     registry.register(testTool);

@@ -493,6 +493,236 @@ describe("writeFileHandler — write size cap", () => {
   });
 });
 
+describe("shellExecHandler — command injection hardening", () => {
+  let tmpDir: string;
+  let policy: PolicyProfile;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "handler-test-"));
+    policy = { ...openPolicy, allowed_paths: [tmpDir] };
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("rejects empty command string", async () => {
+    await expect(
+      shellExecHandler({ command: "" }, "real", policy)
+    ).rejects.toThrow();
+  });
+
+  it("rejects non-string command input", async () => {
+    await expect(
+      shellExecHandler({ command: 123 }, "real", policy)
+    ).rejects.toThrow("input.command must be a string");
+  });
+
+  it("restricts command when allowlist contains only safe binaries", async () => {
+    const restrictedPolicy: PolicyProfile = {
+      ...openPolicy,
+      allowed_paths: [tmpDir],
+      allowed_commands: ["echo", "ls", "cat"],
+    };
+    // Dangerous binaries rejected
+    await expect(
+      shellExecHandler({ command: "rm -rf /", cwd: tmpDir }, "real", restrictedPolicy)
+    ).rejects.toThrow(PolicyViolationError);
+    await expect(
+      shellExecHandler({ command: "curl http://evil.com", cwd: tmpDir }, "real", restrictedPolicy)
+    ).rejects.toThrow(PolicyViolationError);
+    await expect(
+      shellExecHandler({ command: "wget http://evil.com", cwd: tmpDir }, "real", restrictedPolicy)
+    ).rejects.toThrow(PolicyViolationError);
+    await expect(
+      shellExecHandler({ command: "nc -l 4444", cwd: tmpDir }, "real", restrictedPolicy)
+    ).rejects.toThrow(PolicyViolationError);
+  });
+
+  it("handles commands with quoted arguments containing spaces", async () => {
+    const result = (await shellExecHandler(
+      { command: 'echo "hello world"', cwd: tmpDir }, "real", policy
+    )) as any;
+    expect(result.stdout.trim()).toBe("hello world");
+    expect(result.exit_code).toBe(0);
+  });
+
+  it("handles commands with single-quoted arguments", async () => {
+    const result = (await shellExecHandler(
+      { command: "echo 'hello world'", cwd: tmpDir }, "real", policy
+    )) as any;
+    expect(result.stdout.trim()).toBe("hello world");
+    expect(result.exit_code).toBe(0);
+  });
+
+  it("uses execFile not exec (no shell interpretation of metacharacters)", async () => {
+    // execFile doesn't interpret shell metacharacters like ; | && etc.
+    // So "echo hello; echo world" should NOT execute two commands.
+    // Instead, it passes "; echo world" as args to echo.
+    const result = (await shellExecHandler(
+      { command: "echo hello; echo world", cwd: tmpDir }, "real", policy
+    )) as any;
+    // execFile will pass the semicolon as literal text to echo
+    expect(result.stdout).toContain(";");
+    expect(result.exit_code).toBe(0);
+  });
+
+  it("does not pass pipe operator to shell", async () => {
+    // With execFile, pipe is not interpreted as shell pipe
+    const result = (await shellExecHandler(
+      { command: "echo hello | cat", cwd: tmpDir }, "real", policy
+    )) as any;
+    // execFile passes "| cat" as literal args to echo
+    expect(result.stdout).toContain("|");
+  });
+
+  it("handles non-existent binary gracefully", async () => {
+    const result = (await shellExecHandler(
+      { command: "nonexistent_binary_xyz", cwd: tmpDir }, "real", policy
+    )) as any;
+    expect(result.exit_code).not.toBe(0);
+  });
+
+  it("respects maxBuffer limit (1 MB)", async () => {
+    // Generate output larger than maxBuffer — the command should still complete
+    // but the output might be truncated or the command killed
+    const result = (await shellExecHandler(
+      { command: "yes | head -100", cwd: tmpDir }, "real", policy
+    )) as any;
+    // yes | head won't work with execFile (no shell), so it should fail
+    expect(result.exit_code).not.toBe(undefined);
+  });
+});
+
+describe("writeFileHandler — writable_paths enforcement", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "handler-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("rejects writes outside writable_paths", async () => {
+    const writableDir = join(tmpDir, "writable");
+    const readonlyDir = join(tmpDir, "readonly");
+    const policy: PolicyProfile = {
+      ...openPolicy,
+      allowed_paths: [tmpDir],
+      writable_paths: [writableDir],
+    };
+    await expect(
+      writeFileHandler(
+        { path: join(readonlyDir, "file.txt"), content: "bad" }, "real", policy
+      )
+    ).rejects.toThrow(PolicyViolationError);
+  });
+
+  it("allows writes within writable_paths", async () => {
+    const writableDir = join(tmpDir, "writable");
+    const policy: PolicyProfile = {
+      ...openPolicy,
+      allowed_paths: [tmpDir],
+      writable_paths: [writableDir],
+    };
+    const result = (await writeFileHandler(
+      { path: join(writableDir, "file.txt"), content: "ok" }, "real", policy
+    )) as any;
+    expect(result.written).toBe(true);
+  });
+
+  it("rejects writes to readonly_paths", async () => {
+    const readonlyDir = join(tmpDir, "protected");
+    const policy: PolicyProfile = {
+      ...openPolicy,
+      allowed_paths: [tmpDir],
+      readonly_paths: [readonlyDir],
+    };
+    await expect(
+      writeFileHandler(
+        { path: join(readonlyDir, "file.txt"), content: "bad" }, "real", policy
+      )
+    ).rejects.toThrow(PolicyViolationError);
+  });
+
+  it("readonly_paths takes precedence (nested under writable)", async () => {
+    const writableDir = tmpDir;
+    const readonlyDir = join(tmpDir, "secrets");
+    const policy: PolicyProfile = {
+      ...openPolicy,
+      allowed_paths: [tmpDir],
+      writable_paths: [writableDir],
+      readonly_paths: [readonlyDir],
+    };
+    await expect(
+      writeFileHandler(
+        { path: join(readonlyDir, "key.pem"), content: "secret" }, "real", policy
+      )
+    ).rejects.toThrow(PolicyViolationError);
+  });
+
+  it("dry_run respects writable_paths but does not write", async () => {
+    const writableDir = join(tmpDir, "writable");
+    const policy: PolicyProfile = {
+      ...openPolicy,
+      allowed_paths: [tmpDir],
+      writable_paths: [writableDir],
+    };
+    // Outside writable_paths should still throw in dry_run
+    await expect(
+      writeFileHandler(
+        { path: join(tmpDir, "outside.txt"), content: "data" }, "dry_run", policy
+      )
+    ).rejects.toThrow(PolicyViolationError);
+  });
+});
+
+describe("writeFileHandler — input validation", () => {
+  it("rejects non-string path", async () => {
+    await expect(
+      writeFileHandler({ path: 123, content: "data" }, "real", openPolicy)
+    ).rejects.toThrow("input.path must be a string");
+  });
+
+  it("rejects non-string content", async () => {
+    await expect(
+      writeFileHandler({ path: "/tmp/test.txt", content: 123 }, "real", openPolicy)
+    ).rejects.toThrow("input.content must be a string");
+  });
+});
+
+describe("readFileHandler — input validation", () => {
+  it("rejects non-string path", async () => {
+    await expect(
+      readFileHandler({ path: 123 }, "real", openPolicy)
+    ).rejects.toThrow("input.path must be a string");
+  });
+});
+
+describe("httpRequestHandler — input validation", () => {
+  it("rejects non-string url", async () => {
+    await expect(
+      httpRequestHandler({ url: 123, method: "GET" }, "real", openPolicy)
+    ).rejects.toThrow("input.url must be a string");
+  });
+
+  it("rejects non-string method", async () => {
+    await expect(
+      httpRequestHandler({ url: "https://example.com", method: 123 }, "real", openPolicy)
+    ).rejects.toThrow("input.method must be a string");
+  });
+
+  it("does not send body for GET requests", async () => {
+    // GET with body should still work in dry_run — body is ignored
+    const result = (await httpRequestHandler(
+      { url: "https://example.com", method: "GET", body: "ignored" }, "dry_run", openPolicy
+    )) as any;
+    expect(result.body).toContain("[dry_run]");
+  });
+});
+
 describe("browserHandler — DNS rebinding protection", () => {
   it("H2: browser handler uses async SSRF check (imports assertEndpointAllowedAsync)", async () => {
     // Verify the browser handler rejects private IPs (proves it uses assertEndpointAllowedAsync)

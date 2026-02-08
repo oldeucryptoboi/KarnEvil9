@@ -91,17 +91,17 @@ describe("PermissionEngine.check", () => {
     expect(promptCalls).toHaveLength(1); // no additional prompt
   });
 
-  it("caches global grants", async () => {
+  it("allow_always is scoped to session (not global)", async () => {
     promptDecision = "allow_always";
     const engine = new PermissionEngine(journal, mockPrompt);
     const req = makeRequest(["shell:exec:workspace"]);
     await engine.check(req);
     expect(engine.isGranted("shell:exec:workspace", req.session_id)).toBe(true);
-    // Global grants are visible even without sessionId
-    expect(engine.isGranted("shell:exec:workspace")).toBe(true);
+    // allow_always is now session-scoped for safety — not visible without sessionId
+    expect(engine.isGranted("shell:exec:workspace")).toBe(false);
   });
 
-  it("clearSession removes session grants but keeps global", async () => {
+  it("clearSession removes all grants including allow_always", async () => {
     const engine = new PermissionEngine(journal, mockPrompt);
 
     // Grant session-level
@@ -109,14 +109,15 @@ describe("PermissionEngine.check", () => {
     const req1 = makeRequest(["filesystem:read:workspace"]);
     await engine.check(req1);
 
-    // Grant global-level
+    // Grant allow_always (now session-scoped)
     promptDecision = "allow_always";
     const req2 = makeRequest(["shell:exec:workspace"]);
+    req2.session_id = req1.session_id;
     await engine.check(req2);
 
     engine.clearSession(req1.session_id);
     expect(engine.isGranted("filesystem:read:workspace", req1.session_id)).toBe(false);
-    expect(engine.isGranted("shell:exec:workspace")).toBe(true); // global survives
+    expect(engine.isGranted("shell:exec:workspace", req1.session_id)).toBe(false);
   });
 
   it("clearStep removes step-level grants only", async () => {
@@ -204,7 +205,7 @@ describe("PermissionEngine.check", () => {
     expect(engine.isGranted("filesystem:read:workspace", "session-B")).toBe(true);
   });
 
-  it("global grants are shared across all sessions", async () => {
+  it("allow_always grants are isolated per session (not shared)", async () => {
     const engine = new PermissionEngine(journal, mockPrompt);
     promptDecision = "allow_always";
 
@@ -212,8 +213,9 @@ describe("PermissionEngine.check", () => {
     reqA.session_id = "session-A";
     await engine.check(reqA);
 
-    // Session B should see global grant without prompting
-    expect(engine.isGranted("shell:exec:workspace", "session-B")).toBe(true);
+    // allow_always is session-scoped — session B should NOT see it
+    expect(engine.isGranted("shell:exec:workspace", "session-A")).toBe(true);
+    expect(engine.isGranted("shell:exec:workspace", "session-B")).toBe(false);
   });
 });
 
@@ -271,8 +273,9 @@ describe("PermissionEngine graduated decisions", () => {
       input_overrides: { mode: "safe" },
     });
 
-    // Subsequent check for same session/tool should be granted and include cached constraints
+    // Subsequent check for same session/tool/step should be granted and include cached constraints
     const req2 = makeRequest(["filesystem:read:workspace"]);
+    req2.step_id = req.step_id; // constraints are cached per step
     const result2 = await engine.check(req2);
     expect(result2.allowed).toBe(true);
     expect(result2.constraints).toBeDefined();
@@ -320,7 +323,7 @@ describe("PermissionEngine graduated decisions", () => {
     expect(deniedEvent!.payload.alternative).toBeDefined();
   });
 
-  it("allow_constrained with scope=always caches globally", async () => {
+  it("allow_constrained with scope=always caches in session (not global)", async () => {
     promptDecision = {
       type: "allow_constrained",
       scope: "always",
@@ -330,9 +333,9 @@ describe("PermissionEngine graduated decisions", () => {
     const req = makeRequest(["filesystem:read:workspace"]);
     await engine.check(req);
 
-    // Should be globally granted
-    expect(engine.isGranted("filesystem:read:workspace")).toBe(true);
-    expect(engine.isGranted("filesystem:read:workspace", "other-session")).toBe(true);
+    // allow_always is now session-scoped for safety
+    expect(engine.isGranted("filesystem:read:workspace", req.session_id)).toBe(true);
+    expect(engine.isGranted("filesystem:read:workspace", "other-session")).toBe(false);
   });
 
   it("allow_observed with scope=once does not cache in session", async () => {

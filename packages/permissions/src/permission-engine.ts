@@ -14,7 +14,6 @@ export type ApprovalPromptFn = (
 
 export class PermissionEngine {
   private sessionCaches = new Map<string, Map<string, PermissionGrant>>();
-  private globalCache = new Map<string, PermissionGrant>();
   private constraintCache = new Map<string, PermissionConstraints>();
   private observedCache = new Set<string>();
   private journal: Journal;
@@ -93,7 +92,7 @@ export class PermissionEngine {
           granted_at: now,
           ttl: decision === "allow_once" ? "step" : decision === "allow_session" ? "session" : "global",
         };
-        if (decision === "allow_always") this.globalCache.set(perm.scope, grant);
+        // allow_always is scoped to session lifetime (not process) for safety
         if (decision === "allow_session" || decision === "allow_always") {
           sessionCache.set(perm.scope, grant);
         }
@@ -122,17 +121,14 @@ export class PermissionEngine {
           granted_at: now,
           ttl: scopeStr === "once" ? "step" : scopeStr === "session" ? "session" : "global",
         };
-        if (scopeStr === "always") this.globalCache.set(perm.scope, grant);
+        // allow_always is scoped to session lifetime (not process) for safety
         if (scopeStr === "session" || scopeStr === "always") {
           sessionCache.set(perm.scope, grant);
         }
       }
-      // Cache constraints at both step-level and tool-level
-      // Step-level takes priority for per-step constraint differentiation
+      // Cache constraints at step-level only (session-scoped, cleaned up with clearSession)
       const stepCacheKey = `${sessionId}:${request.tool_name}:${request.step_id}`;
-      const toolCacheKey = `${sessionId}:${request.tool_name}`;
       this.constraintCache.set(stepCacheKey, decision.constraints);
-      this.constraintCache.set(toolCacheKey, decision.constraints);
 
       await this.journal.emit(sessionId, "permission.granted", {
         request_id: request.request_id,
@@ -157,16 +153,14 @@ export class PermissionEngine {
           granted_at: now,
           ttl: scopeStr === "once" ? "step" : scopeStr === "session" ? "session" : "global",
         };
-        if (scopeStr === "always") this.globalCache.set(perm.scope, grant);
+        // allow_always is scoped to session lifetime (not process) for safety
         if (scopeStr === "session" || scopeStr === "always") {
           sessionCache.set(perm.scope, grant);
         }
       }
-      // Cache at both step-level and tool-level
+      // Cache at step-level only (session-scoped, cleaned up with clearSession)
       const stepCacheKey = `${sessionId}:${request.tool_name}:${request.step_id}`;
-      const toolCacheKey = `${sessionId}:${request.tool_name}`;
       this.observedCache.add(stepCacheKey);
-      this.observedCache.add(toolCacheKey);
 
       await this.journal.emit(sessionId, "permission.granted", {
         request_id: request.request_id,
@@ -198,7 +192,6 @@ export class PermissionEngine {
   }
 
   isGranted(scope: string, sessionId?: string): boolean {
-    if (this.globalCache.has(scope)) return true;
     if (sessionId) {
       const sessionCache = this.sessionCaches.get(sessionId);
       if (sessionCache?.has(scope)) return true;
@@ -237,14 +230,9 @@ export class PermissionEngine {
   }
 
   listGrants(sessionId?: string): PermissionGrant[] {
-    const grants = new Map<string, PermissionGrant>();
-    for (const [scope, grant] of this.globalCache) grants.set(scope, grant);
-    if (sessionId) {
-      const sessionCache = this.sessionCaches.get(sessionId);
-      if (sessionCache) {
-        for (const [scope, grant] of sessionCache) grants.set(scope, grant);
-      }
-    }
-    return [...grants.values()];
+    if (!sessionId) return [];
+    const sessionCache = this.sessionCaches.get(sessionId);
+    if (!sessionCache) return [];
+    return [...sessionCache.values()];
   }
 }

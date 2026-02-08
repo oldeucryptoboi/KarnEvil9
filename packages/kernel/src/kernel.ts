@@ -361,8 +361,47 @@ export class Kernel {
     return null;
   }
 
+  private detectCycles(plan: Plan): string[] | null {
+    const adj = new Map<string, string[]>();
+    for (const step of plan.steps) {
+      adj.set(step.step_id, step.depends_on ?? []);
+    }
+    const visited = new Set<string>();
+    const inStack = new Set<string>();
+    const cycle: string[] = [];
+
+    function dfs(node: string): boolean {
+      if (inStack.has(node)) { cycle.push(node); return true; }
+      if (visited.has(node)) return false;
+      visited.add(node);
+      inStack.add(node);
+      for (const dep of adj.get(node) ?? []) {
+        if (dfs(dep)) { cycle.push(node); return true; }
+      }
+      inStack.delete(node);
+      return false;
+    }
+
+    for (const step of plan.steps) {
+      if (!visited.has(step.step_id)) {
+        if (dfs(step.step_id)) return cycle.reverse();
+      }
+    }
+    return null;
+  }
+
   private async executePhase(plan: Plan): Promise<void> {
     if (!this.session || !this.taskState) return;
+
+    // Detect cyclic dependencies before execution
+    const cycle = this.detectCycles(plan);
+    if (cycle) {
+      await this.transition("failed");
+      await this.config.journal.tryEmit(this.session.session_id, "session.failed", {
+        reason: `Cyclic dependency detected in plan: ${cycle.join(" → ")}`,
+      });
+      return;
+    }
 
     const steps = new Map<string, Step>();
     const results = new Map<string, StepResult>();

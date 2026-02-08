@@ -62,10 +62,14 @@ export const shellExecHandler: ToolHandler = async (
   if (mode === "dry_run") {
     return { exit_code: 0, stdout: `[dry_run] Would execute: ${command}`, stderr: "" };
   }
+  const MAX_SHELL_TIMEOUT = 300000; // 5 minutes
+  const DEFAULT_SHELL_TIMEOUT = 60000;
+  const rawTimeout = typeof input.timeout_ms === "number" ? input.timeout_ms : DEFAULT_SHELL_TIMEOUT;
+  const shellTimeout = Math.max(1000, Math.min(rawTimeout, MAX_SHELL_TIMEOUT));
   const args = parseCommand(command.trim());
   const binary = args.shift()!;
   return new Promise((resolvePromise) => {
-    execFile(binary, args, { env: sanitizeEnv(), cwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(binary, args, { env: sanitizeEnv(), cwd, timeout: shellTimeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
       let exitCode: number;
       if (!error) {
         exitCode = 0;

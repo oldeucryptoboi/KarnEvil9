@@ -153,6 +153,15 @@ export class ApiServer {
   constructor(configOrRegistry: ApiServerConfig | ToolRegistry, journal?: Journal) {
     this.app = express();
     this.app.use(express.json({ limit: "1mb" }));
+    // Security headers
+    this.app.use((_req, res, next) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("X-Frame-Options", "DENY");
+      res.setHeader("X-XSS-Protection", "0");
+      res.setHeader("Content-Security-Policy", "default-src 'none'");
+      res.setHeader("Cache-Control", "no-store");
+      next();
+    });
     if (journal !== undefined) {
       // Legacy constructor: (toolRegistry, journal)
       const toolRegistry = configOrRegistry as ToolRegistry;
@@ -276,6 +285,8 @@ export class ApiServer {
     this.sseClients.clear();
     // Detach metrics
     if (this.metricsCollector) this.metricsCollector.detach();
+    // Wait for pending journal writes to flush
+    await this.journal.close();
     // Close HTTP server
     if (this.httpServer) {
       await new Promise<void>((resolve) => this.httpServer!.close(() => resolve()));
@@ -481,10 +492,17 @@ export class ApiServer {
 
       if (afterSeq !== undefined && !isNaN(afterSeq)) {
         const events = await this.journal.readSession(sessionId);
+        let replayCount = 0;
+        const MAX_REPLAY = 500;
         for (const event of events) {
           if (event.seq !== undefined && event.seq > afterSeq) {
+            if (replayCount >= MAX_REPLAY) {
+              res.write(`data: ${JSON.stringify({ type: "replay.truncated", remaining: events.length - replayCount })}\n\n`);
+              break;
+            }
             const seqId = `id: ${event.seq}\n`;
             res.write(`${seqId}data: ${JSON.stringify(event)}\n\n`);
+            replayCount++;
           }
         }
       }
@@ -503,8 +521,15 @@ export class ApiServer {
         client.missedEvents = 0;
       });
 
+      // Force-close after 30 minutes to prevent zombie connections
+      const maxLifetime = setTimeout(() => {
+        res.end();
+      }, 30 * 60 * 1000);
+      maxLifetime.unref();
+
       const cleanupSse = () => {
         clearInterval(keepalive);
+        clearTimeout(maxLifetime);
         const remaining = (this.sseClients.get(sessionId) ?? []).filter((c) => c !== client);
         if (remaining.length === 0) this.sseClients.delete(sessionId);
         else this.sseClients.set(sessionId, remaining);

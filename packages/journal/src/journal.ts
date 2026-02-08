@@ -279,6 +279,14 @@ export class Journal {
     }
   }
 
+  /**
+   * Wait for any pending writes to complete. Call this before process exit
+   * to ensure no journal events are lost.
+   */
+  async close(): Promise<void> {
+    await this.writeLock;
+  }
+
   getFilePath(): string {
     return this.filePath;
   }

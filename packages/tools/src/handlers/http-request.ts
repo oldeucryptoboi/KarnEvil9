@@ -21,9 +21,20 @@ export const httpRequestHandler: ToolHandler = async (
   if (mode === "dry_run") {
     return { status: 0, body: `[dry_run] Would ${method} ${url}`, headers: {} };
   }
-  const fetchOpts: RequestInit = { method, headers };
+  const DEFAULT_FETCH_TIMEOUT = 30000;
+  const MAX_FETCH_TIMEOUT = 120000;
+  const rawTimeout = typeof input.timeout_ms === "number" ? input.timeout_ms : DEFAULT_FETCH_TIMEOUT;
+  const fetchTimeout = Math.max(1000, Math.min(rawTimeout, MAX_FETCH_TIMEOUT));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), fetchTimeout);
+  const fetchOpts: RequestInit = { method, headers, signal: controller.signal };
   if (body && method !== "GET") fetchOpts.body = body;
-  const response = await fetch(url, fetchOpts);
+  let response: Response;
+  try {
+    response = await fetch(url, fetchOpts);
+  } finally {
+    clearTimeout(timer);
+  }
   const responseBody = await response.text();
   const responseHeaders: Record<string, string> = {};
   response.headers.forEach((value, key) => { responseHeaders[key] = value; });

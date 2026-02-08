@@ -22,30 +22,39 @@ const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
 
 export function isPrivateIP(hostname: string): boolean {
   const lower = hostname.toLowerCase();
-  if (lower === "localhost" || lower === "::1" || lower === "0.0.0.0") return true;
+  if (lower === "localhost" || lower === "0.0.0.0") return true;
+
+  // IPv6 loopback and special addresses
+  // Strip brackets from IPv6 [::1] notation
+  const bare = lower.startsWith("[") && lower.endsWith("]") ? lower.slice(1, -1) : lower;
+  if (bare === "::1" || bare === "::" || bare === "0:0:0:0:0:0:0:1" || bare === "0:0:0:0:0:0:0:0") return true;
+  // IPv6 mapped IPv4 loopback (::ffff:127.0.0.1)
+  if (bare.startsWith("::ffff:")) {
+    const mapped = bare.slice(7);
+    if (isPrivateIPv4(mapped)) return true;
+  }
+  // IPv6 link-local (fe80::/10)
+  if (bare.startsWith("fe80")) return true;
+  // IPv6 fc00::/7 (unique local)
+  if (bare.startsWith("fc") || bare.startsWith("fd")) return true;
 
   // IPv4 checks
+  if (isPrivateIPv4(hostname)) return true;
+
+  return false;
+}
+
+function isPrivateIPv4(hostname: string): boolean {
   const parts = hostname.split(".");
-  if (parts.length === 4 && parts.every((p) => /^\d+$/.test(p))) {
-    const octets = parts.map(Number);
-    const [a, b] = octets as [number, number, number, number];
-    // 127.0.0.0/8
-    if (a === 127) return true;
-    // 10.0.0.0/8
-    if (a === 10) return true;
-    // 172.16.0.0/12
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    // 192.168.0.0/16
-    if (a === 192 && b === 168) return true;
-    // 169.254.0.0/16
-    if (a === 169 && b === 254) return true;
-    // 0.0.0.0
-    if (a === 0) return true;
-  }
-
-  // IPv6 fc00::/7
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
-
+  if (parts.length !== 4 || !parts.every((p) => /^\d+$/.test(p))) return false;
+  const octets = parts.map(Number);
+  const [a, b] = octets as [number, number, number, number];
+  if (a === 127) return true;         // 127.0.0.0/8
+  if (a === 10) return true;          // 10.0.0.0/8
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;           // 192.168.0.0/16
+  if (a === 169 && b === 254) return true;           // 169.254.0.0/16
+  if (a === 0) return true;           // 0.0.0.0/8
   return false;
 }
 

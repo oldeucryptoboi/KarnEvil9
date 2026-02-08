@@ -213,7 +213,10 @@ export class ToolRuntime {
     if (request.mode === "mock") return this.executeMock(manifest);
     const handler = this.handlers.get(request.tool_name);
     if (!handler) throw new Error(`No handler registered for tool "${request.tool_name}"`);
-    const timeout = timeoutOverride ?? manifest.timeout_ms;
+    const timeout = timeoutOverride ?? manifest.timeout_ms ?? 60000;
+    if (timeout <= 0) {
+      return handler(request.input, request.mode, effectivePolicy);
+    }
     return Promise.race([
       handler(request.input, request.mode, effectivePolicy),
       new Promise<never>((_, reject) =>

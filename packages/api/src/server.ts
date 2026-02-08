@@ -117,6 +117,8 @@ export interface ApiServerConfig {
   maxSseClientsPerSession?: number;
   agentic?: boolean;
   apiToken?: string;
+  /** Set to true to explicitly allow running without an API token. */
+  insecure?: boolean;
   metricsCollector?: MetricsCollector;
   approvalTimeoutMs?: number;
   corsOrigins?: string | string[];
@@ -188,7 +190,13 @@ export class ApiServer {
       this.metricsCollector.attach(this.journal);
     }
     if (!this.apiToken) {
-      console.warn("[api] WARNING: No API token configured — all endpoints are unauthenticated. Set apiToken in config or JARVIS_API_TOKEN env var.");
+      const insecure = journal !== undefined ? true : (configOrRegistry as ApiServerConfig).insecure === true;
+      if (!insecure) {
+        throw new Error(
+          "API token is required. Set apiToken in config, JARVIS_API_TOKEN env var, or pass insecure: true (--insecure) to allow unauthenticated access."
+        );
+      }
+      console.warn("[api] WARNING: Running in insecure mode — all endpoints are unauthenticated.");
     }
     // CORS middleware
     if (this.corsOrigins) {
@@ -408,8 +416,14 @@ export class ApiServer {
           this.kernels.set(session.session_id, kernel);
           this.activeSessionCount++;
 
-          // Run in background — clean up on completion, broadcast failures
-          kernel.run()
+          // Run in background — enforce outer timeout, clean up on completion
+          const sessionTimeoutMs = (limits?.max_duration_ms ?? this.defaultLimits.max_duration_ms) + 30000;
+          const kernelPromise = kernel.run();
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            const t = setTimeout(() => reject(new Error(`Session timed out after ${sessionTimeoutMs}ms`)), sessionTimeoutMs);
+            t.unref();
+          });
+          Promise.race([kernelPromise, timeoutPromise])
             .catch((err) => {
               this.broadcastEvent(session.session_id, {
                 type: "session.failed",

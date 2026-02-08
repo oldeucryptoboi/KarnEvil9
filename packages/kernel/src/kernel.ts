@@ -233,7 +233,7 @@ export class Kernel {
     }
 
     const maxAttempts = (this.config.plannerRetries ?? 0) + 1;
-    const timeoutMs = this.config.plannerTimeoutMs ?? 0;
+    const timeoutMs = this.config.plannerTimeoutMs ?? 30000;
     let lastError: string | null = null;
 
     // Enrich snapshot with memory recalls and subagent findings

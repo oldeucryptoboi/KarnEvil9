@@ -256,8 +256,9 @@ program.command("server").description("Start the API server")
   .option("--planner <type>", "Planner: mock, claude, openai, router")
   .option("--model <name>", "Model name")
   .option("--agentic", "Enable agentic feedback loop")
+  .option("--insecure", "Allow running without an API token (unauthenticated)")
   .option("--no-memory", "Disable cross-session active memory")
-  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; memory?: boolean }) => {
+  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean }) => {
     const { journal, registry, permissions, runtime } = await createRuntime();
     const pluginsDir = resolve(opts.pluginsDir);
     const pluginRegistry = new PluginRegistry({
@@ -279,6 +280,7 @@ program.command("server").description("Start the API server")
       agentic: opts.agentic ?? false,
       metricsCollector,
       apiToken,
+      insecure: opts.insecure === true,
       corsOrigins: corsOrigins ? corsOrigins.split(",").map((s) => s.trim()) : undefined,
       approvalTimeoutMs: parseInt(process.env.JARVIS_APPROVAL_TIMEOUT_MS ?? "300000", 10),
       maxConcurrentSessions: parseInt(process.env.JARVIS_MAX_SESSIONS ?? "50", 10),

@@ -296,6 +296,7 @@ describe("ApiServer (full config constructor)", () => {
       defaultMode: "mock",
       defaultLimits: { max_steps: 10, max_duration_ms: 60000, max_cost_usd: 1, max_tokens: 10000 },
       defaultPolicy: { allowed_paths: ["/tmp"], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: false },
+      insecure: true,
     });
 
     await new Promise<void>((resolve) => {
@@ -480,6 +481,7 @@ describe("ApiServer concurrency limits", () => {
       defaultLimits: { max_steps: 10, max_duration_ms: 60000, max_cost_usd: 1, max_tokens: 10000 },
       defaultPolicy: { allowed_paths: ["/tmp"], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: false },
       maxConcurrentSessions: 2,
+      insecure: true,
     });
 
     await new Promise<void>((resolve) => {
@@ -536,6 +538,7 @@ describe("ApiServer recovery", () => {
       defaultMode: "mock",
       defaultLimits: { max_steps: 10, max_duration_ms: 60000, max_cost_usd: 1, max_tokens: 10000 },
       defaultPolicy: { allowed_paths: ["/tmp"], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: false },
+      insecure: true,
     });
 
     await new Promise<void>((resolve) => {
@@ -671,6 +674,7 @@ export async function register(api) {
       permissions,
       planner: new MockPlanner(),
       pluginRegistry,
+      insecure: true,
     });
 
     await new Promise<void>((resolve) => {

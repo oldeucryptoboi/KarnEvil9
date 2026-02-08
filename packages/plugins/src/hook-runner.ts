@@ -96,12 +96,13 @@ export class HookRunner {
 
       let result: HookResult;
       try {
+        const hookTimeout = reg.timeout_ms && reg.timeout_ms > 0 ? reg.timeout_ms : 5000;
         const raw = await Promise.race([
           reg.handler({ ...context, ...mergedData }),
           new Promise<never>((_, reject) =>
             setTimeout(
-              () => reject(new Error(`Hook "${hookName}" from plugin "${reg.plugin_id}" timed out after ${reg.timeout_ms}ms`)),
-              reg.timeout_ms
+              () => reject(new Error(`Hook "${hookName}" from plugin "${reg.plugin_id}" timed out after ${hookTimeout}ms`)),
+              hookTimeout
             )
           ),
         ]);

@@ -66,7 +66,20 @@ export const shellExecHandler: ToolHandler = async (
   const binary = args.shift()!;
   return new Promise((resolvePromise) => {
     execFile(binary, args, { env: sanitizeEnv(), cwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
-      resolvePromise({ exit_code: error?.code ?? 0, stdout: stdout.toString(), stderr: stderr.toString() });
+      let exitCode: number;
+      if (!error) {
+        exitCode = 0;
+      } else if (typeof error.code === "number") {
+        exitCode = error.code;
+      } else {
+        // Spawn failure (ENOENT, EACCES) or signal kill — report as non-zero
+        exitCode = 1;
+      }
+      const stderrStr = stderr.toString();
+      const errorDetail = error && typeof error.code === "string"
+        ? `${stderrStr}${stderrStr ? "\n" : ""}${error.code}: ${error.message}`
+        : stderrStr;
+      resolvePromise({ exit_code: exitCode, stdout: stdout.toString(), stderr: errorDetail });
     });
   });
 };

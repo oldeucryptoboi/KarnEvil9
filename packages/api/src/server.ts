@@ -47,9 +47,7 @@ function validateSessionInput(body: unknown): string | null {
     }
   }
 
-  if (b.policy !== undefined) {
-    if (typeof b.policy !== "object" || Array.isArray(b.policy)) return "policy must be an object";
-  }
+  // policy is server-controlled and not accepted from clients
 
   return null; // valid
 }
@@ -278,6 +276,12 @@ export class ApiServer {
       approval.resolve("deny");
       this.pendingApprovals.delete(id);
     }
+    // Abort all running kernels
+    const abortPromises: Promise<void>[] = [];
+    for (const kernel of this.kernels.values()) {
+      abortPromises.push(kernel.abort().catch(() => { /* best effort */ }));
+    }
+    await Promise.allSettled(abortPromises);
     // Close all SSE connections
     for (const [, clients] of this.sseClients) {
       for (const client of clients) client.res.end();
@@ -351,7 +355,26 @@ export class ApiServer {
       });
     });
 
-    // Metrics endpoint (unauthenticated, like /health)
+    // Bearer token auth middleware — applied to all routes after /health
+    if (this.apiToken) {
+      const token = this.apiToken;
+      router.use((req, res, next) => {
+        const auth = req.headers.authorization;
+        if (!auth || !auth.startsWith("Bearer ")) {
+          res.status(401).json({ error: "Unauthorized" });
+          return;
+        }
+        const provided = Buffer.from(auth.slice(7));
+        const expected = Buffer.from(token);
+        if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+          res.status(401).json({ error: "Unauthorized" });
+          return;
+        }
+        next();
+      });
+    }
+
+    // Metrics endpoint (behind auth)
     if (this.metricsCollector) {
       const metricsRoute = createMetricsRouter(this.metricsCollector);
       router.get(metricsRoute.path, async (req: express.Request, res: express.Response) => {
@@ -373,25 +396,6 @@ export class ApiServer {
       });
     }
 
-    // Bearer token auth middleware — applied to all routes after /health
-    if (this.apiToken) {
-      const token = this.apiToken;
-      router.use((req, res, next) => {
-        const auth = req.headers.authorization;
-        if (!auth || !auth.startsWith("Bearer ")) {
-          res.status(401).json({ error: "Unauthorized" });
-          return;
-        }
-        const provided = Buffer.from(auth.slice(7));
-        const expected = Buffer.from(token);
-        if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-          res.status(401).json({ error: "Unauthorized" });
-          return;
-        }
-        next();
-      });
-    }
-
     router.post("/sessions", async (req, res) => {
       try {
         const validationError = validateSessionInput(req.body);
@@ -400,17 +404,25 @@ export class ApiServer {
           res.status(429).json({ error: "Max concurrent sessions reached" });
           return;
         }
-        const { text, constraints, submitted_by, mode, limits, policy } = req.body as {
+        const { text, constraints, submitted_by, mode, limits } = req.body as {
           text: string;
           constraints?: Record<string, unknown>;
           submitted_by?: string;
           mode?: ExecutionMode;
           limits?: Partial<SessionLimits>;
-          policy?: Partial<PolicyProfile>;
         };
         const task: Task = { task_id: uuid(), text, constraints, submitted_by, created_at: new Date().toISOString() };
 
         if (this.toolRuntime && this.permissions && this.planner) {
+          // Clamp client-supplied limits to server-configured maximums
+          const effectiveLimits = { ...this.defaultLimits };
+          if (limits) {
+            if (typeof limits.max_steps === "number") effectiveLimits.max_steps = Math.min(limits.max_steps, this.defaultLimits.max_steps);
+            if (typeof limits.max_duration_ms === "number") effectiveLimits.max_duration_ms = Math.min(limits.max_duration_ms, this.defaultLimits.max_duration_ms);
+            if (typeof limits.max_cost_usd === "number") effectiveLimits.max_cost_usd = Math.min(limits.max_cost_usd, this.defaultLimits.max_cost_usd);
+            if (typeof limits.max_tokens === "number") effectiveLimits.max_tokens = Math.min(limits.max_tokens, this.defaultLimits.max_tokens);
+          }
+          // Policy is server-controlled — clients cannot override security boundaries
           const kernelConfig = {
             journal: this.journal,
             toolRuntime: this.toolRuntime,
@@ -418,8 +430,8 @@ export class ApiServer {
             permissions: this.permissions,
             planner: this.planner,
             mode: mode ?? this.defaultMode,
-            limits: { ...this.defaultLimits, ...limits },
-            policy: { ...this.defaultPolicy, ...policy },
+            limits: effectiveLimits,
+            policy: this.defaultPolicy,
             agentic: this.agentic,
           };
           const kernel = new KernelClass(kernelConfig);
@@ -428,11 +440,12 @@ export class ApiServer {
           this.activeSessionCount++;
 
           // Run in background — enforce outer timeout, clean up on completion
-          const sessionTimeoutMs = (limits?.max_duration_ms ?? this.defaultLimits.max_duration_ms) + 30000;
+          const sessionTimeoutMs = effectiveLimits.max_duration_ms + 30000;
           const kernelPromise = kernel.run();
+          let sessionTimer: ReturnType<typeof setTimeout>;
           const timeoutPromise = new Promise<never>((_, reject) => {
-            const t = setTimeout(() => reject(new Error(`Session timed out after ${sessionTimeoutMs}ms`)), sessionTimeoutMs);
-            t.unref();
+            sessionTimer = setTimeout(() => reject(new Error(`Session timed out after ${sessionTimeoutMs}ms`)), sessionTimeoutMs);
+            sessionTimer.unref();
           });
           Promise.race([kernelPromise, timeoutPromise])
             .catch((err) => {
@@ -444,7 +457,8 @@ export class ApiServer {
               });
             })
             .finally(() => {
-              this.activeSessionCount--;
+              clearTimeout(sessionTimer!);
+              this.activeSessionCount = Math.max(0, this.activeSessionCount - 1);
               // Keep session queryable for 60s after completion, then evict
               setTimeout(() => this.kernels.delete(session.session_id), 60000).unref();
             });

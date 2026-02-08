@@ -217,12 +217,17 @@ export class ToolRuntime {
     if (timeout <= 0) {
       return handler(request.input, request.mode, effectivePolicy);
     }
-    return Promise.race([
-      handler(request.input, request.mode, effectivePolicy),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Tool "${request.tool_name}" timed out after ${timeout}ms`)), timeout)
-      ),
-    ]);
+    let timer: ReturnType<typeof setTimeout>;
+    try {
+      return await Promise.race([
+        handler(request.input, request.mode, effectivePolicy),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`Tool "${request.tool_name}" timed out after ${timeout}ms`)), timeout);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer!);
+    }
   }
 
   private executeMock(manifest: ToolManifest): unknown {

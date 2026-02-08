@@ -15,6 +15,15 @@ import { PluginRegistry } from "@jarvis/plugins";
 import { ActiveMemory } from "@jarvis/memory";
 import type { Task, ApprovalDecision, PermissionRequest } from "@jarvis/schemas";
 
+// Global error handlers — prevent silent crashes from unhandled rejections/exceptions
+process.on("unhandledRejection", (reason) => {
+  console.error("[jarvis] Unhandled rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[jarvis] Uncaught exception:", err);
+  process.exit(1);
+});
+
 const JOURNAL_PATH = process.env.JARVIS_JOURNAL_PATH ?? resolve("journal/events.jsonl");
 const TOOLS_DIR = process.env.JARVIS_TOOLS_DIR ?? resolve("tools/examples");
 const MEMORY_PATH = process.env.JARVIS_MEMORY_PATH ?? resolve("sessions/memory.jsonl");
@@ -168,6 +177,7 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
         console.log(`Estimated cost: $${usage.total_cost_usd.toFixed(4)}`);
       }
     }
+    await journal.close();
   });
 
 program.command("plan").description("Generate a plan without executing").argument("<task>", "Task description")

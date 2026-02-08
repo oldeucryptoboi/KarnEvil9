@@ -262,14 +262,20 @@ export class Kernel {
           enrichedSnapshot,
           { policy: this.session.policy, limits: this.session.limits }
         );
-        const planResult = timeoutMs > 0
-          ? await Promise.race([
-              planResultPromise,
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error(`Planner timed out after ${timeoutMs}ms`)), Math.max(1, timeoutMs))
-              ),
-            ])
-          : await planResultPromise;
+        let plannerTimer: ReturnType<typeof setTimeout> | undefined;
+        let planResult: PlanResult;
+        try {
+          planResult = timeoutMs > 0
+            ? await Promise.race([
+                planResultPromise,
+                new Promise<never>((_, reject) => {
+                  plannerTimer = setTimeout(() => reject(new Error(`Planner timed out after ${timeoutMs}ms`)), Math.max(1, timeoutMs));
+                }),
+              ])
+            : await planResultPromise;
+        } finally {
+          if (plannerTimer) clearTimeout(plannerTimer);
+        }
 
         const { plan, usage } = planResult;
 
@@ -511,7 +517,7 @@ export class Kernel {
 
       for (const step of ready) {
         if (completed.has(step.step_id) || failed.has(step.step_id)) {
-          this.config.permissions?.clearStep(step.step_id);
+          this.config.permissions?.clearStep(this.session!.session_id);
         }
       }
     }

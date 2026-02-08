@@ -334,14 +334,13 @@ describe("ApiServer (full config constructor)", () => {
     expect(["completed", "failed", "running", "planning"]).toContain(session.status);
   });
 
-  it("POST /api/sessions accepts custom mode and limits", async () => {
+  it("POST /api/sessions accepts custom mode and limits (clamped to server max)", async () => {
     const res = await fetch(`${baseUrl}/api/sessions`, {
       method: "POST",
       body: {
         text: "Custom config test",
         mode: "mock",
         limits: { max_steps: 5 },
-        policy: { allowed_paths: ["/custom"] },
       },
     });
     expect(res.status).toBe(200);
@@ -352,8 +351,10 @@ describe("ApiServer (full config constructor)", () => {
 
     const sessionRes = await fetch(`${baseUrl}/api/sessions/${body.session_id}`);
     const session = await sessionRes.json();
+    // Client requested 5 which is below server max of 10 — honored
     expect(session.limits.max_steps).toBe(5);
-    expect(session.policy.allowed_paths).toContain("/custom");
+    // Policy is server-controlled — client cannot override
+    expect(session.policy.allowed_paths).toEqual(["/tmp"]);
   });
 
   it("POST /api/sessions/:id/abort aborts a session", async () => {

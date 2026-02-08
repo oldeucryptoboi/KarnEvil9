@@ -1,5 +1,5 @@
 /**
- * OpenFlaw Core Types
+ * OpenVger Core Types
  *
  * These are the canonical data models for the entire runtime.
  * Every component references these types. Nothing is implicit.
@@ -24,6 +24,7 @@ export interface SessionLimits {
   max_duration_ms: number;
   max_cost_usd: number;
   max_tokens: number;
+  max_iterations?: number;
 }
 
 export interface PolicyProfile {
@@ -31,6 +32,8 @@ export interface PolicyProfile {
   allowed_endpoints: string[];
   allowed_commands: string[];
   require_approval_for_writes: boolean;
+  readonly_paths?: string[];
+  writable_paths?: string[];
 }
 
 export interface Session {
@@ -81,6 +84,8 @@ export interface Step {
   failure_policy: FailurePolicy;
   timeout_ms: number;
   max_retries: number;
+  depends_on?: string[];
+  input_from?: Record<string, string>;
 }
 
 export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
@@ -111,6 +116,26 @@ export interface Plan {
   created_at: string;
 }
 
+// ─── Usage / Cost Tracking ──────────────────────────────────────────
+
+export interface UsageMetrics {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd?: number;
+  model?: string;
+}
+
+export interface PlanResult {
+  plan: Plan;
+  usage?: UsageMetrics;
+}
+
+export interface ModelPricing {
+  input_cost_per_1k_tokens: number;
+  output_cost_per_1k_tokens: number;
+}
+
 // ─── Tool Manifest ──────────────────────────────────────────────────
 
 export type ToolRunner = "shell" | "http" | "internal" | "container";
@@ -129,6 +154,40 @@ export interface ToolManifest {
     dry_run: boolean;
   };
   mock_responses?: Record<string, unknown>[];
+}
+
+// ─── Error Infrastructure ───────────────────────────────────────────
+
+export const ErrorCodes = {
+  TOOL_NOT_FOUND: "TOOL_NOT_FOUND",
+  CIRCUIT_BREAKER_OPEN: "CIRCUIT_BREAKER_OPEN",
+  INVALID_INPUT: "INVALID_INPUT",
+  INVALID_OUTPUT: "INVALID_OUTPUT",
+  PERMISSION_DENIED: "PERMISSION_DENIED",
+  EXECUTION_ERROR: "EXECUTION_ERROR",
+  POLICY_VIOLATION: "POLICY_VIOLATION",
+  NO_RUNTIME: "NO_RUNTIME",
+  TIMEOUT: "TIMEOUT",
+  DURATION_LIMIT: "DURATION_LIMIT",
+  SESSION_LIMIT_REACHED: "SESSION_LIMIT_REACHED",
+  PLUGIN_NOT_FOUND: "PLUGIN_NOT_FOUND",
+  PLUGIN_LOAD_FAILED: "PLUGIN_LOAD_FAILED",
+  PLUGIN_TIMEOUT: "PLUGIN_TIMEOUT",
+  PLUGIN_HOOK_FAILED: "PLUGIN_HOOK_FAILED",
+  PLUGIN_HOOK_BLOCKED: "PLUGIN_HOOK_BLOCKED",
+} as const;
+
+export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
+
+export class OpenVgerError extends Error {
+  readonly code: ErrorCode;
+  readonly data?: unknown;
+  constructor(code: ErrorCode, message: string, data?: unknown) {
+    super(message);
+    this.name = "OpenVgerError";
+    this.code = code;
+    this.data = data;
+  }
 }
 
 // ─── Tool Execution ─────────────────────────────────────────────────
@@ -150,6 +209,8 @@ export interface ToolExecutionResult {
   error?: { code: string; message: string; data?: unknown };
   duration_ms: number;
   mode: ExecutionMode;
+  cost_usd?: number;
+  tokens_used?: number;
 }
 
 // ─── Permissions ────────────────────────────────────────────────────
@@ -161,7 +222,41 @@ export interface Permission {
   target: string;
 }
 
-export type ApprovalDecision = "allow_once" | "allow_session" | "allow_always" | "deny";
+export type ApprovalDecision = "allow_once" | "allow_session" | "allow_always" | "deny"
+  | AllowConstrained | AllowObserved | DenyWithAlternative;
+
+export interface AllowConstrained {
+  type: "allow_constrained";
+  scope: "once" | "session" | "always";
+  constraints: PermissionConstraints;
+}
+
+export interface AllowObserved {
+  type: "allow_observed";
+  scope: "once" | "session" | "always";
+  telemetry_level: "basic" | "detailed";
+}
+
+export interface DenyWithAlternative {
+  type: "deny_with_alternative";
+  reason: string;
+  alternative: { tool_name: string; suggested_input?: Record<string, unknown> };
+}
+
+export interface PermissionConstraints {
+  readonly_paths?: string[];
+  writable_paths?: string[];
+  max_duration_ms?: number;
+  input_overrides?: Record<string, unknown>;
+  output_redact_fields?: string[];
+}
+
+export interface PermissionCheckResult {
+  allowed: boolean;
+  constraints?: PermissionConstraints;
+  observed?: boolean;
+  alternative?: { tool_name: string; suggested_input?: Record<string, unknown> };
+}
 
 export interface PermissionRequest {
   request_id: string;
@@ -203,7 +298,56 @@ export type JournalEventType =
   | "tool.requested"
   | "tool.started"
   | "tool.succeeded"
-  | "tool.failed";
+  | "tool.failed"
+  | "policy.violated"
+  | "session.checkpoint"
+  | "limit.exceeded"
+  | "plugin.discovered"
+  | "plugin.loading"
+  | "plugin.loaded"
+  | "plugin.failed"
+  | "plugin.unloaded"
+  | "plugin.reloaded"
+  | "plugin.hook_fired"
+  | "plugin.hook_failed"
+  | "plugin.hook_circuit_open"
+  | "plugin.service_started"
+  | "plugin.service_stopped"
+  | "plugin.service_failed"
+  | "plan.criticized"
+  | "memory.lesson_extracted"
+  | "futility.detected"
+  | "permission.observed_execution"
+  | "usage.recorded"
+  | "context.budget_assessed"
+  | "context.delegation_started"
+  | "context.delegation_completed"
+  | "context.checkpoint_triggered"
+  | "context.summarize_triggered"
+  | "context.checkpoint_saved"
+  | "context.session_rotated";
+
+// ─── Context Budget / Checkpoint ────────────────────────────────────
+
+export interface CheckpointFinding {
+  step_title: string;
+  tool_name: string;
+  status: "succeeded" | "failed";
+  summary: string;
+}
+
+export interface SessionCheckpointData {
+  checkpoint_id: string;
+  source_session_id: string;
+  task_text: string;
+  findings: CheckpointFinding[];
+  next_steps: string[];
+  open_questions: string[];
+  last_plan_goal: string;
+  usage_at_checkpoint: { total_tokens: number; total_cost_usd: number; iterations_completed: number };
+  artifacts: Record<string, unknown>;
+  created_at: string;
+}
 
 export interface JournalEvent {
   event_id: string;
@@ -212,6 +356,7 @@ export interface JournalEvent {
   type: JournalEventType;
   payload: Record<string, unknown>;
   hash_prev?: string;
+  seq?: number;
 }
 
 // ─── Memory ─────────────────────────────────────────────────────────
@@ -236,6 +381,18 @@ export interface MemoryItem {
   metadata?: Record<string, unknown>;
 }
 
+export interface MemoryLesson {
+  lesson_id: string;
+  task_summary: string;
+  outcome: "succeeded" | "failed";
+  lesson: string;
+  tool_names: string[];
+  created_at: string;
+  session_id: string;
+  relevance_count: number;
+  last_retrieved_at?: string;
+}
+
 // ─── Planner Contract ───────────────────────────────────────────────
 
 /** Tool schema as presented to the planner (no implementation details). */
@@ -254,5 +411,123 @@ export interface Planner {
     toolSchemas: ToolSchemaForPlanner[],
     stateSnapshot: Record<string, unknown>,
     constraints: Record<string, unknown>
-  ): Promise<Plan>;
+  ): Promise<PlanResult>;
+}
+
+// ─── Tool Handler ──────────────────────────────────────────────────
+
+export type ToolHandler = (
+  input: Record<string, unknown>,
+  mode: ExecutionMode,
+  policy: PolicyProfile
+) => Promise<unknown>;
+
+// ─── Plugin System ─────────────────────────────────────────────────
+
+export interface PluginManifest {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  entry: string;
+  permissions: string[];
+  config_schema?: Record<string, unknown>;
+  provides: {
+    tools?: string[];
+    hooks?: HookName[];
+    routes?: string[];
+    commands?: string[];
+    planners?: string[];
+    services?: string[];
+  };
+}
+
+export type PluginStatus = "discovered" | "loading" | "active" | "failed" | "unloaded";
+
+export interface PluginState {
+  id: string;
+  manifest: PluginManifest;
+  status: PluginStatus;
+  loaded_at?: string;
+  failed_at?: string;
+  error?: string;
+  config: Record<string, unknown>;
+}
+
+export type HookName =
+  | "before_session_start"
+  | "after_session_end"
+  | "before_plan"
+  | "after_plan"
+  | "before_step"
+  | "after_step"
+  | "before_tool_call"
+  | "after_tool_call"
+  | "on_error";
+
+export interface HookContext {
+  session_id: string;
+  plugin_id: string;
+  [key: string]: unknown;
+}
+
+export type HookResult =
+  | { action: "continue"; data?: Record<string, unknown> }
+  | { action: "modify"; data: Record<string, unknown> }
+  | { action: "block"; reason: string }
+  | { action: "observe" };
+
+export type HookHandler = (context: HookContext) => Promise<HookResult>;
+
+export interface HookOptions {
+  priority?: number;
+  timeout_ms?: number;
+}
+
+export interface HookRegistration {
+  plugin_id: string;
+  hook: HookName;
+  handler: HookHandler;
+  priority: number;
+  timeout_ms: number;
+}
+
+export interface PluginService {
+  name: string;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  health?(): Promise<{ ok: boolean; detail?: string }>;
+}
+
+export interface PluginLogger {
+  info(message: string, data?: Record<string, unknown>): void;
+  warn(message: string, data?: Record<string, unknown>): void;
+  error(message: string, data?: Record<string, unknown>): void;
+  debug(message: string, data?: Record<string, unknown>): void;
+}
+
+export type RouteHandler = (
+  req: { method: string; path: string; params: Record<string, string>; query: Record<string, string>; body: unknown },
+  res: { json(data: unknown): void; status(code: number): { json(data: unknown): void } }
+) => Promise<void>;
+
+export interface CommandOptions {
+  description: string;
+  arguments?: Array<{ name: string; description: string; required?: boolean }>;
+  options?: Array<{ flags: string; description: string; default?: unknown }>;
+  action: (...args: unknown[]) => Promise<void>;
+}
+
+export type PluginRegisterFn = (api: PluginApi) => Promise<void>;
+
+export interface PluginApi {
+  readonly id: string;
+  readonly config: Readonly<Record<string, unknown>>;
+  readonly logger: PluginLogger;
+  registerTool(manifest: ToolManifest, handler: ToolHandler): void;
+  registerHook(hook: HookName, handler: HookHandler, opts?: HookOptions): void;
+  registerRoute(method: string, path: string, handler: RouteHandler): void;
+  registerCommand(name: string, opts: CommandOptions): void;
+  registerPlanner(planner: Planner): void;
+  registerService(service: PluginService): void;
 }

@@ -7,7 +7,7 @@ dist/
 !.env.example
 journal/
 sessions/
-.openflaw/
+.openvger/
 *.log
 .DS_Store
 coverage/

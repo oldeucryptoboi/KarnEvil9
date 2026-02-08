@@ -1,5 +1,5 @@
 {
-  "name": "@openflaw/planner",
+  "name": "@openvger/planner",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@openflaw/schemas": "workspace:*",
+    "@openvger/schemas": "workspace:*",
     "uuid": "^11.0.0"
   }
 }

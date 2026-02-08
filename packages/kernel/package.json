@@ -1,5 +1,5 @@
 {
-  "name": "@openflaw/kernel",
+  "name": "@openvger/kernel",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
@@ -11,14 +11,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@openflaw/schemas": "workspace:*",
-    "@openflaw/journal": "workspace:*",
-    "@openflaw/tools": "workspace:*",
-    "@openflaw/permissions": "workspace:*",
-    "@openflaw/memory": "workspace:*",
+    "@openvger/schemas": "workspace:*",
+    "@openvger/journal": "workspace:*",
+    "@openvger/tools": "workspace:*",
+    "@openvger/permissions": "workspace:*",
+    "@openvger/memory": "workspace:*",
+    "@openvger/plugins": "workspace:*",
     "uuid": "^11.0.0"
   },
   "devDependencies": {
-    "@openflaw/planner": "workspace:*"
+    "@openvger/planner": "workspace:*"
   }
 }

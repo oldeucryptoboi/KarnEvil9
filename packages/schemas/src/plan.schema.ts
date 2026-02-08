@@ -22,13 +22,15 @@ export const StepSchema = {
     failure_policy: { type: "string", enum: ["abort", "replan", "continue"] },
     timeout_ms: { type: "number", minimum: 100 },
     max_retries: { type: "integer", minimum: 0, maximum: 10 },
+    depends_on: { type: "array", items: { type: "string", minLength: 1 } },
+    input_from: { type: "object", additionalProperties: { type: "string", minLength: 1 } },
   },
   additionalProperties: false,
 } as const;
 
 export const PlanSchema = {
   type: "object",
-  required: ["plan_id", "schema_version", "goal", "assumptions", "steps"],
+  required: ["plan_id", "schema_version", "goal", "assumptions", "steps", "created_at"],
   properties: {
     plan_id: { type: "string", minLength: 1 },
     schema_version: { type: "string", const: "0.1" },

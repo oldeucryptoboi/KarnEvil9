@@ -1,2 +1,12 @@
 export { Kernel } from "./kernel.js";
 export type { KernelConfig } from "./kernel.js";
+export { runCritics, toolInputCritic, stepLimitCritic, selfReferenceCritic, unknownToolCritic } from "./critics.js";
+export type { CriticResult, CriticFn, CriticContext } from "./critics.js";
+export { FutilityMonitor } from "./futility.js";
+export type { FutilityConfig, FutilityVerdict, IterationRecord } from "./futility.js";
+export { UsageAccumulator } from "./usage-accumulator.js";
+export type { UsageSummary } from "./usage-accumulator.js";
+export { ContextBudgetMonitor, buildCheckpoint } from "./context-budget.js";
+export type { ContextBudgetConfig, ContextBudgetVerdict, ContextIteration } from "./context-budget.js";
+export { runSubagent } from "./subagent.js";
+export type { SubagentRequest, SubagentResult, SubagentDeps } from "./subagent.js";

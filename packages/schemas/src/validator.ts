@@ -3,6 +3,7 @@ import addFormats from "ajv-formats";
 import { PlanSchema } from "./plan.schema.js";
 import { ToolManifestSchema } from "./tool-manifest.schema.js";
 import { JournalEventSchema } from "./journal-event.schema.js";
+import { PluginManifestSchema } from "./plugin-manifest.schema.js";
 
 const ajv = new (Ajv.default ?? Ajv)({ allErrors: true, strict: false });
 ((addFormats as any).default ?? addFormats)(ajv);
@@ -10,6 +11,7 @@ const ajv = new (Ajv.default ?? Ajv)({ allErrors: true, strict: false });
 const validatePlan = ajv.compile(PlanSchema);
 const validateToolManifest = ajv.compile(ToolManifestSchema);
 const validateJournalEvent = ajv.compile(JournalEventSchema);
+const validatePluginManifest = ajv.compile(PluginManifestSchema);
 
 export interface ValidationResult {
   valid: boolean;
@@ -37,6 +39,11 @@ export function validateToolManifestData(data: unknown): ValidationResult {
 export function validateJournalEventData(data: unknown): ValidationResult {
   const valid = validateJournalEvent(data);
   return toResult(valid, validateJournalEvent.errors);
+}
+
+export function validatePluginManifestData(data: unknown): ValidationResult {
+  const valid = validatePluginManifest(data);
+  return toResult(valid, validatePluginManifest.errors);
 }
 
 export function validateToolInput(

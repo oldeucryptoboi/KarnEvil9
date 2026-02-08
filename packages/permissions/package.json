@@ -1,5 +1,5 @@
 {
-  "name": "@openflaw/permissions",
+  "name": "@openvger/permissions",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
@@ -11,8 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@openflaw/schemas": "workspace:*",
-    "@openflaw/journal": "workspace:*",
+    "@openvger/schemas": "workspace:*",
+    "@openvger/journal": "workspace:*",
     "uuid": "^11.0.0"
   }
 }

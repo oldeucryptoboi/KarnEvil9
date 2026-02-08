@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolve } from "node:path";
-import type { ToolManifest } from "@openflaw/schemas";
+import type { ToolManifest } from "@openvger/schemas";
 import { ToolRegistry } from "./tool-registry.js";
 
 const TOOLS_DIR = resolve(import.meta.dirname ?? ".", "../../../tools/examples");

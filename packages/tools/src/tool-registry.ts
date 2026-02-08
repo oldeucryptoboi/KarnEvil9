@@ -2,8 +2,8 @@ import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import yaml from "js-yaml";
-import type { ToolManifest, ToolSchemaForPlanner } from "@openflaw/schemas";
-import { validateToolManifestData } from "@openflaw/schemas";
+import type { ToolManifest, ToolSchemaForPlanner } from "@openvger/schemas";
+import { validateToolManifestData } from "@openvger/schemas";
 
 export class ToolRegistry {
   private tools = new Map<string, ToolManifest>();
@@ -44,6 +44,10 @@ export class ToolRegistry {
       }
     }
     return loaded;
+  }
+
+  unregister(name: string): boolean {
+    return this.tools.delete(name);
   }
 
   get(name: string): ToolManifest | undefined { return this.tools.get(name); }

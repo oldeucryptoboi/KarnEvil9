@@ -7,8 +7,10 @@
     { "path": "packages/memory" },
     { "path": "packages/tools" },
     { "path": "packages/planner" },
+    { "path": "packages/plugins" },
     { "path": "packages/kernel" },
     { "path": "packages/api" },
+    { "path": "packages/browser-relay" },
     { "path": "packages/cli" }
   ]
 }

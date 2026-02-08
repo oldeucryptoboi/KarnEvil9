@@ -1,0 +1,24 @@
+{
+  "name": "@openvger/plugins",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@openvger/schemas": "workspace:*",
+    "@openvger/journal": "workspace:*",
+    "@openvger/tools": "workspace:*",
+    "@openvger/permissions": "workspace:*",
+    "js-yaml": "^4.1.0",
+    "uuid": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9"
+  }
+}

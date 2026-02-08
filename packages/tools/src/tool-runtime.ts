@@ -3,34 +3,80 @@ import type {
   ToolManifest,
   ToolExecutionRequest,
   ToolExecutionResult,
-  ExecutionMode,
+  ToolHandler,
   Permission,
   PermissionRequest,
-} from "@openflaw/schemas";
-import { validateToolInput, validateToolOutput } from "@openflaw/schemas";
-import { PermissionEngine } from "@openflaw/permissions";
-import type { Journal } from "@openflaw/journal";
+  PolicyProfile,
+  PermissionCheckResult,
+} from "@openvger/schemas";
+import { validateToolInput, validateToolOutput } from "@openvger/schemas";
+import { PermissionEngine } from "@openvger/permissions";
+import type { Journal } from "@openvger/journal";
 import { ToolRegistry } from "./tool-registry.js";
+import { PolicyViolationError } from "./policy-enforcer.js";
 
-export type ToolHandler = (
-  input: Record<string, unknown>,
-  mode: ExecutionMode
-) => Promise<unknown>;
+export type { ToolHandler } from "@openvger/schemas";
+
+export class CircuitBreaker {
+  private failures = new Map<string, { count: number; trippedAt: number }>();
+  private threshold: number;
+  private cooldownMs: number;
+
+  constructor(threshold = 5, cooldownMs = 30000) {
+    this.threshold = threshold;
+    this.cooldownMs = cooldownMs;
+  }
+
+  recordFailure(toolName: string): void {
+    const state = this.failures.get(toolName) ?? { count: 0, trippedAt: 0 };
+    state.count++;
+    if (state.count >= this.threshold) {
+      state.trippedAt = Date.now();
+    }
+    this.failures.set(toolName, state);
+  }
+
+  recordSuccess(toolName: string): void {
+    this.failures.delete(toolName);
+  }
+
+  isOpen(toolName: string): boolean {
+    const state = this.failures.get(toolName);
+    if (!state || state.count < this.threshold) return false;
+    const elapsed = Date.now() - state.trippedAt;
+    if (elapsed >= this.cooldownMs) {
+      // Half-open: allow one attempt, reset trippedAt so next check blocks again
+      state.trippedAt = Date.now();
+      return false;
+    }
+    return true;
+  }
+}
 
 export class ToolRuntime {
   private registry: ToolRegistry;
   private permissions: PermissionEngine;
   private journal: Journal;
+  private policy: PolicyProfile;
   private handlers = new Map<string, ToolHandler>();
+  private breaker = new CircuitBreaker();
 
-  constructor(registry: ToolRegistry, permissions: PermissionEngine, journal: Journal) {
+  constructor(registry: ToolRegistry, permissions: PermissionEngine, journal: Journal, policy?: PolicyProfile) {
     this.registry = registry;
     this.permissions = permissions;
     this.journal = journal;
+    this.policy = policy ?? { allowed_paths: [], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: false };
   }
 
   registerHandler(toolName: string, handler: ToolHandler): void {
+    if (this.handlers.has(toolName)) {
+      throw new Error(`Handler already registered for tool "${toolName}". Unregister first.`);
+    }
     this.handlers.set(toolName, handler);
+  }
+
+  unregisterHandler(toolName: string): void {
+    this.handlers.delete(toolName);
   }
 
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
@@ -40,14 +86,55 @@ export class ToolRuntime {
       return this.fail(request, startTime, "TOOL_NOT_FOUND", `Tool "${request.tool_name}" not registered`);
     }
 
+    if (this.breaker.isOpen(request.tool_name)) {
+      return this.fail(request, startTime, "CIRCUIT_BREAKER_OPEN", `Circuit breaker open for tool "${request.tool_name}"`);
+    }
+
     const inputValidation = validateToolInput(request.input, manifest.input_schema);
     if (!inputValidation.valid) {
       return this.fail(request, startTime, "INVALID_INPUT", `Input validation failed: ${inputValidation.errors.join(", ")}`);
     }
 
-    const permissionsOk = await this.checkPermissions(request, manifest);
-    if (!permissionsOk) {
-      return this.fail(request, startTime, "PERMISSION_DENIED", "Required permissions were denied");
+    let permResult: PermissionCheckResult;
+    try {
+      permResult = await this.checkPermissions(request, manifest);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return this.fail(request, startTime, "PERMISSION_DENIED", `Permission check failed: ${message}`);
+    }
+    if (!permResult.allowed) {
+      const msg = permResult.alternative
+        ? `Permission denied. Try "${permResult.alternative.tool_name}" instead.`
+        : "Required permissions were denied";
+      return this.fail(request, startTime, "PERMISSION_DENIED", msg);
+    }
+
+    // Apply constraints — input overrides
+    if (permResult.constraints?.input_overrides) {
+      request = { ...request, input: { ...request.input, ...permResult.constraints.input_overrides } };
+      // Re-validate input after overrides to prevent constraint-based injection
+      const revalidation = validateToolInput(request.input, manifest.input_schema);
+      if (!revalidation.valid) {
+        return this.fail(request, startTime, "INVALID_INPUT", `Input validation failed after constraint overrides: ${revalidation.errors.join(", ")}`);
+      }
+    }
+
+    // Apply path constraints to effective policy
+    let effectivePolicy = this.policy;
+    if (permResult.constraints?.readonly_paths || permResult.constraints?.writable_paths) {
+      effectivePolicy = {
+        ...this.policy,
+        readonly_paths: permResult.constraints.readonly_paths,
+        writable_paths: permResult.constraints.writable_paths,
+      };
+    }
+
+    // Observed execution telemetry
+    if (permResult.observed) {
+      await this.journal.emit(request.session_id, "permission.observed_execution", {
+        tool_name: request.tool_name,
+        input: request.input,
+      });
     }
 
     await this.journal.emit(request.session_id, "tool.started", {
@@ -58,17 +145,29 @@ export class ToolRuntime {
     });
 
     try {
-      const output = await this.executeWithTimeout(request, manifest);
+      const timeoutOverride = permResult.constraints?.max_duration_ms;
+      const output = await this.executeWithTimeout(request, manifest, effectivePolicy, timeoutOverride);
 
       const outputValidation = validateToolOutput(output, manifest.output_schema);
       if (!outputValidation.valid) {
+        this.breaker.recordFailure(request.tool_name);
         return this.fail(request, startTime, "INVALID_OUTPUT", `Output validation failed: ${outputValidation.errors.join(", ")}`);
+      }
+
+      // Apply output redaction if constraints specify fields to redact
+      let finalOutput = output;
+      if (permResult.constraints?.output_redact_fields && finalOutput && typeof finalOutput === "object") {
+        const redacted = { ...(finalOutput as Record<string, unknown>) };
+        for (const field of permResult.constraints.output_redact_fields) {
+          if (field in redacted) redacted[field] = "[REDACTED]";
+        }
+        finalOutput = redacted;
       }
 
       const result: ToolExecutionResult = {
         request_id: request.request_id,
         ok: true,
-        result: output,
+        result: finalOutput,
         duration_ms: Date.now() - startTime,
         mode: request.mode,
       };
@@ -79,15 +178,26 @@ export class ToolRuntime {
         duration_ms: result.duration_ms,
       });
 
+      this.breaker.recordSuccess(request.tool_name);
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      this.breaker.recordFailure(request.tool_name);
+      if (err instanceof PolicyViolationError) {
+        await this.journal.emit(request.session_id, "policy.violated", {
+          request_id: request.request_id,
+          tool_name: request.tool_name,
+          violation_code: "POLICY_VIOLATION",
+          violation_message: message,
+        });
+        return this.fail(request, startTime, "POLICY_VIOLATION", message);
+      }
       return this.fail(request, startTime, "EXECUTION_ERROR", message);
     }
   }
 
-  private async checkPermissions(request: ToolExecutionRequest, manifest: ToolManifest): Promise<boolean> {
-    if (manifest.permissions.length === 0) return true;
+  private async checkPermissions(request: ToolExecutionRequest, manifest: ToolManifest): Promise<PermissionCheckResult> {
+    if (manifest.permissions.length === 0) return { allowed: true };
     const permissions: Permission[] = manifest.permissions.map((scope) => PermissionEngine.parse(scope));
     const permRequest: PermissionRequest = {
       request_id: uuid(),
@@ -99,14 +209,15 @@ export class ToolRuntime {
     return this.permissions.check(permRequest);
   }
 
-  private async executeWithTimeout(request: ToolExecutionRequest, manifest: ToolManifest): Promise<unknown> {
+  private async executeWithTimeout(request: ToolExecutionRequest, manifest: ToolManifest, effectivePolicy: PolicyProfile, timeoutOverride?: number): Promise<unknown> {
     if (request.mode === "mock") return this.executeMock(manifest);
     const handler = this.handlers.get(request.tool_name);
     if (!handler) throw new Error(`No handler registered for tool "${request.tool_name}"`);
+    const timeout = timeoutOverride ?? manifest.timeout_ms;
     return Promise.race([
-      handler(request.input, request.mode),
+      handler(request.input, request.mode, effectivePolicy),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Tool "${request.tool_name}" timed out after ${manifest.timeout_ms}ms`)), manifest.timeout_ms)
+        setTimeout(() => reject(new Error(`Tool "${request.tool_name}" timed out after ${timeout}ms`)), timeout)
       ),
     ]);
   }

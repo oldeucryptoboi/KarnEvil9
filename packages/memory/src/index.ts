@@ -1,1 +1,1 @@
-export { TaskStateManager, WorkingMemoryManager, LongTermMemory } from "./memory.js";
+export { TaskStateManager, WorkingMemoryManager, LongTermMemory, ActiveMemory, extractLesson } from "./memory.js";

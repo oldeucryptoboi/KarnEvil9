@@ -8,12 +8,14 @@
   "exclude": ["dist", "**/*.test.ts"],
   "references": [
     { "path": "../schemas" },
+    { "path": "../browser-relay" },
     { "path": "../kernel" },
     { "path": "../journal" },
     { "path": "../tools" },
     { "path": "../permissions" },
     { "path": "../planner" },
     { "path": "../memory" },
-    { "path": "../api" }
+    { "path": "../api" },
+    { "path": "../plugins" }
   ]
 }

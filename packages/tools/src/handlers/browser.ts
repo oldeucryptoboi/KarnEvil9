@@ -1,0 +1,107 @@
+import type { ToolHandler } from "../tool-runtime.js";
+import type { ExecutionMode, PolicyProfile } from "@openvger/schemas";
+import { assertEndpointAllowed } from "../policy-enforcer.js";
+
+interface Target {
+  role?: string;
+  name?: string;
+  label?: string;
+  text?: string;
+  placeholder?: string;
+  selector?: string;
+  nth?: number;
+}
+
+const RELAY_URL = process.env.OPENVGER_RELAY_URL ?? "http://localhost:9222";
+
+const MOCK_RESPONSE = {
+  success: true,
+  url: "https://example.com",
+  title: "Example Domain",
+  snapshot: 'document [role=document]\n  heading "Example Domain" [role=heading, level=1]\n  paragraph [role=paragraph]\n    text "This domain is for use in examples."',
+};
+
+const VALID_ACTIONS = new Set([
+  "navigate", "snapshot", "click", "fill", "select",
+  "hover", "keyboard", "screenshot", "get_text", "evaluate", "wait",
+]);
+
+export const browserHandler: ToolHandler = async (
+  input: Record<string, unknown>,
+  mode: ExecutionMode,
+  policy: PolicyProfile,
+): Promise<unknown> => {
+  if (typeof input.action !== "string") {
+    return { success: false, error: "input.action must be a string" };
+  }
+  const action = input.action;
+
+  if (!VALID_ACTIONS.has(action)) {
+    return { success: false, error: `Unknown action: "${action}". Valid actions: ${[...VALID_ACTIONS].join(", ")}` };
+  }
+
+  if (mode === "mock") {
+    return MOCK_RESPONSE;
+  }
+
+  if (mode === "dry_run") {
+    return dryRun(action, input);
+  }
+
+  // Real mode — enforce policy for navigate
+  if (action === "navigate") {
+    if (typeof input.url !== "string") {
+      return { success: false, error: "input.url must be a string for navigate action" };
+    }
+    assertEndpointAllowed(input.url, policy.allowed_endpoints);
+  }
+
+  // Forward to relay server
+  const response = await fetch(`${RELAY_URL}/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return response.json();
+};
+
+function dryRun(action: string, input: Record<string, unknown>): unknown {
+  const target = input.target as Target | undefined;
+  const targetDesc = target ? describeTarget(target) : "";
+
+  switch (action) {
+    case "navigate":
+      return { success: true, url: `[dry_run] Would navigate to ${input.url}` };
+    case "snapshot":
+      return { success: true, snapshot: "[dry_run] Would capture accessibility tree" };
+    case "click":
+      return { success: true, url: `[dry_run] Would click ${targetDesc}` };
+    case "fill":
+      return { success: true, url: `[dry_run] Would fill ${targetDesc} with "${input.value}"` };
+    case "select":
+      return { success: true, url: `[dry_run] Would select "${input.value}" on ${targetDesc}` };
+    case "hover":
+      return { success: true, url: `[dry_run] Would hover ${targetDesc}` };
+    case "keyboard":
+      return { success: true, url: `[dry_run] Would press key "${input.key}"` };
+    case "screenshot":
+      return { success: true, url: "[dry_run] Would take screenshot" };
+    case "get_text":
+      return { success: true, text: `[dry_run] Would get text from ${targetDesc || "page"}` };
+    case "evaluate":
+      return { success: true, url: "[dry_run] Would evaluate script" };
+    case "wait":
+      return { success: true, url: `[dry_run] Would wait for ${targetDesc}` };
+    default:
+      return { success: false, error: `Unknown action: "${action}"` };
+  }
+}
+
+function describeTarget(target: Target): string {
+  if (target.role) return `role=${target.role}${target.name ? ` name="${target.name}"` : ""}`;
+  if (target.label) return `label="${target.label}"`;
+  if (target.placeholder) return `placeholder="${target.placeholder}"`;
+  if (target.text) return `text="${target.text}"`;
+  if (target.selector) return `selector="${target.selector}"`;
+  return "(empty target)";
+}

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenFlaw CDP Bridge</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>OpenFlaw</h1>
+
+    <div class="status-row">
+      <span class="indicator" id="ws-indicator"></span>
+      <span class="status-text" id="ws-status">Relay: Checking...</span>
+    </div>
+
+    <div class="status-row">
+      <span class="indicator" id="dbg-indicator"></span>
+      <span class="status-text" id="dbg-status">Debugger: Checking...</span>
+    </div>
+
+    <div class="details" id="details"></div>
+
+    <div class="actions">
+      <button id="attach-btn" disabled>Attach to This Tab</button>
+      <button id="detach-btn" disabled>Detach</button>
+    </div>
+
+    <div class="bridge-url">
+      <span class="label">Bridge:</span>
+      <span id="bridge-url-text"></span>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

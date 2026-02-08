@@ -1,0 +1,25 @@
+{
+  "name": "@openvger/browser-relay",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "express": "^5.0.0",
+    "ws": "^8.0.0"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.58.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/ws": "^8.0.0"
+  }
+}

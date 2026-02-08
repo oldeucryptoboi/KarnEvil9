@@ -1,19 +1,31 @@
 {
-  "name": "openflaw-monorepo",
+  "name": "openvger-monorepo",
   "private": true,
-  "description": "OpenFlaw — Deterministic agent runtime with explicit plans, typed tools, permissions, and replay",
+  "description": "OpenVger — Deterministic agent runtime with explicit plans, typed tools, permissions, and replay",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "clean": "pnpm -r clean",
     "dev": "pnpm -r --parallel dev",
     "lint": "pnpm -r lint"
   },
   "devDependencies": {
+    "@openvger/api": "workspace:^",
+    "@openvger/browser-relay": "workspace:^",
+    "@openvger/cli": "workspace:^",
+    "@openvger/journal": "workspace:^",
+    "@openvger/kernel": "workspace:^",
+    "@openvger/permissions": "workspace:^",
+    "@openvger/planner": "workspace:^",
+    "@openvger/plugins": "workspace:^",
+    "@openvger/schemas": "workspace:^",
+    "@openvger/tools": "workspace:^",
     "@types/node": "^22.0.0",
     "@types/uuid": "^10.0.0",
     "@vitest/coverage-v8": "^3.0.0",
     "typescript": "^5.7.0",
+    "uuid": "^11.0.0",
     "vitest": "^3.0.0"
   },
   "engines": {

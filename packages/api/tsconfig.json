@@ -10,6 +10,7 @@
     { "path": "../schemas" },
     { "path": "../kernel" },
     { "path": "../tools" },
-    { "path": "../journal" }
+    { "path": "../journal" },
+    { "path": "../plugins" }
   ]
 }

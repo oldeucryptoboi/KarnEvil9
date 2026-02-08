@@ -1,0 +1,10 @@
+id: example-logger
+name: Example Logger
+version: "1.0.0"
+description: A minimal plugin that logs step execution via a before_step hook
+entry: index.js
+permissions: []
+provides:
+  hooks:
+    - before_step
+    - after_step

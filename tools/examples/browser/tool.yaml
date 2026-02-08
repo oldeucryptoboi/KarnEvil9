@@ -1,0 +1,115 @@
+name: browser
+version: "1.0.0"
+description: >
+  Automate a Chromium browser. Navigate pages, interact with elements using
+  semantic locators (role, label, text, placeholder), take screenshots, and
+  extract content.
+runner: internal
+input_schema:
+  type: object
+  required: [action]
+  oneOf:
+    - # navigate
+      properties:
+        action: { type: string, const: navigate }
+        url: { type: string }
+      required: [action, url]
+      additionalProperties: false
+    - # snapshot — get accessibility tree of current page
+      properties:
+        action: { type: string, const: snapshot }
+      required: [action]
+      additionalProperties: false
+    - # click
+      properties:
+        action: { type: string, const: click }
+        target: { $ref: "#/$defs/target" }
+      required: [action, target]
+      additionalProperties: false
+    - # fill — type text into an input
+      properties:
+        action: { type: string, const: fill }
+        target: { $ref: "#/$defs/target" }
+        value: { type: string }
+      required: [action, target, value]
+      additionalProperties: false
+    - # select — select option from dropdown
+      properties:
+        action: { type: string, const: select }
+        target: { $ref: "#/$defs/target" }
+        value: { type: string }
+      required: [action, target, value]
+      additionalProperties: false
+    - # hover
+      properties:
+        action: { type: string, const: hover }
+        target: { $ref: "#/$defs/target" }
+      required: [action, target]
+      additionalProperties: false
+    - # keyboard — press key(s)
+      properties:
+        action: { type: string, const: keyboard }
+        key: { type: string }
+      required: [action, key]
+      additionalProperties: false
+    - # screenshot
+      properties:
+        action: { type: string, const: screenshot }
+        full_page: { type: boolean, default: false }
+      required: [action]
+      additionalProperties: false
+    - # get_text — extract text from element or page
+      properties:
+        action: { type: string, const: get_text }
+        target: { $ref: "#/$defs/target" }
+      required: [action]
+      additionalProperties: false
+    - # evaluate — run JS in page context
+      properties:
+        action: { type: string, const: evaluate }
+        script: { type: string }
+      required: [action, script]
+      additionalProperties: false
+    - # wait — wait for element or timeout
+      properties:
+        action: { type: string, const: wait }
+        target: { $ref: "#/$defs/target" }
+        timeout_ms: { type: number, default: 5000 }
+      required: [action]
+      additionalProperties: false
+  $defs:
+    target:
+      type: object
+      properties:
+        role: { type: string }
+        name: { type: string }
+        label: { type: string }
+        text: { type: string }
+        placeholder: { type: string }
+        selector: { type: string }
+        nth: { type: integer, minimum: 0 }
+      additionalProperties: false
+output_schema:
+  type: object
+  properties:
+    success: { type: boolean }
+    url: { type: string }
+    title: { type: string }
+    snapshot: { type: string }
+    text: { type: string }
+    screenshot_base64: { type: string }
+    element_found: { type: boolean }
+    error: { type: string }
+    result: {}
+  additionalProperties: false
+permissions:
+  - "network:browser:https"
+timeout_ms: 30000
+supports:
+  mock: true
+  dry_run: true
+mock_responses:
+  - success: true
+    url: "https://example.com"
+    title: "Example Domain"
+    snapshot: "document [role=document]\n  heading \"Example Domain\" [role=heading, level=1]\n  paragraph [role=paragraph]\n    text \"This domain is for use in examples.\""

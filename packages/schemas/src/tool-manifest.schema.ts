@@ -6,14 +6,14 @@ export const ToolManifestSchema = {
   ],
   properties: {
     name: { type: "string", pattern: "^[a-z][a-z0-9_-]*$", minLength: 1, maxLength: 64 },
-    version: { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+" },
+    version: { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" },
     description: { type: "string", minLength: 1 },
     runner: { type: "string", enum: ["shell", "http", "internal", "container"] },
     input_schema: { type: "object" },
     output_schema: { type: "object" },
     permissions: {
       type: "array",
-      items: { type: "string", pattern: "^[a-z]+:[a-z_]+:[a-zA-Z0-9_./-]+" },
+      items: { type: "string", pattern: "^[a-z]+:[a-z_]+:[a-zA-Z0-9_./-]+$" },
     },
     timeout_ms: { type: "number", minimum: 100, maximum: 600000 },
     supports: {

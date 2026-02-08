@@ -11,6 +11,7 @@
     { "path": "../journal" },
     { "path": "../tools" },
     { "path": "../permissions" },
-    { "path": "../memory" }
+    { "path": "../memory" },
+    { "path": "../plugins" }
   ]
 }

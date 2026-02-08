@@ -1,27 +1,33 @@
 {
-  "name": "@openflaw/cli",
+  "name": "@openvger/cli",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "openflaw": "dist/index.js"
+    "openvger": "dist/index.js"
   },
   "scripts": {
     "build": "tsc -b",
     "dev": "tsc -b --watch",
+    "test": "vitest run",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@openflaw/schemas": "workspace:*",
-    "@openflaw/kernel": "workspace:*",
-    "@openflaw/journal": "workspace:*",
-    "@openflaw/tools": "workspace:*",
-    "@openflaw/permissions": "workspace:*",
-    "@openflaw/planner": "workspace:*",
-    "@openflaw/memory": "workspace:*",
-    "@openflaw/api": "workspace:*",
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@openvger/api": "workspace:*",
+    "@openvger/browser-relay": "workspace:*",
+    "@openvger/journal": "workspace:*",
+    "@openvger/kernel": "workspace:*",
+    "@openvger/memory": "workspace:*",
+    "@openvger/permissions": "workspace:*",
+    "@openvger/planner": "workspace:*",
+    "@openvger/plugins": "workspace:*",
+    "@openvger/schemas": "workspace:*",
+    "@openvger/tools": "workspace:*",
     "commander": "^13.0.0",
+    "dotenv": "^17.2.4",
+    "openai": "^4.77.0",
     "uuid": "^11.0.0"
   }
 }

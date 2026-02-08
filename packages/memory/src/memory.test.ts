@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { v4 as uuid } from "uuid";
 import { TaskStateManager, WorkingMemoryManager, LongTermMemory } from "./memory.js";
-import type { Plan, StepResult } from "@openflaw/schemas";
+import type { Plan, StepResult } from "@openvger/schemas";
 
 describe("TaskStateManager", () => {
   const makePlan = (): Plan => ({
@@ -94,14 +94,19 @@ describe("TaskStateManager", () => {
     expect(snap.total_steps).toBe(2);
     expect(snap.completed_steps).toBe(1);
     expect(snap.failed_steps).toBe(1);
+    // step_titles maps step IDs to titles from the plan
+    const titles = snap.step_titles as Record<string, string>;
+    expect(titles["step-1"]).toBe("Step 1");
+    expect(titles["step-2"]).toBe("Step 2");
   });
 
-  it("snapshot without plan", () => {
+  it("snapshot without plan has empty step_titles", () => {
     const mgr = new TaskStateManager("sess-1");
     const snap = mgr.getSnapshot();
     expect(snap.has_plan).toBe(false);
     expect(snap.plan_goal).toBeNull();
     expect(snap.total_steps).toBe(0);
+    expect(snap.step_titles).toEqual({});
   });
 });
 

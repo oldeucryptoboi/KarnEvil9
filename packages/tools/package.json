@@ -1,5 +1,5 @@
 {
-  "name": "@openflaw/tools",
+  "name": "@openvger/tools",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
@@ -11,9 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@openflaw/schemas": "workspace:*",
-    "@openflaw/journal": "workspace:*",
-    "@openflaw/permissions": "workspace:*",
+    "@openvger/journal": "workspace:*",
+    "@openvger/permissions": "workspace:*",
+    "@openvger/schemas": "workspace:*",
     "js-yaml": "^4.1.0",
     "uuid": "^11.0.0"
   },

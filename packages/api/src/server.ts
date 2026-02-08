@@ -1,30 +1,176 @@
 import express from "express";
 import { v4 as uuid } from "uuid";
-import type { Kernel } from "@openflaw/kernel";
-import type { ToolRegistry } from "@openflaw/tools";
-import type { Journal } from "@openflaw/journal";
-import type { Task, ApprovalDecision } from "@openflaw/schemas";
+import type { Kernel } from "@openvger/kernel";
+import { Kernel as KernelClass } from "@openvger/kernel";
+import type { ToolRegistry, ToolRuntime } from "@openvger/tools";
+import type { Journal } from "@openvger/journal";
+import type { PermissionEngine } from "@openvger/permissions";
+import type { Planner, Task, ApprovalDecision, ExecutionMode, SessionLimits, PolicyProfile, JournalEvent } from "@openvger/schemas";
+import type { PluginRegistry } from "@openvger/plugins";
 import type { ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
+
+// ─── Input Validation ──────────────────────────────────────────────
+
+const VALID_MODES = new Set(["mock", "dry_run", "real"]);
+const MAX_TEXT_LENGTH = 10000;
+const MAX_SUBMITTED_BY_LENGTH = 200;
+
+function validateSessionInput(body: unknown): string | null {
+  if (!body || typeof body !== "object") return "Request body must be a JSON object";
+  const b = body as Record<string, unknown>;
+
+  if (typeof b.text !== "string" || b.text.trim().length === 0) return "text is required and must be a non-empty string";
+  if (b.text.length > MAX_TEXT_LENGTH) return `text must be at most ${MAX_TEXT_LENGTH} characters`;
+
+  if (b.submitted_by !== undefined && (typeof b.submitted_by !== "string" || b.submitted_by.length > MAX_SUBMITTED_BY_LENGTH)) {
+    return `submitted_by must be a string of at most ${MAX_SUBMITTED_BY_LENGTH} characters`;
+  }
+
+  if (b.mode !== undefined && (typeof b.mode !== "string" || !VALID_MODES.has(b.mode))) {
+    return `mode must be one of: ${[...VALID_MODES].join(", ")}`;
+  }
+
+  if (b.constraints !== undefined && (typeof b.constraints !== "object" || Array.isArray(b.constraints))) {
+    return "constraints must be an object";
+  }
+
+  if (b.limits !== undefined) {
+    if (typeof b.limits !== "object" || Array.isArray(b.limits)) return "limits must be an object";
+    const limits = b.limits as Record<string, unknown>;
+    for (const key of ["max_steps", "max_duration_ms", "max_cost_usd", "max_tokens"]) {
+      if (limits[key] !== undefined && (typeof limits[key] !== "number" || (limits[key] as number) <= 0)) {
+        return `limits.${key} must be a positive number`;
+      }
+    }
+  }
+
+  if (b.policy !== undefined) {
+    if (typeof b.policy !== "object" || Array.isArray(b.policy)) return "policy must be an object";
+  }
+
+  return null; // valid
+}
+
+function validateApprovalInput(body: unknown): string | null {
+  if (!body || typeof body !== "object") return "Request body must be a JSON object";
+  const b = body as Record<string, unknown>;
+
+  if (b.decision === undefined) return "decision is required";
+
+  if (typeof b.decision === "string") {
+    if (!["allow_once", "allow_session", "allow_always", "deny"].includes(b.decision)) {
+      return "decision must be one of: allow_once, allow_session, allow_always, deny";
+    }
+    return null;
+  }
+
+  if (typeof b.decision === "object" && b.decision !== null) {
+    const d = b.decision as Record<string, unknown>;
+    if (typeof d.type !== "string") return "decision.type is required for object decisions";
+    if (!["allow_constrained", "allow_observed", "deny_with_alternative"].includes(d.type)) {
+      return `Invalid decision type: ${d.type}`;
+    }
+    return null;
+  }
+
+  return "decision must be a string or object";
+}
+
+function validateCompactInput(body: unknown): string | null {
+  if (!body || typeof body !== "object") return "Request body must be a JSON object";
+  const b = body as Record<string, unknown>;
+
+  if (b.retain_sessions !== undefined) {
+    if (!Array.isArray(b.retain_sessions)) return "retain_sessions must be an array";
+    if (!b.retain_sessions.every((s: unknown) => typeof s === "string")) return "retain_sessions must contain only strings";
+  }
+
+  return null;
+}
 
 interface PendingApproval {
   resolve: (decision: ApprovalDecision) => void;
   request: unknown;
 }
 
+interface SSEClient {
+  res: ServerResponse;
+  paused: boolean;
+  missedEvents: number;
+}
+
+export interface ApiServerConfig {
+  toolRegistry: ToolRegistry;
+  journal: Journal;
+  toolRuntime?: ToolRuntime;
+  permissions?: PermissionEngine;
+  planner?: Planner;
+  pluginRegistry?: PluginRegistry;
+  defaultMode?: ExecutionMode;
+  defaultLimits?: SessionLimits;
+  defaultPolicy?: PolicyProfile;
+  maxConcurrentSessions?: number;
+  maxSseClientsPerSession?: number;
+  agentic?: boolean;
+  apiToken?: string;
+}
+
 export class ApiServer {
   private app: express.Application;
   private kernels = new Map<string, Kernel>();
   private toolRegistry: ToolRegistry;
+  private toolRuntime?: ToolRuntime;
   private journal: Journal;
+  private permissions?: PermissionEngine;
+  private planner?: Planner;
+  private defaultMode: ExecutionMode;
+  private defaultLimits: SessionLimits;
+  private defaultPolicy: PolicyProfile;
   private pendingApprovals = new Map<string, PendingApproval>();
-  private sseClients = new Map<string, ServerResponse[]>();
+  private sseClients = new Map<string, SSEClient[]>();
+  private pluginRegistry?: PluginRegistry;
+  private maxConcurrentSessions: number;
+  private maxSseClientsPerSession: number;
+  private agentic: boolean;
+  private apiToken?: string;
 
-  constructor(toolRegistry: ToolRegistry, journal: Journal) {
+  constructor(config: ApiServerConfig);
+  constructor(toolRegistry: ToolRegistry, journal: Journal);
+  constructor(configOrRegistry: ApiServerConfig | ToolRegistry, journal?: Journal) {
     this.app = express();
-    this.app.use(express.json());
-    this.toolRegistry = toolRegistry;
-    this.journal = journal;
+    this.app.use(express.json({ limit: "1mb" }));
+    if (journal !== undefined) {
+      // Legacy constructor: (toolRegistry, journal)
+      const toolRegistry = configOrRegistry as ToolRegistry;
+      this.toolRegistry = toolRegistry;
+      this.journal = journal;
+      // toolRuntime, permissions, planner remain undefined (optional)
+      this.defaultMode = "mock";
+      this.defaultLimits = { max_steps: 20, max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000 };
+      this.defaultPolicy = { allowed_paths: [], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
+      this.maxConcurrentSessions = 50;
+      this.maxSseClientsPerSession = 10;
+      this.agentic = false;
+      // No token in legacy constructor — unauthenticated
+    } else {
+      const config = configOrRegistry as ApiServerConfig;
+      this.toolRegistry = config.toolRegistry;
+      this.toolRuntime = config.toolRuntime;
+      this.journal = config.journal;
+      this.permissions = config.permissions;
+      this.planner = config.planner;
+      this.pluginRegistry = config.pluginRegistry;
+      this.defaultMode = config.defaultMode ?? "mock";
+      this.defaultLimits = config.defaultLimits ?? { max_steps: 20, max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000 };
+      this.defaultPolicy = config.defaultPolicy ?? { allowed_paths: [], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
+      this.maxConcurrentSessions = config.maxConcurrentSessions ?? 50;
+      this.maxSseClientsPerSession = config.maxSseClientsPerSession ?? 10;
+      this.agentic = config.agentic ?? false;
+      this.apiToken = config.apiToken;
+    }
     this.setupRoutes();
+    this.journal.on((event) => { this.broadcastEvent(event.session_id, event); });
   }
 
   registerKernel(sessionId: string, kernel: Kernel): void { this.kernels.set(sessionId, kernel); }
@@ -36,26 +182,158 @@ export class ApiServer {
   broadcastEvent(sessionId: string, data: unknown): void {
     const clients = this.sseClients.get(sessionId);
     if (!clients) return;
-    const msg = `data: ${JSON.stringify(data)}\n\n`;
-    for (const res of clients) res.write(msg);
+    const event = data as JournalEvent;
+    const seqId = event.seq !== undefined ? `id: ${event.seq}\n` : "";
+    const msg = `${seqId}data: ${JSON.stringify(data)}\n\n`;
+    for (const client of clients) {
+      if (client.paused) {
+        client.missedEvents++;
+        if (client.missedEvents > 1000) {
+          client.res.end();
+          const remaining = clients.filter((c) => c !== client);
+          if (remaining.length === 0) this.sseClients.delete(sessionId);
+          else this.sseClients.set(sessionId, remaining);
+        }
+        continue;
+      }
+      const ok = client.res.write(msg);
+      if (!ok) {
+        client.paused = true;
+        client.missedEvents++;
+      }
+    }
   }
 
   listen(port: number): void {
-    this.app.listen(port, () => { console.log(`OpenFlaw API listening on http://localhost:${port}`); });
+    this.app.listen(port, () => { console.log(`OpenVger API listening on http://localhost:${port}`); });
   }
 
   getExpressApp(): express.Application { return this.app; }
 
+  async discoverRecoverableSessions(): Promise<string[]> {
+    const allEvents = await this.journal.readAll();
+    const sessions = new Map<string, Set<string>>();
+    for (const event of allEvents) {
+      const types = sessions.get(event.session_id) ?? new Set();
+      types.add(event.type);
+      sessions.set(event.session_id, types);
+    }
+    const terminalTypes = new Set(["session.completed", "session.failed", "session.aborted"]);
+    const recoverable: string[] = [];
+    for (const [sessionId, types] of sessions) {
+      if (!types.has("session.started") || !types.has("plan.accepted")) continue;
+      if ([...types].some((t) => terminalTypes.has(t))) continue;
+      recoverable.push(sessionId);
+    }
+    return recoverable;
+  }
+
   private setupRoutes(): void {
     const router = express.Router();
 
+    // Health check is always unauthenticated
+    router.get("/health", async (_req, res) => {
+      const journalHealth = await this.journal.checkHealth();
+      const toolCount = this.toolRegistry.list().length;
+      const activeSessionCount = this.kernels.size;
+
+      const journalStatus = journalHealth.writable ? "ok" as const : "error" as const;
+      const toolsStatus = toolCount > 0 ? "ok" as const : "warning" as const;
+      const diskWarning = journalHealth.disk_usage && journalHealth.disk_usage.usage_pct > 90;
+      const overallStatus = journalStatus === "error" ? "degraded" : diskWarning ? "warning" : "healthy";
+
+      res.json({
+        status: overallStatus,
+        version: "0.1.0",
+        timestamp: new Date().toISOString(),
+        checks: {
+          journal: {
+            status: journalStatus,
+            detail: journalHealth.writable ? "writable" : "not writable",
+            ...(journalHealth.disk_usage ? { disk_usage: journalHealth.disk_usage } : {}),
+          },
+          tools: { status: toolsStatus, loaded: toolCount },
+          sessions: { status: "ok", active: activeSessionCount },
+          planner: { status: this.planner ? "ok" : "unavailable" },
+          permissions: { status: this.permissions ? "ok" : "unavailable" },
+          runtime: { status: this.toolRuntime ? "ok" : "unavailable" },
+          plugins: {
+            status: this.pluginRegistry ? "ok" : "unavailable",
+            loaded: this.pluginRegistry?.listPlugins().filter((p) => p.status === "active").length ?? 0,
+            failed: this.pluginRegistry?.listPlugins().filter((p) => p.status === "failed").length ?? 0,
+          },
+        },
+      });
+    });
+
+    // Bearer token auth middleware — applied to all routes after /health
+    if (this.apiToken) {
+      const token = this.apiToken;
+      router.use((req, res, next) => {
+        const auth = req.headers.authorization;
+        if (!auth || !auth.startsWith("Bearer ")) {
+          res.status(401).json({ error: "Unauthorized" });
+          return;
+        }
+        const provided = Buffer.from(auth.slice(7));
+        const expected = Buffer.from(token);
+        if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+          res.status(401).json({ error: "Unauthorized" });
+          return;
+        }
+        next();
+      });
+    }
+
     router.post("/sessions", async (req, res) => {
       try {
-        const { text, constraints, submitted_by } = req.body as { text?: string; constraints?: Record<string, unknown>; submitted_by?: string };
-        if (!text) { res.status(400).json({ error: "text is required" }); return; }
+        const validationError = validateSessionInput(req.body);
+        if (validationError) { res.status(400).json({ error: validationError }); return; }
+        if (this.kernels.size >= this.maxConcurrentSessions) {
+          res.status(429).json({ error: "Max concurrent sessions reached" });
+          return;
+        }
+        const { text, constraints, submitted_by, mode, limits, policy } = req.body as {
+          text: string;
+          constraints?: Record<string, unknown>;
+          submitted_by?: string;
+          mode?: ExecutionMode;
+          limits?: Partial<SessionLimits>;
+          policy?: Partial<PolicyProfile>;
+        };
         const task: Task = { task_id: uuid(), text, constraints, submitted_by, created_at: new Date().toISOString() };
-        res.json({ task, message: "Task created. Use a kernel to start a session." });
-      } catch (err) { res.status(500).json({ error: String(err) }); }
+
+        if (this.toolRuntime && this.permissions && this.planner) {
+          const kernelConfig = {
+            journal: this.journal,
+            toolRuntime: this.toolRuntime,
+            toolRegistry: this.toolRegistry,
+            permissions: this.permissions,
+            planner: this.planner,
+            mode: mode ?? this.defaultMode,
+            limits: { ...this.defaultLimits, ...limits },
+            policy: { ...this.defaultPolicy, ...policy },
+            agentic: this.agentic,
+          };
+          const kernel = new KernelClass(kernelConfig);
+          const session = await kernel.createSession(task);
+          this.kernels.set(session.session_id, kernel);
+
+          // Run in background — broadcast failures to SSE clients
+          kernel.run().catch((err) => {
+            this.broadcastEvent(session.session_id, {
+              type: "session.failed",
+              session_id: session.session_id,
+              payload: { error: err instanceof Error ? err.message : String(err) },
+              timestamp: new Date().toISOString(),
+            });
+          });
+
+          res.json({ session_id: session.session_id, status: session.status, task });
+        } else {
+          res.json({ task, message: "Task created. Use a kernel to start a session." });
+        }
+      } catch (err) { console.error("[api] POST /sessions error:", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
     router.get("/sessions/:id", (req, res) => {
@@ -75,19 +353,50 @@ export class ApiServer {
       try {
         const events = await this.journal.readSession(req.params.id!);
         res.json({ events });
-      } catch (err) { res.status(500).json({ error: String(err) }); }
+      } catch (err) { console.error("[api] GET /sessions/:id/journal error:", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
-    router.get("/sessions/:id/stream", (req, res) => {
+    router.get("/sessions/:id/stream", async (req, res) => {
       const sessionId = req.params.id!;
+      const existingClients = this.sseClients.get(sessionId) ?? [];
+      if (existingClients.length >= this.maxSseClientsPerSession) {
+        res.status(429).json({ error: "Max SSE clients per session reached" });
+        return;
+      }
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+
+      // Replay catch-up from Last-Event-ID or after_seq query param
+      const lastEventId = req.headers["last-event-id"] as string | undefined;
+      const afterSeqParam = req.query.after_seq as string | undefined;
+      const afterSeq = lastEventId !== undefined ? parseInt(lastEventId, 10) : afterSeqParam !== undefined ? parseInt(afterSeqParam, 10) : undefined;
+
+      if (afterSeq !== undefined && !isNaN(afterSeq)) {
+        const events = await this.journal.readSession(sessionId);
+        for (const event of events) {
+          if (event.seq !== undefined && event.seq > afterSeq) {
+            const seqId = `id: ${event.seq}\n`;
+            res.write(`${seqId}data: ${JSON.stringify(event)}\n\n`);
+          }
+        }
+      }
+
+      const client: SSEClient = { res: res as unknown as ServerResponse, paused: false, missedEvents: 0 };
       const clients = this.sseClients.get(sessionId) ?? [];
-      clients.push(res as unknown as ServerResponse);
+      clients.push(client);
       this.sseClients.set(sessionId, clients);
-      const keepalive = setInterval(() => { res.write(":keepalive\n\n"); }, 15000);
+
+      const keepalive = setInterval(() => {
+        if (!client.paused) res.write(":keepalive\n\n");
+      }, 15000);
+
+      (res as unknown as ServerResponse).on("drain", () => {
+        client.paused = false;
+        client.missedEvents = 0;
+      });
+
       req.on("close", () => {
         clearInterval(keepalive);
-        const remaining = (this.sseClients.get(sessionId) ?? []).filter((c) => c !== (res as unknown as ServerResponse));
+        const remaining = (this.sseClients.get(sessionId) ?? []).filter((c) => c !== client);
         if (remaining.length === 0) this.sseClients.delete(sessionId);
         else this.sseClients.set(sessionId, remaining);
       });
@@ -99,12 +408,11 @@ export class ApiServer {
     });
 
     router.post("/approvals/:id", (req, res) => {
+      const approvalError = validateApprovalInput(req.body);
+      if (approvalError) { res.status(400).json({ error: approvalError }); return; }
       const approval = this.pendingApprovals.get(req.params.id!);
       if (!approval) { res.status(404).json({ error: "Approval not found" }); return; }
-      const { decision } = req.body as { decision?: ApprovalDecision };
-      if (!decision || !["allow_once", "allow_session", "allow_always", "deny"].includes(decision)) {
-        res.status(400).json({ error: "Invalid decision" }); return;
-      }
+      const { decision } = req.body as { decision: ApprovalDecision };
       approval.resolve(decision);
       this.pendingApprovals.delete(req.params.id!);
       res.json({ status: "resolved", decision });
@@ -129,11 +437,109 @@ export class ApiServer {
         const events = await this.journal.readSession(req.params.id!);
         if (events.length === 0) { res.status(404).json({ error: "No events found for session" }); return; }
         res.json({ session_id: req.params.id, event_count: events.length, events });
-      } catch (err) { res.status(500).json({ error: String(err) }); }
+      } catch (err) { console.error("[api] POST /sessions/:id/replay error:", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
-    router.get("/health", (_req, res) => {
-      res.json({ status: "ok", version: "0.1.0", tools_loaded: this.toolRegistry.list().length });
+    router.post("/sessions/:id/recover", async (req, res) => {
+      try {
+        const sessionId = req.params.id!;
+        if (this.kernels.has(sessionId)) {
+          res.status(409).json({ error: "Session already active" });
+          return;
+        }
+        if (!this.toolRuntime || !this.permissions || !this.planner) {
+          res.status(503).json({ error: "Server not fully configured for recovery" });
+          return;
+        }
+        const kernel = new KernelClass({
+          journal: this.journal,
+          toolRuntime: this.toolRuntime,
+          toolRegistry: this.toolRegistry,
+          permissions: this.permissions,
+          planner: this.planner,
+          mode: this.defaultMode,
+          limits: this.defaultLimits,
+          policy: this.defaultPolicy,
+        });
+        const session = await kernel.resumeSession(sessionId);
+        if (!session) {
+          res.status(404).json({ error: "Session not recoverable" });
+          return;
+        }
+        this.kernels.set(sessionId, kernel);
+        res.json({ session_id: sessionId, status: session.status });
+      } catch (err) { console.error("[api] POST /sessions/:id/recover error:", err); res.status(500).json({ error: "Internal server error" }); }
+    });
+
+    // ─── Plugin Management Routes ─────────────────────────────────────
+
+    router.get("/plugins", (_req, res) => {
+      if (!this.pluginRegistry) { res.json({ plugins: [] }); return; }
+      res.json({ plugins: this.pluginRegistry.listPlugins() });
+    });
+
+    router.get("/plugins/:id", (req, res) => {
+      if (!this.pluginRegistry) { res.status(404).json({ error: "Plugin system not configured" }); return; }
+      const plugin = this.pluginRegistry.getPlugin(req.params.id!);
+      if (!plugin) { res.status(404).json({ error: "Plugin not found" }); return; }
+      res.json(plugin);
+    });
+
+    router.post("/plugins/:id/reload", async (req, res) => {
+      if (!this.pluginRegistry) { res.status(404).json({ error: "Plugin system not configured" }); return; }
+      try {
+        const state = await this.pluginRegistry.reloadPlugin(req.params.id!);
+        res.json(state);
+      } catch (err) { console.error("[api] POST /plugins/:id/reload error:", err); res.status(500).json({ error: "Internal server error" }); }
+    });
+
+    router.post("/plugins/:id/unload", async (req, res) => {
+      if (!this.pluginRegistry) { res.status(404).json({ error: "Plugin system not configured" }); return; }
+      try {
+        await this.pluginRegistry.unloadPlugin(req.params.id!);
+        res.json({ status: "unloaded" });
+      } catch (err) { console.error("[api] POST /plugins/:id/unload error:", err); res.status(500).json({ error: "Internal server error" }); }
+    });
+
+    // ─── Plugin-Provided Routes ─────────────────────────────────────
+
+    if (this.pluginRegistry) {
+      for (const route of this.pluginRegistry.getRoutes()) {
+        const method = route.method.toLowerCase();
+        if (method === "get" || method === "post" || method === "put" || method === "delete" || method === "patch") {
+          (router as any)[method](route.path.replace("/api/", "/"), async (req: express.Request, res: express.Response) => {
+            try {
+              await route.handler(
+                {
+                  method: req.method,
+                  path: req.path,
+                  params: req.params as Record<string, string>,
+                  query: req.query as Record<string, string>,
+                  body: req.body,
+                },
+                {
+                  json: (data: unknown) => res.json(data),
+                  status: (code: number) => ({
+                    json: (data: unknown) => res.status(code).json(data),
+                  }),
+                }
+              );
+            } catch (err) {
+              console.error("[api] plugin route error:", err); res.status(500).json({ error: "Internal server error" });
+            }
+          });
+        }
+      }
+    }
+
+    router.post("/journal/compact", async (req, res) => {
+      try {
+        const compactError = validateCompactInput(req.body);
+        if (compactError) { res.status(400).json({ error: compactError }); return; }
+        const { retain_sessions } = req.body as { retain_sessions?: string[] };
+        const result = await this.journal.compact(retain_sessions);
+        res.json(result);
+      } catch (err) { console.error("[api] POST /journal/compact error:", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
     this.app.use("/api", router);

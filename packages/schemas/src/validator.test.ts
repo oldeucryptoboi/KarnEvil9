@@ -4,6 +4,7 @@ import {
   validatePlanData,
   validateToolManifestData,
   validateJournalEventData,
+  validatePluginManifestData,
   validateToolInput,
   validateToolOutput,
 } from "./validator.js";
@@ -179,6 +180,40 @@ describe("validateJournalEventData", () => {
     const result = validateJournalEventData({});
     expect(result.valid).toBe(false);
   });
+
+  it("accepts policy.violated event type", () => {
+    const result = validateJournalEventData({ ...validEvent(), type: "policy.violated" });
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts session.checkpoint event type", () => {
+    const result = validateJournalEventData({ ...validEvent(), type: "session.checkpoint" });
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts limit.exceeded event type", () => {
+    const result = validateJournalEventData({ ...validEvent(), type: "limit.exceeded" });
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe("OpenVgerError", () => {
+  it("has correct code, message, and data", async () => {
+    const { OpenVgerError, ErrorCodes } = await import("./types.js");
+    const err = new OpenVgerError("POLICY_VIOLATION", "test message", { detail: 42 });
+    expect(err.code).toBe(ErrorCodes.POLICY_VIOLATION);
+    expect(err.message).toBe("test message");
+    expect(err.data).toEqual({ detail: 42 });
+    expect(err.name).toBe("OpenVgerError");
+    expect(err instanceof Error).toBe(true);
+  });
+
+  it("works without data parameter", async () => {
+    const { OpenVgerError } = await import("./types.js");
+    const err = new OpenVgerError("TIMEOUT", "timed out");
+    expect(err.code).toBe("TIMEOUT");
+    expect(err.data).toBeUndefined();
+  });
 });
 
 describe("validateToolInput", () => {
@@ -236,6 +271,108 @@ describe("validateToolOutput", () => {
 
   it("accepts output with only required fields", () => {
     const result = validateToolOutput({ status: 200 }, schema);
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe("validatePluginManifestData", () => {
+  const validManifest = () => ({
+    id: "my-plugin",
+    name: "My Plugin",
+    version: "1.0.0",
+    description: "A test plugin",
+    entry: "index.js",
+    permissions: [],
+    provides: {
+      hooks: ["before_step"],
+    },
+  });
+
+  it("accepts a valid plugin manifest", () => {
+    const result = validatePluginManifestData(validManifest());
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("rejects manifest missing required fields", () => {
+    const result = validatePluginManifestData({ id: "x" });
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("rejects invalid id pattern", () => {
+    const m = validManifest();
+    m.id = "UPPERCASE_NOT_ALLOWED!";
+    const result = validatePluginManifestData(m);
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects invalid hook name", () => {
+    const m = validManifest();
+    (m.provides.hooks as string[]) = ["nonexistent_hook"];
+    const result = validatePluginManifestData(m);
+    expect(result.valid).toBe(false);
+  });
+
+  it("accepts manifest with all provides types", () => {
+    const m = {
+      ...validManifest(),
+      provides: {
+        tools: ["my-tool"],
+        hooks: ["before_step", "after_step"],
+        routes: ["status"],
+        commands: ["my-cmd"],
+        planners: ["custom"],
+        services: ["bg"],
+      },
+    };
+    const result = validatePluginManifestData(m);
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects manifest with additional properties", () => {
+    const m = { ...validManifest(), extra_field: true };
+    const result = validatePluginManifestData(m);
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe("validateJournalEventData (plugin events)", () => {
+  const validEvent = () => ({
+    event_id: uuid(),
+    timestamp: new Date().toISOString(),
+    session_id: uuid(),
+    type: "plugin.loaded",
+    payload: {},
+  });
+
+  it("accepts plugin.loaded event", () => {
+    const result = validateJournalEventData(validEvent());
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts plugin.discovered event", () => {
+    const result = validateJournalEventData({ ...validEvent(), type: "plugin.discovered" });
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts plugin.hook_fired event", () => {
+    const result = validateJournalEventData({ ...validEvent(), type: "plugin.hook_fired" });
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts plugin.hook_circuit_open event", () => {
+    const result = validateJournalEventData({ ...validEvent(), type: "plugin.hook_circuit_open" });
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts plugin.service_started event", () => {
+    const result = validateJournalEventData({ ...validEvent(), type: "plugin.service_started" });
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts plugin.failed event", () => {
+    const result = validateJournalEventData({ ...validEvent(), type: "plugin.failed" });
     expect(result.valid).toBe(true);
   });
 });

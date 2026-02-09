@@ -592,4 +592,55 @@ describe("PermissionEngine edge cases", () => {
     expect(engine.isGranted("always:scope:target", "sess-ttl")).toBe(true);
     expect(engine.isGranted("always:scope:target", "other-session")).toBe(false);
   });
+
+  it("concurrent checks for same scope prompt only once with allow_session", async () => {
+    let resolvePrompt!: (d: ApprovalDecision) => void;
+    const slowPrompt = async (_req: PermissionRequest): Promise<ApprovalDecision> => {
+      promptCalls.push(_req);
+      return new Promise<ApprovalDecision>((r) => { resolvePrompt = r; });
+    };
+    const engine = new PermissionEngine(journal, slowPrompt);
+    const sessionId = "concurrent-session";
+    const scope = "network:browser:https";
+
+    const req1 = makeRequest([scope], { sessionId, stepId: "step-1" });
+    const req2 = makeRequest([scope], { sessionId, stepId: "step-2" });
+
+    // Fire both checks concurrently
+    const p1 = engine.check(req1);
+    const p2 = engine.check(req2);
+
+    // Let microtasks settle — req1 should be prompting, req2 should be waiting
+    await new Promise((r) => setTimeout(r, 10));
+    expect(promptCalls.length).toBe(1);
+
+    // Resolve the prompt with session grant
+    resolvePrompt("allow_session");
+
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1.allowed).toBe(true);
+    expect(r2.allowed).toBe(true);
+    // Only one prompt was shown to the user
+    expect(promptCalls.length).toBe(1);
+  });
+
+  it("concurrent checks with allow_once still prompt the second caller", async () => {
+    let promptCount = 0;
+    const autoPrompt = async (_req: PermissionRequest): Promise<ApprovalDecision> => {
+      promptCount++;
+      return "allow_once";
+    };
+    const engine = new PermissionEngine(journal, autoPrompt);
+    const sessionId = "concurrent-once-session";
+    const scope = "network:browser:https";
+
+    const req1 = makeRequest([scope], { sessionId, stepId: "step-1" });
+    const req2 = makeRequest([scope], { sessionId, stepId: "step-2" });
+
+    const [r1, r2] = await Promise.all([engine.check(req1), engine.check(req2)]);
+    expect(r1.allowed).toBe(true);
+    expect(r2.allowed).toBe(true);
+    // allow_once doesn't cache — second caller still needs its own prompt
+    expect(promptCount).toBe(2);
+  });
 });

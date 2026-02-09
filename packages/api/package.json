@@ -11,19 +11,22 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jarvis/schemas": "workspace:*",
-    "@jarvis/kernel": "workspace:*",
-    "@jarvis/tools": "workspace:*",
     "@jarvis/journal": "workspace:*",
+    "@jarvis/kernel": "workspace:*",
+    "@jarvis/metrics": "workspace:*",
     "@jarvis/permissions": "workspace:*",
     "@jarvis/plugins": "workspace:*",
-    "@jarvis/metrics": "workspace:*",
+    "@jarvis/scheduler": "workspace:*",
+    "@jarvis/schemas": "workspace:*",
+    "@jarvis/tools": "workspace:*",
     "express": "^5.0.0",
-    "uuid": "^11.0.0"
+    "uuid": "^11.0.0",
+    "ws": "^8.0.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.0",
+    "@jarvis/memory": "workspace:*",
     "@jarvis/planner": "workspace:*",
-    "@jarvis/memory": "workspace:*"
+    "@types/express": "^5.0.0",
+    "@types/ws": "^8.0.0"
   }
 }

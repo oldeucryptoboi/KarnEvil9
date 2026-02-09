@@ -8,11 +8,6 @@
   "exclude": ["dist", "**/*.test.ts"],
   "references": [
     { "path": "../schemas" },
-    { "path": "../kernel" },
-    { "path": "../tools" },
-    { "path": "../journal" },
-    { "path": "../plugins" },
-    { "path": "../metrics" },
-    { "path": "../scheduler" }
+    { "path": "../journal" }
   ]
 }

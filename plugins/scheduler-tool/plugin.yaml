@@ -1,0 +1,15 @@
+id: scheduler-tool
+name: Scheduler Tool
+version: "1.0.0"
+description: Exposes the scheduler as a tool for agents to create/manage scheduled tasks
+entry: index.js
+permissions:
+  - scheduler:manage:schedules
+config_schema:
+  type: object
+  properties:
+    scheduler:
+      description: Scheduler instance (injected at runtime)
+provides:
+  tools:
+    - schedule

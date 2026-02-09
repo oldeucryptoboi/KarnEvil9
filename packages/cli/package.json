@@ -24,11 +24,16 @@
     "@jarvis/permissions": "workspace:*",
     "@jarvis/planner": "workspace:*",
     "@jarvis/plugins": "workspace:*",
+    "@jarvis/scheduler": "workspace:*",
     "@jarvis/schemas": "workspace:*",
     "@jarvis/tools": "workspace:*",
     "commander": "^13.0.0",
     "dotenv": "^17.2.4",
     "openai": "^4.77.0",
-    "uuid": "^11.0.0"
+    "uuid": "^11.0.0",
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.0.0"
   }
 }

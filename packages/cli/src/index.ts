@@ -13,7 +13,9 @@ import { ApiServer } from "@jarvis/api";
 import { MetricsCollector } from "@jarvis/metrics";
 import { PluginRegistry } from "@jarvis/plugins";
 import { ActiveMemory } from "@jarvis/memory";
+import { ScheduleStore, Scheduler } from "@jarvis/scheduler";
 import type { Task, ApprovalDecision, PermissionRequest } from "@jarvis/schemas";
+import type { ChatWebSocket } from "./chat-client.js";
 
 // Global error handlers — prevent silent crashes from unhandled rejections/exceptions
 process.on("unhandledRejection", (reason) => {
@@ -27,6 +29,7 @@ process.on("uncaughtException", (err) => {
 const JOURNAL_PATH = process.env.JARVIS_JOURNAL_PATH ?? resolve("journal/events.jsonl");
 const TOOLS_DIR = process.env.JARVIS_TOOLS_DIR ?? resolve("tools/examples");
 const MEMORY_PATH = process.env.JARVIS_MEMORY_PATH ?? resolve("sessions/memory.jsonl");
+const SCHEDULER_PATH = process.env.JARVIS_SCHEDULER_PATH ?? resolve("sessions/schedules.jsonl");
 const DEFAULT_PORT = parseInt(process.env.JARVIS_PORT ?? "3100", 10);
 
 async function cliApprovalPrompt(request: PermissionRequest): Promise<ApprovalDecision> {
@@ -60,12 +63,15 @@ async function cliApprovalPrompt(request: PermissionRequest): Promise<ApprovalDe
   });
 }
 
-async function createRuntime(policy?: { allowed_paths: string[]; allowed_endpoints: string[]; allowed_commands: string[]; require_approval_for_writes: boolean }) {
+async function createRuntime(
+  policy?: { allowed_paths: string[]; allowed_endpoints: string[]; allowed_commands: string[]; require_approval_for_writes: boolean },
+  approvalPrompt?: (request: PermissionRequest) => Promise<ApprovalDecision>,
+) {
   const journal = new Journal(JOURNAL_PATH);
   await journal.init();
   const registry = new ToolRegistry();
   await registry.loadFromDirectory(TOOLS_DIR);
-  const permissions = new PermissionEngine(journal, cliApprovalPrompt);
+  const permissions = new PermissionEngine(journal, approvalPrompt ?? cliApprovalPrompt);
   const defaultPolicy = policy ?? { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
   const runtime = new ToolRuntime(registry, permissions, journal, defaultPolicy);
   runtime.registerHandler("read-file", readFileHandler);
@@ -269,33 +275,88 @@ program.command("server").description("Start the API server")
   .option("--insecure", "Allow running without an API token (unauthenticated)")
   .option("--no-memory", "Disable cross-session active memory")
   .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean }) => {
-    const { journal, registry, permissions, runtime } = await createRuntime();
+    // Late-binding ref: set after ApiServer is constructed
+    let apiServerRef: ApiServer | null = null;
+    const serverApprovalPrompt = async (request: PermissionRequest): Promise<ApprovalDecision> => {
+      if (!apiServerRef) return "deny";
+      return new Promise<ApprovalDecision>((resolve) => {
+        apiServerRef!.registerApproval(request.request_id, request, resolve);
+      });
+    };
+    const { journal, registry, permissions, runtime } = await createRuntime(undefined, serverApprovalPrompt);
+    const metricsCollector = new MetricsCollector();
+
+    // Bootstrap scheduler before plugins so the scheduler-tool plugin can access it
+    const planner = createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic });
+    const scheduleStore = new ScheduleStore(SCHEDULER_PATH);
     const pluginsDir = resolve(opts.pluginsDir);
-    const pluginRegistry = new PluginRegistry({
+    const port = parseInt(opts.port, 10);
+    // pluginRegistry reference needed by sessionFactory — assigned after construction
+    let pluginRegistry!: PluginRegistry;
+
+    // Shared session factory used by scheduler and slack plugins
+    const sharedSessionFactory = async (task: Task, sessionOpts?: { mode?: string; agentic?: boolean }) => {
+      const kernel = new Kernel({
+        journal, toolRuntime: runtime, toolRegistry: registry, permissions,
+        pluginRegistry,
+        planner,
+        mode: (sessionOpts?.mode ?? (opts.agentic ? "real" : "mock")) as "real" | "dry_run" | "mock",
+        limits: { max_steps: 20, max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000 },
+        policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true },
+        agentic: sessionOpts?.agentic ?? opts.agentic ?? false,
+      });
+      const session = await kernel.createSession(task);
+      // Run in background — don't block the caller
+      void kernel.run().catch((err) => {
+        console.error(`[session] Session ${session.session_id} failed:`, err);
+      });
+      return { session_id: session.session_id, status: session.status };
+    };
+
+    const scheduler = new Scheduler({
+      store: scheduleStore,
+      journal,
+      sessionFactory: sharedSessionFactory,
+    });
+    await scheduler.start();
+    console.log(`Scheduler started (${scheduleStore.size} schedules loaded)`);
+
+    const apiToken = process.env.JARVIS_API_TOKEN;
+    pluginRegistry = new PluginRegistry({
       journal, toolRegistry: registry, toolRuntime: runtime, permissions,
       pluginsDir,
+      pluginConfigs: {
+        "scheduler-tool": { scheduler },
+        "slack": {
+          sessionFactory: sharedSessionFactory,
+          journal,
+          apiBaseUrl: `http://localhost:${port}`,
+          apiToken,
+        },
+      },
     });
     await pluginRegistry.discoverAndLoadAll();
     const active = pluginRegistry.listPlugins().filter((p) => p.status === "active");
     if (active.length > 0) {
       console.log(`Plugins loaded: ${active.map((p) => p.id).join(", ")}`);
     }
-    const metricsCollector = new MetricsCollector();
-    const apiToken = process.env.JARVIS_API_TOKEN;
+
     const corsOrigins = process.env.JARVIS_CORS_ORIGINS;
     const apiServer = new ApiServer({
       toolRegistry: registry, journal, toolRuntime: runtime, permissions,
       pluginRegistry,
-      planner: createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic }),
+      planner,
       agentic: opts.agentic ?? false,
       metricsCollector,
+      scheduler,
       apiToken,
       insecure: opts.insecure === true,
       corsOrigins: corsOrigins ? corsOrigins.split(",").map((s) => s.trim()) : undefined,
       approvalTimeoutMs: parseInt(process.env.JARVIS_APPROVAL_TIMEOUT_MS ?? "300000", 10),
       maxConcurrentSessions: parseInt(process.env.JARVIS_MAX_SESSIONS ?? "50", 10),
     });
-    apiServer.listen(parseInt(opts.port, 10));
+    apiServerRef = apiServer;
+    apiServer.listen(port);
 
     // Graceful shutdown
     const shutdown = async () => {
@@ -305,6 +366,28 @@ program.command("server").description("Start the API server")
     };
     process.on("SIGTERM", shutdown);
     process.on("SIGINT", shutdown);
+  });
+
+// ─── Chat Command ─────────────────────────────────────────────────
+
+program.command("chat").description("Interactive chat session via WebSocket")
+  .option("--url <url>", "WebSocket URL", "ws://localhost:3100/api/ws")
+  .option("--token <token>", "API token (defaults to JARVIS_API_TOKEN)")
+  .option("--mode <mode>", "Execution mode: real, dry_run, mock", "real")
+  .action(async (opts: { url: string; token?: string; mode: string }) => {
+    const { WebSocket: WS } = await import("ws");
+    const { ChatClient, RealTerminalIO } = await import("./chat-client.js");
+
+    const token = opts.token ?? process.env.JARVIS_API_TOKEN;
+    const wsUrl = token ? `${opts.url}?token=${encodeURIComponent(token)}` : opts.url;
+
+    const client = new ChatClient({
+      wsUrl,
+      mode: opts.mode,
+      wsFactory: (url) => new WS(url) as unknown as ChatWebSocket,
+      terminal: new RealTerminalIO(),
+    });
+    client.connect();
   });
 
 // ─── Relay Command ────────────────────────────────────────────────

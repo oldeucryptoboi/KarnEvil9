@@ -9,8 +9,12 @@ import type { Planner, Task, ApprovalDecision, ExecutionMode, SessionLimits, Pol
 import type { PluginRegistry } from "@jarvis/plugins";
 import type { MetricsCollector } from "@jarvis/metrics";
 import { createMetricsRouter } from "@jarvis/metrics";
+import type { Scheduler } from "@jarvis/scheduler";
+import { createSchedulerRoutes } from "@jarvis/scheduler";
 import type { ServerResponse, Server, IncomingMessage } from "node:http";
 import { timingSafeEqual } from "node:crypto";
+import { parse as parseUrl } from "node:url";
+import { WebSocketServer, WebSocket } from "ws";
 
 // ─── Rate Limiter ──────────────────────────────────────────────────
 
@@ -140,6 +144,11 @@ interface SSEClient {
   missedEvents: number;
 }
 
+interface WSClient {
+  ws: WebSocket;
+  activeSessionIds: Set<string>;
+}
+
 export interface ApiServerConfig {
   toolRegistry: ToolRegistry;
   journal: Journal;
@@ -157,6 +166,7 @@ export interface ApiServerConfig {
   /** Set to true to explicitly allow running without an API token. */
   insecure?: boolean;
   metricsCollector?: MetricsCollector;
+  scheduler?: Scheduler;
   approvalTimeoutMs?: number;
   corsOrigins?: string | string[];
 }
@@ -181,12 +191,15 @@ export class ApiServer {
   private agentic: boolean;
   private apiToken?: string;
   private metricsCollector?: MetricsCollector;
+  private scheduler?: Scheduler;
   private approvalTimeoutMs: number;
   private corsOrigins?: string | string[];
   private httpServer?: Server;
   private rateLimiter: RateLimiter;
   private rateLimiterPruneInterval?: ReturnType<typeof setInterval>;
   private journalUnsubscribe?: () => void;
+  private wss?: WebSocketServer;
+  private wsClients = new Set<WSClient>();
 
   constructor(config: ApiServerConfig);
   constructor(toolRegistry: ToolRegistry, journal: Journal);
@@ -233,6 +246,7 @@ export class ApiServer {
       this.agentic = config.agentic ?? false;
       this.apiToken = config.apiToken;
       this.metricsCollector = config.metricsCollector;
+      this.scheduler = config.scheduler;
       this.approvalTimeoutMs = config.approvalTimeoutMs ?? 300000; // 5 minutes
       this.corsOrigins = config.corsOrigins;
       this.rateLimiter = new RateLimiter();
@@ -268,7 +282,10 @@ export class ApiServer {
       });
     }
     this.setupRoutes();
-    this.journalUnsubscribe = this.journal.on((event) => { this.broadcastEvent(event.session_id, event); });
+    this.journalUnsubscribe = this.journal.on((event) => {
+      this.broadcastEvent(event.session_id, event);
+      this.broadcastWsEvent(event.session_id, event);
+    });
   }
 
   registerKernel(sessionId: string, kernel: Kernel): void { this.kernels.set(sessionId, kernel); }
@@ -281,6 +298,22 @@ export class ApiServer {
       }
     }, this.approvalTimeoutMs);
     this.pendingApprovals.set(requestId, { resolve, request, timer });
+
+    // Broadcast approve.needed to WS clients tracking this session
+    const req = request as Record<string, unknown> | undefined;
+    const sessionId = typeof req?.session_id === "string" ? req.session_id : undefined;
+    if (sessionId) {
+      for (const client of this.wsClients) {
+        if (client.activeSessionIds.has(sessionId)) {
+          this.wsSend(client.ws, {
+            type: "approve.needed",
+            request_id: requestId,
+            session_id: sessionId,
+            request,
+          });
+        }
+      }
+    }
   }
 
   broadcastEvent(sessionId: string, data: unknown): void {
@@ -313,6 +346,7 @@ export class ApiServer {
     // Prune rate limiter entries every 60 seconds
     this.rateLimiterPruneInterval = setInterval(() => this.rateLimiter.prune(), 60000);
     this.rateLimiterPruneInterval.unref();
+    this.setupWebSocket(this.httpServer);
     return this.httpServer;
   }
 
@@ -334,10 +368,18 @@ export class ApiServer {
       for (const client of clients) client.res.end();
     }
     this.sseClients.clear();
+    // Close all WebSocket connections
+    for (const client of this.wsClients) {
+      client.ws.close(1001, "Server shutting down");
+    }
+    this.wsClients.clear();
+    if (this.wss) this.wss.close();
     // Unsubscribe journal listener
     if (this.journalUnsubscribe) this.journalUnsubscribe();
     // Stop rate limiter pruning
     if (this.rateLimiterPruneInterval) clearInterval(this.rateLimiterPruneInterval);
+    // Stop scheduler
+    if (this.scheduler) await this.scheduler.stop();
     // Detach metrics
     if (this.metricsCollector) this.metricsCollector.detach();
     // Wait for pending journal writes to flush
@@ -349,6 +391,196 @@ export class ApiServer {
   }
 
   getExpressApp(): express.Application { return this.app; }
+
+  private setupWebSocket(server: Server): void {
+    this.wss = new WebSocketServer({ noServer: true });
+
+    server.on("upgrade", (req: IncomingMessage, socket, head) => {
+      const parsed = parseUrl(req.url ?? "", true);
+      if (parsed.pathname !== "/api/ws") {
+        socket.destroy();
+        return;
+      }
+
+      // Authenticate via ?token= query param
+      if (this.apiToken) {
+        const token = parsed.query.token;
+        if (typeof token !== "string") {
+          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        const provided = Buffer.from(token);
+        const expected = Buffer.from(this.apiToken);
+        if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+      }
+
+      this.wss!.handleUpgrade(req, socket, head, (ws) => {
+        this.wss!.emit("connection", ws, req);
+      });
+    });
+
+    this.wss.on("connection", (ws: WebSocket) => {
+      const client: WSClient = { ws, activeSessionIds: new Set() };
+      this.wsClients.add(client);
+
+      ws.on("message", async (raw: Buffer | string) => {
+        let msg: Record<string, unknown>;
+        try {
+          msg = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf-8"));
+        } catch {
+          this.wsSend(ws, { type: "error", message: "Invalid JSON" });
+          return;
+        }
+
+        try {
+          switch (msg.type) {
+            case "submit":
+              await this.handleWsSubmit(client, msg);
+              break;
+            case "abort":
+              await this.handleWsAbort(msg);
+              break;
+            case "approve":
+              this.handleWsApprove(msg);
+              break;
+            case "ping":
+              this.wsSend(ws, { type: "pong" });
+              break;
+            default:
+              this.wsSend(ws, { type: "error", message: `Unknown message type: ${String(msg.type)}` });
+          }
+        } catch (err) {
+          this.wsSend(ws, { type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
+      });
+
+      ws.on("close", () => {
+        client.activeSessionIds.clear();
+        this.wsClients.delete(client);
+      });
+
+      ws.on("error", () => {
+        client.activeSessionIds.clear();
+        this.wsClients.delete(client);
+      });
+    });
+  }
+
+  private wsSend(ws: WebSocket, data: unknown): void {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(data));
+    }
+  }
+
+  private broadcastWsEvent(sessionId: string, event: JournalEvent): void {
+    for (const client of this.wsClients) {
+      if (client.activeSessionIds.has(sessionId)) {
+        this.wsSend(client.ws, { type: "event", session_id: sessionId, event });
+      }
+    }
+  }
+
+  private async handleWsSubmit(client: WSClient, msg: Record<string, unknown>): Promise<void> {
+    const text = msg.text;
+    if (typeof text !== "string" || text.trim().length === 0) {
+      this.wsSend(client.ws, { type: "error", message: "text is required and must be a non-empty string" });
+      return;
+    }
+    if (text.length > MAX_TEXT_LENGTH) {
+      this.wsSend(client.ws, { type: "error", message: `text must be at most ${MAX_TEXT_LENGTH} characters` });
+      return;
+    }
+    if (this.activeSessionCount >= this.maxConcurrentSessions) {
+      this.wsSend(client.ws, { type: "error", message: "Max concurrent sessions reached" });
+      return;
+    }
+    if (!this.toolRuntime || !this.permissions || !this.planner) {
+      this.wsSend(client.ws, { type: "error", message: "Server not fully configured" });
+      return;
+    }
+
+    const mode = (typeof msg.mode === "string" && VALID_MODES.has(msg.mode)) ? msg.mode as ExecutionMode : this.defaultMode;
+    const task: Task = { task_id: uuid(), text: text.trim(), created_at: new Date().toISOString() };
+
+    const kernel = new KernelClass({
+      journal: this.journal,
+      toolRuntime: this.toolRuntime,
+      toolRegistry: this.toolRegistry,
+      permissions: this.permissions,
+      planner: this.planner,
+      mode,
+      limits: this.defaultLimits,
+      policy: this.defaultPolicy,
+      agentic: this.agentic,
+    });
+
+    const session = await kernel.createSession(task);
+    this.kernels.set(session.session_id, kernel);
+    this.activeSessionCount++;
+    client.activeSessionIds.add(session.session_id);
+
+    this.wsSend(client.ws, { type: "session.created", session_id: session.session_id, task });
+
+    // Replay the session.created journal event that was emitted during createSession()
+    // before this client was subscribed to the session ID.
+    this.wsSend(client.ws, {
+      type: "event",
+      session_id: session.session_id,
+      event: {
+        type: "session.created",
+        session_id: session.session_id,
+        timestamp: session.created_at,
+        payload: { task_id: task.task_id, task_text: task.text, mode: session.mode },
+      },
+    });
+
+    // Run in background
+    const sessionTimeoutMs = this.defaultLimits.max_duration_ms + 30000;
+    const kernelPromise = kernel.run();
+    let sessionTimer: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      sessionTimer = setTimeout(() => reject(new Error(`Session timed out after ${sessionTimeoutMs}ms`)), sessionTimeoutMs);
+      sessionTimer.unref();
+    });
+    Promise.race([kernelPromise, timeoutPromise])
+      .catch((err) => {
+        this.broadcastEvent(session.session_id, {
+          type: "session.failed",
+          session_id: session.session_id,
+          payload: { error: err instanceof Error ? err.message : String(err) },
+          timestamp: new Date().toISOString(),
+        });
+      })
+      .finally(() => {
+        clearTimeout(sessionTimer!);
+        this.activeSessionCount = Math.max(0, this.activeSessionCount - 1);
+        setTimeout(() => this.kernels.delete(session.session_id), 60000).unref();
+      });
+  }
+
+  private async handleWsAbort(msg: Record<string, unknown>): Promise<void> {
+    const sessionId = msg.session_id;
+    if (typeof sessionId !== "string") return;
+    const kernel = this.kernels.get(sessionId);
+    if (kernel) await kernel.abort();
+  }
+
+  private handleWsApprove(msg: Record<string, unknown>): void {
+    const requestId = msg.request_id;
+    if (typeof requestId !== "string") return;
+    const approval = this.pendingApprovals.get(requestId);
+    if (!approval) return;
+    const decision = msg.decision as ApprovalDecision;
+    if (!decision) return;
+    clearTimeout(approval.timer);
+    approval.resolve(decision);
+    this.pendingApprovals.delete(requestId);
+  }
 
   async discoverRecoverableSessions(): Promise<string[]> {
     const allEvents = await this.journal.readAll();
@@ -401,6 +633,10 @@ export class ApiServer {
             status: this.pluginRegistry ? "ok" : "unavailable",
             loaded: this.pluginRegistry?.listPlugins().filter((p) => p.status === "active").length ?? 0,
             failed: this.pluginRegistry?.listPlugins().filter((p) => p.status === "failed").length ?? 0,
+          },
+          scheduler: {
+            status: this.scheduler ? (this.scheduler.isRunning() ? "ok" : "stopped") : "unavailable",
+            schedules: this.scheduler?.listSchedules().length ?? 0,
           },
         },
       });
@@ -784,6 +1020,46 @@ export class ApiServer {
               );
             } catch (err) {
               console.error("[api] plugin route error:", err); res.status(500).json({ error: "Internal server error" });
+            }
+          });
+        }
+      }
+    }
+
+    // ─── Scheduler Routes ───────────────────────────────────────────────
+
+    if (this.scheduler) {
+      const schedulerRoutes = createSchedulerRoutes(this.scheduler);
+      for (const route of schedulerRoutes) {
+        const method = route.method.toLowerCase();
+        if (method === "get" || method === "post" || method === "put" || method === "delete") {
+          (router as any)[method](route.path, async (req: express.Request, res: express.Response) => {
+            try {
+              await route.handler(
+                {
+                  method: req.method,
+                  path: req.path,
+                  params: req.params as Record<string, string>,
+                  query: req.query as Record<string, string>,
+                  body: req.body,
+                },
+                {
+                  json: (data: unknown) => res.json(data),
+                  text: (data: string, contentType?: string) => {
+                    res.set("Content-Type", contentType ?? "text/plain; charset=utf-8");
+                    res.end(data);
+                  },
+                  status: (code: number) => ({
+                    json: (data: unknown) => res.status(code).json(data),
+                    text: (data: string, contentType?: string) => {
+                      res.status(code).set("Content-Type", contentType ?? "text/plain; charset=utf-8").end(data);
+                    },
+                  }),
+                }
+              );
+            } catch (err) {
+              console.error("[api] scheduler route error:", err);
+              res.status(500).json({ error: "Internal server error" });
             }
           });
         }

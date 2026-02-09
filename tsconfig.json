@@ -10,6 +10,7 @@
     { "path": "packages/plugins" },
     { "path": "packages/kernel" },
     { "path": "packages/metrics" },
+    { "path": "packages/scheduler" },
     { "path": "packages/api" },
     { "path": "packages/browser-relay" },
     { "path": "packages/cli" }

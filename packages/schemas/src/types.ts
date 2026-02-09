@@ -175,6 +175,9 @@ export const ErrorCodes = {
   PLUGIN_TIMEOUT: "PLUGIN_TIMEOUT",
   PLUGIN_HOOK_FAILED: "PLUGIN_HOOK_FAILED",
   PLUGIN_HOOK_BLOCKED: "PLUGIN_HOOK_BLOCKED",
+  SCHEDULE_NOT_FOUND: "SCHEDULE_NOT_FOUND",
+  SCHEDULE_INVALID: "SCHEDULE_INVALID",
+  SCHEDULER_NOT_RUNNING: "SCHEDULER_NOT_RUNNING",
 } as const;
 
 export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
@@ -325,7 +328,17 @@ export type JournalEventType =
   | "context.checkpoint_triggered"
   | "context.summarize_triggered"
   | "context.checkpoint_saved"
-  | "context.session_rotated";
+  | "context.session_rotated"
+  | "scheduler.started"
+  | "scheduler.stopped"
+  | "scheduler.job_triggered"
+  | "scheduler.job_completed"
+  | "scheduler.job_failed"
+  | "scheduler.job_skipped"
+  | "scheduler.schedule_created"
+  | "scheduler.schedule_updated"
+  | "scheduler.schedule_deleted"
+  | "scheduler.schedule_paused";
 
 // ─── Context Budget / Checkpoint ────────────────────────────────────
 
@@ -534,4 +547,59 @@ export interface PluginApi {
   registerCommand(name: string, opts: CommandOptions): void;
   registerPlanner(planner: Planner): void;
   registerService(service: PluginService): void;
+}
+
+// ─── Scheduler ─────────────────────────────────────────────────────
+
+export type ScheduleType = "at" | "every" | "cron";
+export type JobActionType = "createSession" | "emitEvent";
+export type ScheduleStatus = "active" | "paused" | "completed" | "failed";
+export type MissedSchedulePolicy = "skip" | "catchup_one" | "catchup_all";
+
+export interface ScheduleTriggerAt { type: "at"; at: string; }
+export interface ScheduleTriggerEvery { type: "every"; interval: string; start_at?: string; }
+export interface ScheduleTriggerCron { type: "cron"; expression: string; timezone?: string; }
+export type ScheduleTrigger = ScheduleTriggerAt | ScheduleTriggerEvery | ScheduleTriggerCron;
+
+export interface JobActionCreateSession {
+  type: "createSession";
+  task_text: string;
+  mode?: ExecutionMode;
+  constraints?: TaskConstraints;
+  agentic?: boolean;
+}
+
+export interface JobActionEmitEvent {
+  type: "emitEvent";
+  session_id?: string;
+  event_type: JournalEventType;
+  payload: Record<string, unknown>;
+}
+
+export type JobAction = JobActionCreateSession | JobActionEmitEvent;
+
+export interface ScheduleOptions {
+  delete_after_run?: boolean;
+  missed_policy?: MissedSchedulePolicy;
+  max_failures?: number;
+  description?: string;
+  tags?: string[];
+}
+
+export interface Schedule {
+  schedule_id: string;
+  name: string;
+  trigger: ScheduleTrigger;
+  action: JobAction;
+  options: ScheduleOptions;
+  status: ScheduleStatus;
+  run_count: number;
+  failure_count: number;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_session_id?: string;
+  last_error?: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 }

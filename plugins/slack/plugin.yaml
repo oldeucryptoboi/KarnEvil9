@@ -1,0 +1,29 @@
+id: slack
+name: Slack Integration
+version: "1.0.0"
+description: Bidirectional Slack integration — receive tasks, post progress, handle approvals
+entry: index.js
+permissions:
+  - slack:send:messages
+  - slack:receive:events
+config_schema:
+  type: object
+  properties:
+    sessionFactory:
+      description: Session factory function (injected at runtime)
+    journal:
+      description: Journal instance for event subscription (injected at runtime)
+    apiBaseUrl:
+      description: Base URL of the Jarvis API server (injected at runtime)
+    apiToken:
+      description: Jarvis API token for authenticated calls (injected at runtime)
+provides:
+  tools:
+    - send-slack-message
+  hooks:
+    - after_session_end
+  routes:
+    - status
+    - channels
+  services:
+    - slack-connection

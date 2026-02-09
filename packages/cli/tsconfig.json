@@ -16,6 +16,7 @@
     { "path": "../planner" },
     { "path": "../memory" },
     { "path": "../metrics" },
+    { "path": "../scheduler" },
     { "path": "../api" },
     { "path": "../plugins" }
   ]

@@ -5,7 +5,8 @@ import { v4 as uuid } from "uuid";
 import { resolve } from "node:path";
 import * as readline from "node:readline";
 import { Journal } from "@jarvis/journal";
-import { ToolRegistry, ToolRuntime, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, browserHandler } from "@jarvis/tools";
+import { ToolRegistry, ToolRuntime, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, browserHandler, createBrowserHandler } from "@jarvis/tools";
+import type { BrowserDriverLike } from "@jarvis/tools";
 import { PermissionEngine } from "@jarvis/permissions";
 import { Kernel } from "@jarvis/kernel";
 import { createPlanner } from "./llm-adapters.js";
@@ -66,6 +67,7 @@ async function cliApprovalPrompt(request: PermissionRequest): Promise<ApprovalDe
 async function createRuntime(
   policy?: { allowed_paths: string[]; allowed_endpoints: string[]; allowed_commands: string[]; require_approval_for_writes: boolean },
   approvalPrompt?: (request: PermissionRequest) => Promise<ApprovalDecision>,
+  browserDriver?: BrowserDriverLike,
 ) {
   const journal = new Journal(JOURNAL_PATH);
   await journal.init();
@@ -78,7 +80,7 @@ async function createRuntime(
   runtime.registerHandler("write-file", writeFileHandler);
   runtime.registerHandler("shell-exec", shellExecHandler);
   runtime.registerHandler("http-request", httpRequestHandler);
-  runtime.registerHandler("browser", browserHandler);
+  runtime.registerHandler("browser", createBrowserHandler(browserDriver));
   return { journal, registry, permissions, runtime };
 }
 
@@ -95,9 +97,15 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
   .option("--context-budget", "Enable proactive context budget management (requires --agentic)")
   .option("--checkpoint-dir <dir>", "Directory for checkpoint files", "sessions/checkpoints")
   .option("--no-memory", "Disable cross-session active memory")
-  .action(async (taskText: string, opts: { mode: string; maxSteps: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; contextBudget?: boolean; checkpointDir?: string; memory?: boolean }) => {
+  .option("--browser <mode>", "Browser driver: managed (in-process Playwright) or extension (HTTP relay)", "managed")
+  .action(async (taskText: string, opts: { mode: string; maxSteps: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; contextBudget?: boolean; checkpointDir?: string; memory?: boolean; browser: string }) => {
     const policy = { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
-    const { journal, registry, permissions, runtime } = await createRuntime(policy);
+    let browserDriver: BrowserDriverLike | undefined;
+    if (opts.browser === "managed") {
+      const { ManagedDriver } = await import("@jarvis/browser-relay");
+      browserDriver = new ManagedDriver({ headless: true });
+    }
+    const { journal, registry, permissions, runtime } = await createRuntime(policy, undefined, browserDriver);
     const task: Task = { task_id: uuid(), text: taskText, created_at: new Date().toISOString() };
 
     const pluginsDir = resolve(opts.pluginsDir);
@@ -274,7 +282,8 @@ program.command("server").description("Start the API server")
   .option("--agentic", "Enable agentic feedback loop")
   .option("--insecure", "Allow running without an API token (unauthenticated)")
   .option("--no-memory", "Disable cross-session active memory")
-  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean }) => {
+  .option("--browser <mode>", "Browser driver: managed (in-process Playwright) or extension (HTTP relay)", "managed")
+  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean; browser: string }) => {
     // Late-binding ref: set after ApiServer is constructed
     let apiServerRef: ApiServer | null = null;
     const serverApprovalPrompt = async (request: PermissionRequest): Promise<ApprovalDecision> => {
@@ -283,7 +292,12 @@ program.command("server").description("Start the API server")
         apiServerRef!.registerApproval(request.request_id, request, resolve);
       });
     };
-    const { journal, registry, permissions, runtime } = await createRuntime(undefined, serverApprovalPrompt);
+    let browserDriver: BrowserDriverLike | undefined;
+    if (opts.browser === "managed") {
+      const { ManagedDriver } = await import("@jarvis/browser-relay");
+      browserDriver = new ManagedDriver({ headless: true });
+    }
+    const { journal, registry, permissions, runtime } = await createRuntime(undefined, serverApprovalPrompt, browserDriver);
     const metricsCollector = new MetricsCollector();
 
     // Bootstrap scheduler before plugins so the scheduler-tool plugin can access it

@@ -12,6 +12,11 @@ interface Target {
   nth?: number;
 }
 
+/** Minimal interface a browser driver must satisfy. */
+export interface BrowserDriverLike {
+  execute(request: { action: string; [key: string]: unknown }): Promise<{ success: boolean; [key: string]: unknown }>;
+}
+
 const RELAY_URL = process.env.OPENVGER_RELAY_URL ?? "http://localhost:9222";
 
 const MOCK_RESPONSE = {
@@ -26,44 +31,59 @@ const VALID_ACTIONS = new Set([
   "hover", "keyboard", "screenshot", "get_text", "evaluate", "wait",
 ]);
 
-export const browserHandler: ToolHandler = async (
-  input: Record<string, unknown>,
-  mode: ExecutionMode,
-  policy: PolicyProfile,
-): Promise<unknown> => {
-  if (typeof input.action !== "string") {
-    return { success: false, error: "input.action must be a string" };
-  }
-  const action = input.action;
-
-  if (!VALID_ACTIONS.has(action)) {
-    return { success: false, error: `Unknown action: "${action}". Valid actions: ${[...VALID_ACTIONS].join(", ")}` };
-  }
-
-  if (mode === "mock") {
-    return MOCK_RESPONSE;
-  }
-
-  if (mode === "dry_run") {
-    return dryRun(action, input);
-  }
-
-  // Real mode — enforce policy for navigate
-  if (action === "navigate") {
-    if (typeof input.url !== "string") {
-      return { success: false, error: "input.url must be a string for navigate action" };
+/**
+ * Factory that creates a browser tool handler.
+ * When `driver` is provided, requests are sent directly to the in-process driver.
+ * Otherwise, requests are forwarded via HTTP to the relay server.
+ */
+export function createBrowserHandler(driver?: BrowserDriverLike): ToolHandler {
+  return async (
+    input: Record<string, unknown>,
+    mode: ExecutionMode,
+    policy: PolicyProfile,
+  ): Promise<unknown> => {
+    if (typeof input.action !== "string") {
+      return { success: false, error: "input.action must be a string" };
     }
-    await assertEndpointAllowedAsync(input.url, policy.allowed_endpoints);
-  }
+    const action = input.action;
 
-  // Forward to relay server
-  const response = await fetch(`${RELAY_URL}/actions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  return response.json();
-};
+    if (!VALID_ACTIONS.has(action)) {
+      return { success: false, error: `Unknown action: "${action}". Valid actions: ${[...VALID_ACTIONS].join(", ")}` };
+    }
+
+    if (mode === "mock") {
+      return MOCK_RESPONSE;
+    }
+
+    if (mode === "dry_run") {
+      return dryRun(action, input);
+    }
+
+    // Real mode — enforce policy for navigate
+    if (action === "navigate") {
+      if (typeof input.url !== "string") {
+        return { success: false, error: "input.url must be a string for navigate action" };
+      }
+      await assertEndpointAllowedAsync(input.url, policy.allowed_endpoints);
+    }
+
+    // Direct: use in-process driver
+    if (driver) {
+      return driver.execute(input as { action: string; [key: string]: unknown });
+    }
+
+    // Fallback: forward to relay server
+    const response = await fetch(`${RELAY_URL}/actions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    return response.json();
+  };
+}
+
+/** Backward-compatible default handler (uses HTTP relay). */
+export const browserHandler: ToolHandler = createBrowserHandler();
 
 function dryRun(action: string, input: Record<string, unknown>): unknown {
   const target = input.target as Target | undefined;

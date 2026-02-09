@@ -57,8 +57,41 @@ function formatStepOutput(output: unknown): string {
   }
 
   // File read result: { content, exists, size }
-  if ("content" in obj) {
+  if ("content" in obj && !("success" in obj)) {
     return String(obj.content ?? "");
+  }
+
+  // Browser result: { success, url?, title?, snapshot?, result?, error? }
+  if ("success" in obj) {
+    if (obj.success === false) {
+      return red(`Error: ${String(obj.error ?? "unknown")}`);
+    }
+    const parts: string[] = [];
+    if (obj.url) parts.push(`${dim("URL:")} ${String(obj.url)}`);
+    if (obj.title) parts.push(`${dim("Title:")} ${String(obj.title)}`);
+    if (obj.text) parts.push(String(obj.text));
+    if (typeof obj.snapshot === "string") {
+      const snap = obj.snapshot.length > 800
+        ? obj.snapshot.slice(0, 800) + dim(`\n... (${obj.snapshot.length} chars)`)
+        : obj.snapshot;
+      parts.push(`${dim("Snapshot:")}\n${snap}`);
+    }
+    // Array result (e.g. extracted data)
+    if (Array.isArray(obj.result)) {
+      const items = obj.result as Record<string, unknown>[];
+      const lines = items.map((item, i) => {
+        if (item.title) {
+          const rank = item.rank != null ? `${item.rank}. ` : `${i + 1}. `;
+          const pts = item.points ? dim(` (${item.points})`) : "";
+          return `  ${bold(rank + String(item.title))}${pts}`;
+        }
+        return `  ${JSON.stringify(item)}`;
+      });
+      parts.push(lines.join("\n"));
+    } else if (obj.result != null && !Array.isArray(obj.result)) {
+      parts.push(String(obj.result));
+    }
+    if (parts.length > 0) return parts.join("\n");
   }
 
   return JSON.stringify(output, null, 2);
@@ -125,7 +158,10 @@ export function formatEvent(sessionId: string, event: Record<string, unknown>): 
       const stepList = steps
         .map((s: unknown, i: number) => {
           const step = s as Record<string, unknown>;
-          return `  ${dim(`${i + 1}.`)} ${bold(String(step.tool ?? "?"))} ${dim(String(step.description ?? ""))}`;
+          const toolRef = step.tool_ref as Record<string, unknown> | undefined;
+          const toolName = String(toolRef?.name ?? step.tool ?? "?");
+          const title = String(step.title ?? step.description ?? "");
+          return `  ${dim(`${i + 1}.`)} ${bold(toolName)} ${dim(title)}`;
         })
         .join("\n");
       return `${prefix}\n${stepList}`;

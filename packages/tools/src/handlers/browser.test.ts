@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { PolicyProfile } from "@jarvis/schemas";
-import { browserHandler } from "./browser.js";
+import { browserHandler, createBrowserHandler } from "./browser.js";
+import type { BrowserDriverLike } from "./browser.js";
 
 const openPolicy: PolicyProfile = {
   allowed_paths: [],
@@ -177,5 +178,119 @@ describe("browserHandler — policy enforcement", () => {
       );
     } catch { /* expected */ }
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+// ── createBrowserHandler with in-process driver ──────────────────
+
+describe("createBrowserHandler — with driver", () => {
+  let mockDriver: BrowserDriverLike;
+  let handler: ReturnType<typeof createBrowserHandler>;
+
+  beforeEach(() => {
+    mockDriver = {
+      execute: vi.fn().mockResolvedValue({ success: true, url: "https://example.com", title: "Example" }),
+    };
+    handler = createBrowserHandler(mockDriver);
+  });
+
+  it("calls driver.execute() directly for navigate", async () => {
+    const result = (await handler(
+      { action: "navigate", url: "https://example.com" }, "real", openPolicy
+    )) as any;
+    expect(result.success).toBe(true);
+    expect(mockDriver.execute).toHaveBeenCalledWith({ action: "navigate", url: "https://example.com" });
+  });
+
+  it("calls driver.execute() for snapshot", async () => {
+    (mockDriver.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, snapshot: "<tree>" });
+    const result = (await handler(
+      { action: "snapshot" }, "real", openPolicy
+    )) as any;
+    expect(result.success).toBe(true);
+    expect(result.snapshot).toBe("<tree>");
+    expect(mockDriver.execute).toHaveBeenCalledWith({ action: "snapshot" });
+  });
+
+  it("does NOT call fetch when driver is provided", async () => {
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy;
+    await handler({ action: "click", target: { role: "button", name: "Go" } }, "real", openPolicy);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    globalThis.fetch = originalFetch;
+  });
+
+  it("still returns mock response in mock mode", async () => {
+    const result = (await handler(
+      { action: "navigate", url: "https://example.com" }, "mock", openPolicy
+    )) as any;
+    expect(result.success).toBe(true);
+    expect(result.title).toBe("Example Domain");
+    expect(mockDriver.execute).not.toHaveBeenCalled();
+  });
+
+  it("still returns dry_run response in dry_run mode", async () => {
+    const result = (await handler(
+      { action: "navigate", url: "https://example.com" }, "dry_run", openPolicy
+    )) as any;
+    expect(result.success).toBe(true);
+    expect(result.url).toContain("[dry_run]");
+    expect(mockDriver.execute).not.toHaveBeenCalled();
+  });
+
+  it("enforces policy before calling driver for navigate", async () => {
+    const restrictedPolicy: PolicyProfile = {
+      ...openPolicy,
+      allowed_endpoints: ["https://api.allowed.com"],
+    };
+    await expect(
+      handler({ action: "navigate", url: "https://evil.com" }, "real", restrictedPolicy),
+    ).rejects.toThrow();
+    expect(mockDriver.execute).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown actions even with driver", async () => {
+    const result = (await handler(
+      { action: "destroy" }, "real", openPolicy
+    )) as any;
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Unknown action");
+    expect(mockDriver.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("createBrowserHandler — without driver (relay fallback)", () => {
+  it("calls fetch to relay URL", async () => {
+    const handler = createBrowserHandler();
+    mockFetch({ success: true, url: "https://example.com", title: "Example" });
+    const result = (await handler(
+      { action: "navigate", url: "https://example.com" }, "real", openPolicy
+    )) as any;
+    expect(result.success).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://localhost:9222/actions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ action: "navigate", url: "https://example.com" }),
+      }),
+    );
+  });
+});
+
+describe("backward-compatible browserHandler export", () => {
+  it("is a function (ToolHandler)", () => {
+    expect(typeof browserHandler).toBe("function");
+  });
+
+  it("uses relay fallback (no driver)", async () => {
+    mockFetch({ success: true, snapshot: "<tree>" });
+    const result = (await browserHandler(
+      { action: "snapshot" }, "real", openPolicy
+    )) as any;
+    expect(result.success).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://localhost:9222/actions",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });

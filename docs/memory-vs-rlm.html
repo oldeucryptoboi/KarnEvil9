@@ -4,6 +4,74 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Memory-Assisted Learning vs Recursive Language Modeling: An Empirical Study</title>
+
+<!-- Authorship -->
+<meta name="author" content="Laurent DeSegur">
+
+<!-- SEO -->
+<meta name="description" content="An empirical comparison of Memory-Assisted Learning (MAL) and Recursive Language Modeling (RLM) for enabling LLMs to improve at strategic tasks without weight updates. 72-game tic-tac-toe experiment using a 3-node swarm mesh, demonstrating that hybrid memory+code architectures eliminate losses while pure self-referential learning hits a reliability ceiling.">
+<meta name="keywords" content="LLM learning, recursive language modeling, memory-assisted learning, agentic AI, self-improving AI, tic-tac-toe AI, knowing-doing gap, Claude, Anthropic, swarm agents, multi-agent systems, in-context learning, AI memory systems, KarnEvil9, prompt engineering, AI architecture">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+<link rel="canonical" href="https://github.com/oldeucryptoboi/KarnEvil9/blob/master/docs/memory-vs-rlm.html">
+
+<!-- Open Graph / Social -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="Memory-Assisted Learning vs Recursive Language Modeling">
+<meta property="og:description" content="Can an LLM improve at a game by reading its own past failures? An empirical comparison using a swarm-based tic-tac-toe testbed shows hybrid memory+code beats pure recursive self-improvement.">
+<meta property="og:site_name" content="KarnEvil9 Project">
+<meta property="article:author" content="Laurent DeSegur">
+<meta property="article:published_time" content="2026-02-09">
+<meta property="article:section" content="AI Research">
+<meta property="article:tag" content="LLM">
+<meta property="article:tag" content="Recursive Language Modeling">
+<meta property="article:tag" content="Memory-Assisted Learning">
+<meta property="article:tag" content="Agentic AI">
+<meta property="article:tag" content="Multi-Agent Systems">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Memory-Assisted Learning vs Recursive Language Modeling">
+<meta name="twitter:description" content="Can an LLM improve at a game by reading its own past failures? 72-game empirical study comparing two learning paradigms for LLMs without weight updates.">
+
+<!-- Generative Engine Optimization (GEO) -->
+<meta name="citation_title" content="Memory-Assisted Learning vs Recursive Language Modeling: An Empirical Study">
+<meta name="citation_author" content="Laurent DeSegur">
+<meta name="citation_date" content="2026-02-09">
+<meta name="citation_journal_title" content="KarnEvil9 Technical Reports">
+
+<!-- Schema.org structured data for GEO -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Memory-Assisted Learning vs Recursive Language Modeling: An Empirical Study",
+  "alternativeHeadline": "Can an LLM improve at a game by reading its own past failures?",
+  "author": {
+    "@type": "Person",
+    "name": "Laurent DeSegur"
+  },
+  "datePublished": "2026-02-09",
+  "description": "An empirical comparison of Memory-Assisted Learning (MAL) and Recursive Language Modeling (RLM) for enabling LLMs to improve at strategic tasks without weight updates. Using a 3-node swarm mesh tic-tac-toe testbed, we demonstrate that MAL achieves zero losses by run 3 while pure RLM hits a reliability ceiling due to the knowing-doing gap.",
+  "keywords": ["LLM learning", "recursive language modeling", "memory-assisted learning", "agentic AI", "self-improving AI", "knowing-doing gap", "multi-agent systems", "in-context learning"],
+  "about": [
+    {"@type": "Thing", "name": "Large Language Models"},
+    {"@type": "Thing", "name": "Machine Learning"},
+    {"@type": "Thing", "name": "Artificial Intelligence"},
+    {"@type": "Thing", "name": "Multi-Agent Systems"}
+  ],
+  "isPartOf": {
+    "@type": "SoftwareSourceCode",
+    "name": "KarnEvil9",
+    "codeRepository": "https://github.com/oldeucryptoboi/KarnEvil9"
+  },
+  "mainEntityOfPage": {
+    "@type": "WebPage"
+  },
+  "proficiencyLevel": "Expert",
+  "dependencies": "Claude Haiku 4.5, Claude Sonnet 4.5, KarnEvil9 Swarm Package",
+  "abstract": "We compare two approaches for enabling a large language model to improve at a strategic game without weight updates: Memory-Assisted Learning (MAL), which augments an LLM with persistent external memory and programmatic rules derived from accumulated lessons, and Recursive Language Modeling (RLM), a pure self-referential loop where the model's own analytical outputs feed back into its prompt context. Over 72 games of tic-tac-toe against a near-optimal opponent, MAL achieves zero losses by the third run while RLM reduces losses but cannot eliminate them, revealing a fundamental knowing-doing gap in LLM reasoning."
+}
+</script>
 <style>
   :root {
     --bg: #0d1117;
@@ -72,6 +140,12 @@
     color: var(--text-dim);
     max-width: 650px;
     margin: 0 auto 1.5rem;
+  }
+  .paper-header .author {
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 0.5rem;
   }
   .paper-header .meta {
     font-size: 0.85rem;
@@ -403,6 +477,7 @@
     Can an LLM improve at a game by reading its own past failures?
     An empirical comparison of two learning paradigms using a swarm-based tic-tac-toe testbed.
   </p>
+  <div class="author">Laurent DeSegur</div>
   <div class="meta">
     <span>February 2026</span> &middot;
     <span>KarnEvil9 Project</span> &middot;

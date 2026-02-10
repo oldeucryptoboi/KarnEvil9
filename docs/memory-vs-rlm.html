@@ -1892,6 +1892,116 @@
   feedback loops) may yield better returns than simply scaling to more capable models.
 </p>
 
+<h3>10.5 Training Signals for Recursive Control</h3>
+
+<p>
+  Our experiment fixed the recursion structure externally: 12 games per run, 3 runs per phase, one lesson
+  per game. A full RLM system would need the model to control its own recursion&mdash;deciding <em>when</em>
+  to recurse deeper, <em>when</em> to consolidate, and <em>when</em> to stop. This requires training signals
+  that our experiment didn't provide but that the data strongly suggests are needed.
+</p>
+
+<p>
+  <strong>Lesson similarity as a halt signal.</strong> By run 3, over 70% of lessons were restatements of
+  "take opposite corners" and "block two-in-a-row." A system that measured semantic similarity between new
+  and existing lessons could detect this saturation and shift from generating more lessons to consolidating
+  existing ones. The signal: <em>if the last K lessons have cosine similarity &gt; 0.85 with existing
+  lessons, stop recursing and synthesize.</em>
+</p>
+
+<p>
+  <strong>Performance plateau as a depth signal.</strong> RLM run 2 performed <em>worse</em> than run 1
+  despite having twice the lessons. A system monitoring its own win/loss rate across iterations could
+  detect this regression and trigger a different strategy&mdash;perhaps lesson pruning, contradiction
+  resolution, or strategy reformulation rather than additional accumulation. The signal: <em>if loss rate
+  hasn't decreased over N iterations, change the recursion strategy rather than continuing the current one.</em>
+</p>
+
+<p>
+  <strong>Contradiction detection as a consolidation trigger.</strong> Our data shows directly contradictory
+  lessons accumulating: game 5 says "prioritize offense over defense," game 6 says "block before pursuing
+  threats." A full RLM system should detect when its lesson store contains contradictions and initiate a
+  meta-level reconciliation pass&mdash;asking the model to resolve the conflict into a conditional rule
+  ("block when threatened, attack when not"). The signal: <em>if lessons contain opposing directives for
+  the same game state, recurse into a consolidation pass before continuing play.</em>
+</p>
+
+<p>
+  These signals point toward a <strong>meta-recursive architecture</strong>: the outer loop generates
+  experience, an inner loop monitors the quality of that experience, and a control layer decides whether
+  to continue, consolidate, or terminate. None of this was present in our experiment&mdash;and the
+  performance regression in RLM run 2 is exactly what happens without it.
+</p>
+
+<h3>10.6 Failure Mode: Looping Hallucinations</h3>
+
+<p>
+  The self-referential feedback loop in RLM creates a specific failure mode that traditional RL systems
+  don't face: <strong>looping hallucinations</strong>, where the model's own incorrect outputs compound
+  through iterations, creating a degenerative spiral.
+</p>
+
+<p>
+  We observed a mild form of this in our data. Consider the sequence:
+</p>
+
+<ol style="margin: 0.5rem 0 1rem 1.5rem; color: var(--text-dim);">
+  <li>Game 1: Claude loses, generates lesson: "prioritize taking the opposite corner."</li>
+  <li>Game 5: Claude draws (good), generates lesson: "prioritize creating immediate threats over
+  defensive blocks."</li>
+  <li>Game 6: Claude draws, generates lesson: "block X's second corner before pursuing own threats."</li>
+  <li>Games 7+: The model now has conflicting lessons. In some games it follows the offensive advice,
+  in others the defensive. It cannot reliably determine which lesson applies to the current board
+  state because the lessons lack the conditional specificity to disambiguate.</li>
+</ol>
+
+<p>
+  This is not yet a hallucination spiral&mdash;the lessons are individually reasonable. But it illustrates
+  the mechanism. In a more complex domain, the failure mode escalates:
+</p>
+
+<div class="callout red">
+  <p>
+    <strong>Degenerative loop:</strong> Model produces incorrect analysis &#x2192; incorrect analysis
+    becomes a lesson &#x2192; lesson biases future reasoning &#x2192; biased reasoning produces more
+    incorrect analysis &#x2192; each iteration reinforces the error. Unlike RL, where gradient updates
+    can correct course through reward signals, RLM has <strong>no error-correction mechanism</strong>.
+    A bad lesson persists in the context window indefinitely, biasing all subsequent iterations.
+  </p>
+</div>
+
+<p>
+  In our experiment, this was bounded by tic-tac-toe's simplicity&mdash;there are only so many wrong
+  things to say about a 9-square board. But in open-ended domains (code generation, strategic planning,
+  research synthesis), a looping hallucination could be catastrophic: the model confidently generates an
+  incorrect architectural pattern, encodes it as a lesson, and then applies it to every subsequent task,
+  each application generating a new lesson that further reinforces the mistake.
+</p>
+
+<p>
+  <strong>Mitigations:</strong>
+</p>
+
+<ul style="margin: 0.5rem 0 1rem 1.5rem; color: var(--text-dim);">
+  <li><strong>External validation:</strong> Ground-truth checks on lesson accuracy before they enter
+  the lesson store. In our experiment, the minimax opponent provides an implicit oracle&mdash;if a
+  lesson leads to a loss, the lesson may be wrong. In production, this could be unit tests, human review,
+  or a separate verification model.</li>
+  <li><strong>Lesson decay:</strong> Reduce the weight of older lessons over time, allowing the system
+  to "forget" early mistakes rather than carrying them forever.</li>
+  <li><strong>Adversarial self-critique:</strong> Before accepting a new lesson, ask the model to argue
+  against it. If the counter-argument is compelling, discard or flag the lesson.</li>
+  <li><strong>Promotion to code (MAL's approach):</strong> Once a lesson is promoted to a deterministic
+  rule, it can be tested against known correct behavior. Code is verifiable in ways that natural
+  language lessons are not.</li>
+</ul>
+
+<p>
+  This failure mode is the strongest argument for hybrid architectures: RLM for exploration and pattern
+  discovery, but with external guardrails that prevent the feedback loop from becoming self-reinforcing
+  in the wrong direction.
+</p>
+
 <!-- ════════════════════════════════════════════════════════════════════ -->
 <!-- 11. CONCLUSION                                                    -->
 <!-- ════════════════════════════════════════════════════════════════════ -->

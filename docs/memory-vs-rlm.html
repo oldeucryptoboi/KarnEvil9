@@ -69,7 +69,7 @@
   },
   "proficiencyLevel": "Expert",
   "dependencies": "Claude Haiku 4.5, Claude Sonnet 4.5, KarnEvil9 Swarm Package",
-  "abstract": "We compare two approaches for enabling a large language model to improve at a strategic game without weight updates: Memory-Assisted Learning (MAL), which augments an LLM with persistent external memory and programmatic rules derived from accumulated lessons, and Recursive Language Modeling (RLM), a pure self-referential loop where the model's own analytical outputs feed back into its prompt context. Over 72 games of tic-tac-toe against a near-optimal opponent, MAL achieves zero losses by the third run while RLM reduces losses but cannot eliminate them, revealing a fundamental knowing-doing gap in LLM reasoning."
+  "abstract": "We compare two approaches for enabling a large language model to improve at a strategic game without weight updates: Memory-Assisted Learning (MAL), which augments an LLM with persistent external memory and programmatic rules derived from accumulated lessons, and Recursive Language Modeling (RLM), a pure self-referential loop where the model's own analytical outputs feed back into its prompt context. The LLM plays first (O) against a deterministic minimax opponent (X) with a 10% random blunder rate—the only exploitable weakness. Over 72 games, MAL learns to reliably capitalize on those blunders, achieving zero losses by run 3, while pure RLM reduces losses but cannot eliminate them, revealing a fundamental knowing-doing gap in LLM reasoning."
 }
 </script>
 <style>
@@ -665,37 +665,57 @@
   <div class="diagram-box" style="border-color: var(--red);">
     <div class="icon">&#x1F3AF;</div>
     <div class="name">Expert (X)</div>
-    <div class="desc">Port 3201<br>Minimax algorithm<br>10% blunder rate</div>
+    <div class="desc">Port 3201<br>Deterministic minimax<br>10% random blunder</div>
   </div>
   <div class="diagram-box" style="border-color: var(--accent);">
     <div class="icon">&#x1F4DA;</div>
     <div class="name">Learner (O)</div>
-    <div class="desc">Port 3202<br>Claude + Memory<br>Goes first</div>
+    <div class="desc">Port 3202<br>Claude + Memory<br>Moves first (advantage)</div>
   </div>
 </div>
 
 <h3>Expert Node</h3>
 <p>
-  The expert plays X using the minimax algorithm&mdash;provably optimal play for tic-tac-toe. To create
-  exploitable openings (simulating real-world imperfect opponents), the expert has a <strong>10% blunder
-  rate</strong>: one in ten moves is chosen randomly rather than optimally. Without this, minimax as
-  second player guarantees at least a draw, making wins impossible for O regardless of strategy.
+  The expert plays X (second) using the <strong>minimax algorithm</strong>&mdash;a deterministic, provably
+  optimal strategy for tic-tac-toe that evaluates every possible future game state and selects the move
+  that minimizes the opponent's best outcome. Against perfect play, minimax is unbeatable. However, to
+  create a learnable signal, the expert has a <strong>10% uniform blunder rate</strong>: on any given move,
+  there is a 1-in-10 chance the expert picks a random legal square instead of the optimal one. This is the
+  <em>only</em> weakness in the opponent&mdash;a narrow, stochastic window that the learner must learn to exploit.
 </p>
 
 <h3>Learner Node</h3>
 <p>
-  The learner plays O (moving first) and receives the current board state plus all accumulated lessons
-  as its prompt. After each game, a separate Claude call analyzes the game and extracts a single
-  generalizable lesson, which is appended to the persistent lesson store.
+  The learner plays O and <strong>always moves first</strong>. This is a deliberate design choice: in
+  tic-tac-toe, the first player has a theoretical advantage&mdash;with perfect play, X (first mover)
+  can force at least a draw, and against imperfect opponents can force a win. By giving Claude the
+  first-move advantage <em>and</em> providing the expert with a 10% blunder rate, the experiment creates
+  a scenario where winning is genuinely achievable but only if the learner can reliably execute correct
+  strategy. The question isn't <em>whether</em> Claude can identify winning patterns, but whether it can
+  consistently capitalize on the expert's rare mistakes when they occur.
+</p>
+
+<p>
+  On each move, the learner receives the current board state plus all accumulated lessons as its prompt.
+  After each game, a separate Claude call analyzes the complete game transcript and extracts a single
+  generalizable lesson, which is appended to the persistent lesson store. This creates a feedback loop
+  where past failures directly inform future play.
 </p>
 
 <h3>Why Tic-Tac-Toe?</h3>
 <p>
   Tic-tac-toe was chosen for three properties: (1) it has <strong>solved optimal play</strong>, providing
-  a known ceiling for evaluation; (2) it is <strong>simple enough</strong> that individual moves and mistakes
-  are easy to attribute; (3) Claude has <strong>some prior knowledge</strong> of the game, which creates
-  a realistic starting point (the learner isn't truly blank-slate, mirroring how LLM agents typically
-  have partial domain knowledge).
+  a known ceiling for evaluation&mdash;we know exactly what perfect looks like; (2) it is <strong>simple
+  enough</strong> that individual moves and mistakes are easy to attribute (unlike chess or Go, every loss
+  can be traced to a specific blunder); (3) Claude has <strong>some prior knowledge</strong> of the game,
+  which creates a realistic starting point&mdash;the learner isn't truly blank-slate, mirroring how LLM
+  agents typically have partial domain knowledge when deployed to real-world tasks.
+</p>
+
+<p>
+  The experimental setup thus asks a precise question: <strong>given first-move advantage and a
+  near-perfect opponent with a known 10% weak spot, can an LLM learn to reliably exploit that weakness
+  through accumulated experience?</strong> MAL says yes. Pure RLM says <em>almost</em>.
 </p>
 
 <!-- ════════════════════════════════════════════════════════════════════ -->

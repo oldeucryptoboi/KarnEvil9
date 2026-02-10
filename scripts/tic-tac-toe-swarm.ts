@@ -45,6 +45,30 @@ const NUM_GAMES = parseInt(args.games!, 10);
 // ─── Claude ──────────────────────────────────────────────────────────
 const anthropic = new Anthropic();
 
+const tokenTracker = {
+  total_calls: 0,
+  total_input: 0,
+  total_output: 0,
+  per_game: [] as Array<{ calls: number; input: number; output: number }>,
+  _snap_calls: 0,
+  _snap_input: 0,
+  _snap_output: 0,
+};
+
+function startGameTokens() {
+  tokenTracker._snap_calls = tokenTracker.total_calls;
+  tokenTracker._snap_input = tokenTracker.total_input;
+  tokenTracker._snap_output = tokenTracker.total_output;
+}
+
+function endGameTokens() {
+  tokenTracker.per_game.push({
+    calls: tokenTracker.total_calls - tokenTracker._snap_calls,
+    input: tokenTracker.total_input - tokenTracker._snap_input,
+    output: tokenTracker.total_output - tokenTracker._snap_output,
+  });
+}
+
 async function callClaude(system: string, user: string, maxTokens = 200): Promise<string> {
   const response = await anthropic.messages.create({
     model: MODEL,
@@ -52,6 +76,9 @@ async function callClaude(system: string, user: string, maxTokens = 200): Promis
     system,
     messages: [{ role: "user", content: user }],
   });
+  tokenTracker.total_calls++;
+  tokenTracker.total_input += response.usage.input_tokens;
+  tokenTracker.total_output += response.usage.output_tokens;
   const block = response.content[0];
   return block?.type === "text" ? block.text : "";
 }
@@ -430,6 +457,7 @@ async function main() {
   const results: Array<{ outcome: string; lessonsUsed: number }> = [];
 
   for (let game = 1; game <= NUM_GAMES; game++) {
+    startGameTokens();
     console.log(`\n${C.bold}━━━ GAME ${game} of ${NUM_GAMES} ━━━━━━━━━━━━━━━━━━${C.reset}`);
 
     // Feed ALL lessons — the only source of improvement (pure RLM)
@@ -515,6 +543,7 @@ async function main() {
     };
     memory.addLesson(lesson);
     await memory.save();
+    endGameTokens();
   }
 
   // ── Scoreboard ─────────────────────────────────────────────────────
@@ -524,17 +553,28 @@ async function main() {
   let wins = 0, losses = 0, draws = 0;
   for (let i = 0; i < results.length; i++) {
     const r = results[i]!;
+    const g = tokenTracker.per_game[i];
     const emoji = r.outcome === "O" ? "🏆 Win " : r.outcome === "X" ? "❌ Loss" : "🤝 Draw";
     if (r.outcome === "O") wins++;
     else if (r.outcome === "X") losses++;
     else draws++;
-    console.log(`  Game ${String(i + 1).padStart(2)}: ${emoji}  │ 📚 ${r.lessonsUsed} lesson${r.lessonsUsed === 1 ? "" : "s"}`);
+    const tokStr = g ? `${C.dim}${g.input + g.output} tok (${g.calls} calls)${C.reset}` : "";
+    console.log(`  Game ${String(i + 1).padStart(2)}: ${emoji}  │ 📚 ${String(r.lessonsUsed).padStart(2)} lesson${r.lessonsUsed === 1 ? " " : "s"} │ ${tokStr}`);
   }
 
   console.log();
   console.log(`  ${C.red}Expert:${C.reset}  ${losses}W ${wins}L ${draws}D`);
   console.log(`  ${C.blue}Learner:${C.reset} ${wins}W ${losses}L ${draws}D`);
   console.log(`\n  ${C.magenta}🧠 ${memory.getLessons().length} total lessons in memory${C.reset}`);
+
+  // Token summary
+  const avgPerGame = Math.round((tokenTracker.total_input + tokenTracker.total_output) / NUM_GAMES);
+  console.log(`\n  ${C.cyan}📈 Token Usage${C.reset}`);
+  console.log(`  ${C.dim}${"─".repeat(40)}${C.reset}`);
+  console.log(`  Input:  ${tokenTracker.total_input.toLocaleString()} tokens`);
+  console.log(`  Output: ${tokenTracker.total_output.toLocaleString()} tokens`);
+  console.log(`  Total:  ${C.bold}${(tokenTracker.total_input + tokenTracker.total_output).toLocaleString()} tokens${C.reset} (${tokenTracker.total_calls} API calls)`);
+  console.log(`  Avg/game: ${avgPerGame.toLocaleString()} tokens`);
   console.log(`  ${C.dim}Run again to see continued improvement!${C.reset}`);
 
   // ── Shutdown ───────────────────────────────────────────────────────

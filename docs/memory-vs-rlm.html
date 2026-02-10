@@ -10,7 +10,7 @@
 
 <!-- SEO -->
 <meta name="description" content="An empirical comparison of Memory-Assisted Learning (MAL) and Recursive Language Modeling (RLM) for enabling LLMs to improve at strategic tasks without weight updates. 72-game tic-tac-toe experiment using a 3-node swarm mesh, demonstrating that hybrid memory+code architectures eliminate losses while pure self-referential learning hits a reliability ceiling.">
-<meta name="keywords" content="LLM learning, recursive language modeling, memory-assisted learning, agentic AI, self-improving AI, tic-tac-toe AI, knowing-doing gap, Claude, Anthropic, swarm agents, multi-agent systems, in-context learning, AI memory systems, KarnEvil9, prompt engineering, AI architecture">
+<meta name="keywords" content="LLM learning, recursive language modeling, memory-assisted learning, agentic AI, self-improving AI, tic-tac-toe AI, knowing-doing gap, Claude, Anthropic, swarm agents, multi-agent systems, in-context learning, AI memory systems, KarnEvil9, prompt engineering, AI architecture, token economics, LLM cost optimization, context window scaling">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 <link rel="canonical" href="https://github.com/oldeucryptoboi/KarnEvil9/blob/master/docs/memory-vs-rlm.html">
 
@@ -52,7 +52,7 @@
   },
   "datePublished": "2026-02-09",
   "description": "An empirical comparison of Memory-Assisted Learning (MAL) and Recursive Language Modeling (RLM) for enabling LLMs to improve at strategic tasks without weight updates. Using a 3-node swarm mesh tic-tac-toe testbed, we demonstrate that MAL achieves zero losses by run 3 while pure RLM hits a reliability ceiling due to the knowing-doing gap.",
-  "keywords": ["LLM learning", "recursive language modeling", "memory-assisted learning", "agentic AI", "self-improving AI", "knowing-doing gap", "multi-agent systems", "in-context learning"],
+  "keywords": ["LLM learning", "recursive language modeling", "memory-assisted learning", "agentic AI", "self-improving AI", "knowing-doing gap", "multi-agent systems", "in-context learning", "token economics", "LLM cost optimization"],
   "about": [
     {"@type": "Thing", "name": "Large Language Models"},
     {"@type": "Thing", "name": "Machine Learning"},
@@ -1120,9 +1120,200 @@
 </p>
 
 <!-- ════════════════════════════════════════════════════════════════════ -->
-<!-- 7. LESSON EVOLUTION                                               -->
+<!-- 7. TOKEN ECONOMICS                                                -->
 <!-- ════════════════════════════════════════════════════════════════════ -->
-<h2 id="lesson-evolution">7. Lesson Evolution</h2>
+<h2 id="token-economics">7. Token Economics</h2>
+
+<p>
+  A critical but often overlooked dimension of learning architectures is <strong>token cost</strong>.
+  Every Claude API call consumes input and output tokens, and the two approaches have fundamentally
+  different consumption profiles.
+</p>
+
+<h3>7.1 Per-Move Token Growth</h3>
+
+<p>
+  Both MAL and RLM inject accumulated lessons into the learner's prompt. As lessons grow, so does
+  the input token count for every move. The prompt for each learner move consists of:
+</p>
+
+<ul style="margin: 0.5rem 0 1rem 1.5rem; color: var(--text-dim);">
+  <li><strong>System prompt:</strong> ~150 tokens (game rules, chain-of-thought instructions)</li>
+  <li><strong>Board state + move history:</strong> ~100&ndash;150 tokens (grows through the game)</li>
+  <li><strong>Lesson block:</strong> ~30 tokens per lesson (variable)</li>
+  <li><strong>Output:</strong> ~50&ndash;80 tokens (reasoning + single digit)</li>
+</ul>
+
+<p>
+  This means input tokens per move scale linearly with lesson count:
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Lessons in Memory</th>
+      <th>Estimated Input / Move</th>
+      <th>Run</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>0</td><td>~300 tokens</td><td>Run 1, game 1</td></tr>
+    <tr><td>12</td><td>~660 tokens</td><td>Run 2, game 1</td></tr>
+    <tr><td>24</td><td>~1,020 tokens</td><td>Run 3, game 1</td></tr>
+    <tr><td>36</td><td>~1,380 tokens</td><td>Run 3, game 12</td></tr>
+  </tbody>
+</table>
+
+<h3>7.2 The MAL Token Advantage</h3>
+
+<p>
+  Here is where the architectures diverge. In a typical tic-tac-toe game, the learner (O) makes
+  <strong>~5 moves</strong>. RLM routes every one of them through Claude. MAL, once its programmatic
+  rules activate, <strong>bypasses Claude entirely</strong> for block and win moves&mdash;those decisions
+  are made by deterministic code at zero token cost.
+</p>
+
+<p>
+  By run 3, the block rule handles ~2 of 5 moves per game, and the win rule handles ~0.5. That
+  leaves only <strong>~2.5 Claude calls per game</strong> for MAL versus 5 for RLM&mdash;a 50%
+  reduction in API calls, each of which carries the full lesson payload.
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th>MAL (Run 3)</th>
+      <th>RLM (Run 3)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Claude calls per game</strong></td>
+      <td>~2.5 moves + 1 lesson = 3.5</td>
+      <td>~5 moves + 1 lesson = 6</td>
+    </tr>
+    <tr>
+      <td><strong>Input tokens per game</strong></td>
+      <td>~2,800</td>
+      <td>~5,400</td>
+    </tr>
+    <tr>
+      <td><strong>Total tokens per game</strong></td>
+      <td>~3,100</td>
+      <td>~5,800</td>
+    </tr>
+    <tr>
+      <td><strong>Estimated per-run (12 games)</strong></td>
+      <td>~37,000</td>
+      <td>~70,000</td>
+    </tr>
+    <tr>
+      <td><strong>Model</strong></td>
+      <td>Haiku 4.5 ($0.80/M&nbsp;in, $4/M&nbsp;out)</td>
+      <td>Sonnet 4.5 ($3/M&nbsp;in, $15/M&nbsp;out)</td>
+    </tr>
+    <tr>
+      <td><strong>Estimated cost per run</strong></td>
+      <td>~$0.03</td>
+      <td>~$0.25</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <p>
+    <strong>MAL is ~8&times; cheaper per run.</strong> The combination of fewer API calls (rules bypass Claude)
+    and a cheaper model (Haiku vs Sonnet) creates a compounding cost advantage&mdash;while also producing
+    better results.
+  </p>
+</div>
+
+<h3>7.3 Scaling: Neither Has Infinite Context</h3>
+
+<p>
+  A natural question is whether RLM's pure-prompt approach offers a <strong>scaling advantage</strong>
+  through "infinite context"&mdash;the idea that lessons, being natural language, can be summarized
+  and compressed indefinitely, allowing unbounded knowledge accumulation within the context window.
+</p>
+
+<p>
+  This is a misconception. <strong>Both approaches are bounded by the context window</strong>, and
+  MAL actually scales better:
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Scaling Property</th>
+      <th>MAL</th>
+      <th>RLM</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Knowledge in context</strong></td>
+      <td>Only unpromoted lessons</td>
+      <td>All lessons (entire history)</td>
+    </tr>
+    <tr>
+      <td><strong>Knowledge in code</strong></td>
+      <td>Promoted rules (zero tokens)</td>
+      <td>None</td>
+    </tr>
+    <tr>
+      <td><strong>Context pressure at scale</strong></td>
+      <td>Low (lessons graduate to code)</td>
+      <td>High (all lessons stay in prompt)</td>
+    </tr>
+    <tr>
+      <td><strong>Cost trajectory</strong></td>
+      <td>Flattens as rules absorb patterns</td>
+      <td>Grows linearly with experience</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+  In MAL, high-confidence lessons are <strong>promoted to deterministic code</strong>, which removes them
+  from the context window entirely. The block rule, for instance, replaces dozens of "always block
+  two-in-a-row" lessons with a single programmatic check. This means MAL's context pressure
+  <em>decreases</em> as the system matures, while RLM's context pressure only grows.
+</p>
+
+<p>
+  At 36 lessons (~1,100 tokens of lesson text), neither approach is anywhere near the context limit.
+  But extrapolate to a more complex domain&mdash;chess, code review, security auditing&mdash;where
+  thousands of lessons accumulate, and the difference becomes critical. MAL offloads mature knowledge
+  to code; RLM must carry everything in the prompt forever.
+</p>
+
+<h3>7.4 RLM's Actual Advantage</h3>
+
+<p>
+  If not infinite context, what <em>is</em> RLM's advantage? Two things:
+</p>
+
+<ol style="margin: 0.5rem 0 1rem 1.5rem; color: var(--text-dim);">
+  <li><strong>Zero engineering overhead.</strong> RLM requires no code changes, no rule authoring, no
+  promotion logic. The feedback loop is entirely self-contained in the prompt. This makes it trivially
+  portable to any domain.</li>
+  <li><strong>Nuance retention.</strong> Natural language lessons can express subtle, conditional,
+  context-dependent strategies that are difficult to encode as deterministic rules. "When the opponent
+  takes two opposite corners and you hold center, prioritize edges over corners" is easy to state in
+  English but non-trivial to implement as a programmatic rule.</li>
+</ol>
+
+<p>
+  The optimal architecture, then, is a <strong>hybrid</strong>: use RLM to discover and articulate patterns,
+  then promote the highest-confidence patterns to code. The prompt carries only emerging or nuanced
+  lessons; everything else runs as zero-token deterministic logic.
+</p>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- 8. LESSON EVOLUTION                                               -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2 id="lesson-evolution">8. Lesson Evolution</h2>
 
 <p>
   Examining the 36 lessons generated across the RLM phase reveals how the learner's understanding evolved:
@@ -1211,9 +1402,9 @@
 </p>
 
 <!-- ════════════════════════════════════════════════════════════════════ -->
-<!-- 8. RAW EXPERIMENTAL OUTPUT                                        -->
+<!-- 9. RAW EXPERIMENTAL OUTPUT                                        -->
 <!-- ════════════════════════════════════════════════════════════════════ -->
-<h2 id="output">8. Raw Experimental Output</h2>
+<h2 id="output">9. Raw Experimental Output</h2>
 
 <p>
   The following excerpts show representative terminal outputs from the experimental runs (runs 1 and 3 from each phase),
@@ -1608,11 +1799,11 @@
 </div>
 
 <!-- ════════════════════════════════════════════════════════════════════ -->
-<!-- 9. IMPLICATIONS                                                   -->
+<!-- 10. IMPLICATIONS                                                  -->
 <!-- ════════════════════════════════════════════════════════════════════ -->
-<h2 id="implications">9. Implications for Agentic Systems</h2>
+<h2 id="implications">10. Implications for Agentic Systems</h2>
 
-<h3>9.1 Hybrid Approaches Win</h3>
+<h3>10.1 Hybrid Approaches Win</h3>
 
 <p>
   The results strongly favor a <strong>hybrid MAL architecture</strong> for production agentic systems.
@@ -1631,7 +1822,7 @@
   which through repetition becomes unconscious reflex (programmatic rules).
 </p>
 
-<h3>9.2 The Lesson Saturation Problem</h3>
+<h3>10.2 The Lesson Saturation Problem</h3>
 
 <p>
   Both approaches face a <strong>lesson saturation</strong> problem at scale. By run 3, the learner had
@@ -1645,7 +1836,7 @@
   <li><strong>Lesson pruning:</strong> Remove lessons that have been superseded by more refined versions.</li>
 </ul>
 
-<h3>9.3 Domain Complexity and Prior Knowledge</h3>
+<h3>10.3 Domain Complexity and Prior Knowledge</h3>
 
 <p>
   A significant caveat: Claude already knows tic-tac-toe. Its baseline performance (before any lessons)
@@ -1659,7 +1850,7 @@
   rather than recalled from pre-training.
 </p>
 
-<h3>9.4 Model Capability vs. Architecture</h3>
+<h3>10.4 Model Capability vs. Architecture</h3>
 
 <p>
   The finding that Haiku + MAL outperforms Sonnet + RLM has significant cost implications. In production
@@ -1669,9 +1860,9 @@
 </p>
 
 <!-- ════════════════════════════════════════════════════════════════════ -->
-<!-- 10. CONCLUSION                                                    -->
+<!-- 11. CONCLUSION                                                    -->
 <!-- ════════════════════════════════════════════════════════════════════ -->
-<h2 id="conclusion">10. Conclusion</h2>
+<h2 id="conclusion">11. Conclusion</h2>
 
 <p>
   We compared two paradigms for enabling LLMs to improve at a strategic task without weight updates:

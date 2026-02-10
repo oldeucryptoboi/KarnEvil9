@@ -1218,49 +1218,81 @@
       <th></th>
       <th>MAL (Run 3)</th>
       <th>RLM (Run 3)</th>
+      <th>RLM (Run 3, same model)</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><strong>Claude calls per game</strong></td>
-      <td>~2.5 moves + 1 lesson = 3.5</td>
-      <td>~5 moves + 1 lesson = 6</td>
-    </tr>
-    <tr>
-      <td><strong>Input tokens per game</strong></td>
-      <td>~2,800</td>
-      <td>~5,400</td>
+      <td>~3.5</td>
+      <td>~6</td>
+      <td>~6</td>
     </tr>
     <tr>
       <td><strong>Total tokens per game</strong></td>
       <td>~3,100</td>
+      <td>~5,800</td>
       <td>~5,800</td>
     </tr>
     <tr>
       <td><strong>Estimated per-run (12 games)</strong></td>
       <td>~37,000</td>
       <td>~70,000</td>
+      <td>~70,000</td>
     </tr>
     <tr>
       <td><strong>Model</strong></td>
-      <td>Haiku 4.5 ($0.80/M&nbsp;in, $4/M&nbsp;out)</td>
-      <td>Sonnet 4.5 ($3/M&nbsp;in, $15/M&nbsp;out)</td>
+      <td>Haiku 4.5</td>
+      <td>Sonnet 4.5</td>
+      <td>Haiku 4.5</td>
     </tr>
     <tr>
       <td><strong>Estimated cost per run</strong></td>
       <td>~$0.03</td>
       <td>~$0.25</td>
+      <td>~$0.06</td>
     </tr>
   </tbody>
 </table>
 
+<p>
+  <strong>Decomposing the cost gap.</strong> The headline comparison&mdash;MAL at ~$0.03 vs RLM at
+  ~$0.25&mdash;is ~8&times;, but this conflates two independent variables:
+</p>
+
+<ol style="margin: 0.5rem 0 1rem 1.5rem; color: var(--text-dim);">
+  <li><strong>Architectural advantage (~2&times;):</strong> MAL's programmatic rules bypass Claude for
+  ~50% of moves. This savings is intrinsic to the architecture&mdash;code execution is always cheaper
+  than LLM inference, regardless of which model you use.</li>
+  <li><strong>Model pricing advantage (~4&times;):</strong> MAL used Haiku ($0.80/M input) while RLM
+  used Sonnet ($3/M input). This was a deliberate experimental choice&mdash;MAL's scaffolding
+  compensates for a weaker model&mdash;but it's a design decision, not an inherent property of MAL.</li>
+</ol>
+
+<p>
+  The third column shows the fair apples-to-apples comparison: RLM on the same Haiku model would cost
+  ~$0.06 per run, making MAL only ~2&times; cheaper. The architectural token savings is real but modest.
+  The larger implication is that MAL <strong>enables the use of cheaper models</strong> by offloading
+  critical decisions to code, while RLM demands a more capable (and more expensive) model because
+  every decision flows through the LLM.
+</p>
+
 <div class="callout">
   <p>
-    <strong>MAL is ~8&times; cheaper per run.</strong> The combination of fewer API calls (rules bypass Claude)
-    and a cheaper model (Haiku vs Sonnet) creates a compounding cost advantage&mdash;while also producing
-    better results.
+    <strong>The honest comparison:</strong> MAL's intrinsic architectural advantage is ~2&times; fewer
+    tokens (rules bypass the LLM). The remaining cost gap comes from MAL enabling a cheaper model.
+    In production, both factors compound&mdash;but they should be understood as separate levers.
   </p>
 </div>
+
+<p>
+  Note that our experiment tested only the simplest form of RLM (flat lesson injection). A full RLM
+  system with model-controlled recursion&mdash;meta-cognitive consolidation passes, contradiction
+  resolution, and learned halting (see &sect;10.5)&mdash;would add <em>additional</em> API calls at
+  each iteration, widening the token gap further. Every recursive pass requires a full forward pass
+  through the model with the entire accumulated context. MAL's code-level shortcuts become increasingly
+  valuable as recursion depth grows.
+</p>
 
 <h3>7.3 Scaling: Neither Has Infinite Context</h3>
 

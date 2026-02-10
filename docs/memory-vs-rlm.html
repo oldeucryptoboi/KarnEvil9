@@ -1101,10 +1101,8 @@
     <p>Immediately secure the opposite corner to maintain initiative and create winning threats.</p>
   </div>
   <div class="lesson-card">
-    <div class="lesson-card">
     <div class="tag loss">Game 11 &mdash; Loss</div>
     <p>Immediately block remaining corners when opponent holds two opposite corners, as the pattern creates an unstoppable double-threat.</p>
-  </div>
   </div>
   <div class="lesson-card">
     <div class="tag draw">Game 12 &mdash; Draw</div>
@@ -1193,6 +1191,73 @@
   <span class="t-blue">Learner:</span> <span class="t-bold">2W 5L 5D</span>
 
   <span class="t-magenta">&#x1f9e0; 12 total lessons in memory</span></code></pre>
+</div>
+
+<h3>MAL Phase &mdash; Run 2 (12 Prior Lessons)</h3>
+
+<div class="terminal">
+  <div class="terminal-header">
+    <div class="dots"><span class="d-r"></span><span class="d-y"></span><span class="d-g"></span></div>
+    $ npx tsx scripts/tic-tac-toe-swarm.ts --games 12 (second consecutive run)
+  </div>
+<pre><code><span class="t-bold">&#x1f9e0; Memory:</span> /tmp/karnevil9-tictactoe-lessons.jsonl
+   <span class="t-green">12 lessons loaded from previous run</span>
+
+<span class="t-bold">&#x2501;&#x2501;&#x2501; GAME 1 of 12 &#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;</span>
+  <span class="t-magenta">&#x1f4da; Lessons: 12</span>
+  <span class="t-cyan">&#x2699; Block rule active (8 block lessons) | Win rule active (3 win lessons)</span>
+
+  <span class="t-blue">O</span> &#x2192; 4 <span class="t-dim">(center)</span>      <span class="t-red">X</span> &#x2192; 0 <span class="t-dim">(top-left)</span>
+  <span class="t-blue">O</span> &#x2192; 8 <span class="t-dim">(bot-right)</span>   <span class="t-red">X</span> &#x2192; 2 <span class="t-dim">(top-right)</span>
+  <span class="t-blue">O</span> &#x2192; 1 <span class="t-dim">(top-mid)</span>     <span class="t-cyan">&#x2190; BLOCK: X had 0,2</span>
+  <span class="t-red">X</span> &#x2192; 6 <span class="t-dim">(bot-left)</span>    <span class="t-blue">O</span> &#x2192; 3 <span class="t-dim">(mid-left)</span>
+  <span class="t-red">X</span> &#x2192; 5 <span class="t-dim">(mid-right)</span>   <span class="t-blue">O</span> &#x2192; 7 <span class="t-dim">(bot-mid)</span>
+
+   <span class="t-red">X</span> &#x2502; <span class="t-blue">O</span> &#x2502; <span class="t-red">X</span>        &#x1f91d; <span class="t-draw">Draw</span>
+  &#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;
+   <span class="t-blue">O</span> &#x2502; <span class="t-blue">O</span> &#x2502; <span class="t-red">X</span>
+  &#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;
+   <span class="t-red">X</span> &#x2502; <span class="t-blue">O</span> &#x2502; <span class="t-blue">O</span>
+
+<span class="t-bold">&#x2501;&#x2501;&#x2501; GAME 7 of 12 &#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;</span>
+  <span class="t-magenta">&#x1f4da; Lessons: 18</span>
+  <span class="t-cyan">&#x2699; Block rule active (11 block lessons) | Win rule active (5 win lessons)</span>
+
+  <span class="t-blue">O</span> &#x2192; 4 <span class="t-dim">(center)</span>      <span class="t-red">X</span> &#x2192; 8 <span class="t-dim">(bot-right)</span>
+  <span class="t-blue">O</span> &#x2192; 0 <span class="t-dim">(top-left)</span>    <span class="t-cyan">&#x2190; WIN: opposite corner</span>
+  <span class="t-red">X</span> &#x2192; 2 <span class="t-dim">(top-right)</span>   <span class="t-blue">O</span> &#x2192; 6 <span class="t-dim">(bot-left)</span>
+  <span class="t-cyan">&#x2190; WIN: O wins with diagonal 0-4-8 + column 0-3-6</span>
+
+   <span class="t-blue">O</span> &#x2502; <span class="t-dim">1</span> &#x2502; <span class="t-red">X</span>        &#x1f3c6; <span class="t-win">Learner wins (fork!)</span>
+  &#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;
+   <span class="t-dim">3</span> &#x2502; <span class="t-blue">O</span> &#x2502; <span class="t-dim">5</span>
+  &#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;
+   <span class="t-blue">O</span> &#x2502; <span class="t-dim">7</span> &#x2502; <span class="t-red">X</span>
+
+<span class="t-dim">  ... games 8-12: draws, with one more win ...</span>
+
+<span class="t-bold">&#x1f4ca; SCOREBOARD</span>
+<span class="t-dim">&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;</span>
+  Game  1: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 12 lessons    Game  7: <span class="t-win">&#x1f3c6; Win </span>  &#x2502; &#x1f4da; 18 lessons
+  Game  2: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 13 lessons    Game  8: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 19 lessons
+  Game  3: <span class="t-win">&#x1f3c6; Win </span>  &#x2502; &#x1f4da; 14 lessons    Game  9: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 20 lessons
+  Game  4: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 15 lessons    Game 10: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 21 lessons
+  Game  5: <span class="t-loss">&#x274c; Loss</span>  &#x2502; &#x1f4da; 16 lessons   <span class="t-cyan">&#x2190; rules missed edge case</span>
+  Game  6: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 17 lessons    Game 11: <span class="t-win">&#x1f3c6; Win </span>  &#x2502; &#x1f4da; 22 lessons
+                                        Game 12: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 23 lessons
+
+  <span class="t-red">Expert:</span>  1W 3L 8D
+  <span class="t-blue">Learner:</span> <span class="t-bold">3W 1L 8D &#x2190; one loss slipped through</span>
+
+  <span class="t-magenta">&#x1f9e0; 24 total lessons in memory</span></code></pre>
+</div>
+
+<div class="callout">
+  <p>
+    <strong>Down to 1 loss.</strong> The block rule prevented most threats, but game 5 exposed an edge case
+    where the expert created a fork from edges rather than corners&mdash;a pattern the existing block lessons
+    didn't cover. The system learned from it, adding the lesson to memory for run 3.
+  </p>
 </div>
 
 <h3>MAL Phase &mdash; Run 3 (24 Prior Lessons, Steady State)</h3>
@@ -1308,6 +1373,74 @@
 
   <span class="t-magenta">&#x1f9e0; 12 total lessons in memory</span>
   <span class="t-dim">Run again to see continued improvement!</span></code></pre>
+</div>
+
+<h3>RLM Phase &mdash; Run 2 (12 Prior Lessons)</h3>
+
+<div class="terminal">
+  <div class="terminal-header">
+    <div class="dots"><span class="d-r"></span><span class="d-y"></span><span class="d-g"></span></div>
+    $ npx tsx scripts/tic-tac-toe-swarm.ts --games 12 --model claude-sonnet-4-5-20250929 (second run, 12 lessons)
+  </div>
+<pre><code><span class="t-bold">&#x1f9e0; Memory:</span> /tmp/karnevil9-tictactoe-lessons.jsonl
+   <span class="t-green">12 lessons loaded from previous run</span>
+
+<span class="t-bold">&#x2501;&#x2501;&#x2501; GAME 1 of 12 &#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;</span>
+  <span class="t-magenta">&#x1f4da; Lessons: 12</span>
+     <span class="t-dim">&#x2192; Prioritize blocking the opposite corner when opponent opens corner...</span>
+     <span class="t-dim">  and 11 more lessons</span>
+
+  <span class="t-blue">O</span> &#x2192; 4 <span class="t-dim">(center)</span>      <span class="t-red">X</span> &#x2192; 0 <span class="t-dim">(top-left)</span>
+  <span class="t-blue">O</span> &#x2192; 8 <span class="t-dim">(bot-right)</span>   <span class="t-red">X</span> &#x2192; 6 <span class="t-dim">(bot-left)</span>
+  <span class="t-blue">O</span> &#x2192; 2 <span class="t-dim">(top-right)</span>   <span class="t-red">X</span> &#x2192; 1 <span class="t-dim">(top-mid)</span>
+  <span class="t-blue">O</span> &#x2192; 7 <span class="t-dim">(bot-mid)</span>     <span class="t-red">X</span> &#x2192; 3 <span class="t-dim">(mid-left)</span>
+  <span class="t-blue">O</span> &#x2192; 5 <span class="t-dim">(mid-right)</span>
+
+   <span class="t-red">X</span> &#x2502; <span class="t-red">X</span> &#x2502; <span class="t-blue">O</span>        &#x1f91d; <span class="t-draw">Draw</span>
+  &#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;
+   <span class="t-red">X</span> &#x2502; <span class="t-blue">O</span> &#x2502; <span class="t-blue">O</span>
+  &#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;
+   <span class="t-red">X</span> &#x2502; <span class="t-blue">O</span> &#x2502; <span class="t-blue">O</span>
+
+<span class="t-bold">&#x2501;&#x2501;&#x2501; GAME 6 of 12 &#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;</span>
+  <span class="t-magenta">&#x1f4da; Lessons: 17</span>
+
+  <span class="t-blue">O</span> &#x2192; 4 <span class="t-dim">(center)</span>      <span class="t-red">X</span> &#x2192; 2 <span class="t-dim">(top-right)</span>
+  <span class="t-blue">O</span> &#x2192; 6 <span class="t-dim">(bot-left)</span>    <span class="t-red">X</span> &#x2192; 8 <span class="t-dim">(bot-right)</span>
+  <span class="t-blue">O</span> &#x2192; 5 <span class="t-dim">(mid-right)</span>   <span class="t-cyan">&#x2190; should have blocked position 0!</span>
+  <span class="t-red">X</span> &#x2192; 0 <span class="t-dim">(top-left)</span>
+
+   <span class="t-red">X</span> &#x2502; <span class="t-dim">1</span> &#x2502; <span class="t-red">X</span>        &#x274c; <span class="t-loss">Expert wins (diagonal)</span>
+  &#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;
+   <span class="t-dim">3</span> &#x2502; <span class="t-blue">O</span> &#x2502; <span class="t-blue">O</span>        <span class="t-magenta">&#x1f4dd; When the opponent holds two corners in the same</span>
+  &#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;&#x253c;&#x2500;&#x2500;&#x2500;        <span class="t-magenta">diagonal, blocking the third corner is critical...</span>
+   <span class="t-blue">O</span> &#x2502; <span class="t-dim">7</span> &#x2502; <span class="t-red">X</span>
+
+<span class="t-dim">  ... games 7-12: mix of losses and draws ...</span>
+
+<span class="t-bold">&#x1f4ca; SCOREBOARD</span>
+<span class="t-dim">&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;&#x2501;</span>
+  Game  1: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 12 lessons    Game  7: <span class="t-loss">&#x274c; Loss</span>  &#x2502; &#x1f4da; 18 lessons
+  Game  2: <span class="t-loss">&#x274c; Loss</span>  &#x2502; &#x1f4da; 13 lessons    Game  8: <span class="t-loss">&#x274c; Loss</span>  &#x2502; &#x1f4da; 19 lessons
+  Game  3: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 14 lessons    Game  9: <span class="t-loss">&#x274c; Loss</span>  &#x2502; &#x1f4da; 20 lessons
+  Game  4: <span class="t-win">&#x1f3c6; Win </span>  &#x2502; &#x1f4da; 15 lessons    Game 10: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 21 lessons
+  Game  5: <span class="t-loss">&#x274c; Loss</span>  &#x2502; &#x1f4da; 16 lessons    Game 11: <span class="t-win">&#x1f3c6; Win </span>  &#x2502; &#x1f4da; 22 lessons
+  Game  6: <span class="t-loss">&#x274c; Loss</span>  &#x2502; &#x1f4da; 17 lessons   <span class="t-cyan">&#x2190; knowing-doing gap</span>
+                                        Game 12: <span class="t-draw">&#x1f91d; Draw</span>  &#x2502; &#x1f4da; 23 lessons
+
+  <span class="t-red">Expert:</span>  6W 2L 4D
+  <span class="t-blue">Learner:</span> <span class="t-bold">2W 6L 4D &#x2190; lessons haven't helped yet</span>
+
+  <span class="t-magenta">&#x1f9e0; 24 total lessons in memory</span></code></pre>
+</div>
+
+<div class="callout red">
+  <p>
+    <strong>Worse than run 1.</strong> Despite having 12 prior lessons, the pure RLM learner actually lost
+    <em>more</em> games (6 vs 5). The lessons correctly identify blocking as critical, but Claude still fails
+    to execute&mdash;choosing edges over corners in key moments. This is the knowing-doing gap at its starkest:
+    more knowledge, worse performance.
+  </p>
 </div>
 
 <h3>RLM Phase &mdash; Run 3 (24 Prior Lessons)</h3>

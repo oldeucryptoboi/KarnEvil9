@@ -1,7 +1,7 @@
 import * as readline from "node:readline";
 import {
   green, red, yellow, dim,
-  chatPrompt, colorForType, formatEvent, helpText, TERMINAL_EVENTS,
+  chatPrompt, formatEvent, helpText, TERMINAL_EVENTS,
 } from "./chat-formatter.js";
 import type { StatusBarLike } from "./status-bar.js";
 

@@ -11,6 +11,7 @@
     { "path": "../kernel" },
     { "path": "../tools" },
     { "path": "../journal" },
+    { "path": "../permissions" },
     { "path": "../plugins" },
     { "path": "../metrics" },
     { "path": "../scheduler" }

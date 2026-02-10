@@ -11,7 +11,8 @@
     "build": "tsc -b",
     "dev": "tsc -b --watch",
     "test": "vitest run",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "lint": "biome lint src"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

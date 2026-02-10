@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { resolve, join } from "node:path";
 import { rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { v4 as uuid } from "uuid";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { WebSocket } from "ws";
 import { Journal } from "@karnevil9/journal";
 import { ToolRegistry, ToolRuntime } from "@karnevil9/tools";
 import { PermissionEngine } from "@karnevil9/permissions";
@@ -12,7 +13,7 @@ import { PluginRegistry } from "@karnevil9/plugins";
 import { MockPlanner } from "@karnevil9/planner";
 import type { ToolManifest, ApprovalDecision } from "@karnevil9/schemas";
 import { MetricsCollector } from "@karnevil9/metrics";
-import { ApiServer } from "./server.js";
+import { ApiServer, RateLimiter } from "./server.js";
 
 const TEST_DIR = resolve(import.meta.dirname ?? ".", "../../.test-data");
 const TEST_FILE = resolve(TEST_DIR, "api-journal.jsonl");
@@ -1114,8 +1115,8 @@ describe("ApiServer security hardening", () => {
     const res = await new Promise<{ headers: Record<string, string>; status: number }>((resolve, reject) => {
       const parsed = new URL(`${baseUrl}/api/health`);
       require("node:http").request(parsed, (res: any) => {
-        let data = "";
-        res.on("data", (chunk: string) => { data += chunk; });
+        let _data = "";
+        res.on("data", (chunk: string) => { _data += chunk; });
         res.on("end", () => {
           resolve({ headers: res.headers, status: res.statusCode });
         });
@@ -1338,8 +1339,8 @@ describe("ApiServer CORS", () => {
     const res = await new Promise<{ headers: Record<string, string>; status: number }>((resolve, reject) => {
       const parsed = new URL(`${baseUrl}/api/health`);
       require("node:http").request(parsed, { headers: { Origin: "http://localhost:3000" } }, (res: any) => {
-        let data = "";
-        res.on("data", (chunk: string) => { data += chunk; });
+        let _data = "";
+        res.on("data", (chunk: string) => { _data += chunk; });
         res.on("end", () => { resolve({ headers: res.headers, status: res.statusCode }); });
       }).on("error", reject).end();
     });
@@ -1351,8 +1352,8 @@ describe("ApiServer CORS", () => {
     const res = await new Promise<{ headers: Record<string, string>; status: number }>((resolve, reject) => {
       const parsed = new URL(`${baseUrl}/api/health`);
       require("node:http").request(parsed, { headers: { Origin: "http://evil.com" } }, (res: any) => {
-        let data = "";
-        res.on("data", (chunk: string) => { data += chunk; });
+        let _data = "";
+        res.on("data", (chunk: string) => { _data += chunk; });
         res.on("end", () => { resolve({ headers: res.headers, status: res.statusCode }); });
       }).on("error", reject).end();
     });
@@ -1367,8 +1368,8 @@ describe("ApiServer CORS", () => {
         method: "OPTIONS",
         headers: { Origin: "http://example.com" },
       }, (res: any) => {
-        let data = "";
-        res.on("data", (chunk: string) => { data += chunk; });
+        let _data = "";
+        res.on("data", (chunk: string) => { _data += chunk; });
         res.on("end", () => { resolve({ headers: res.headers, status: res.statusCode }); });
       }).on("error", reject).end();
     });
@@ -1707,7 +1708,7 @@ describe("ApiServer M3: journal listener cleanup on shutdown", () => {
     registry.register(testTool);
     const apiServer = new ApiServer(registry, journal);
 
-    const httpServer = await new Promise<ReturnType<typeof createServer>>((resolve) => {
+    const _httpServer = await new Promise<ReturnType<typeof createServer>>((resolve) => {
       const s = createServer(apiServer.getExpressApp());
       s.listen(0, () => resolve(s));
     });
@@ -1772,5 +1773,450 @@ describe("ApiServer B3: session timer cleanup", () => {
 
     await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+});
+
+// ─── RateLimiter Unit Tests ─────────────────────────────────────────
+
+describe("RateLimiter", () => {
+  it("allows requests within the limit", () => {
+    const limiter = new RateLimiter(3, 60000);
+    const r1 = limiter.check("client-a");
+    expect(r1.allowed).toBe(true);
+    expect(r1.remaining).toBe(2);
+    const r2 = limiter.check("client-a");
+    expect(r2.allowed).toBe(true);
+    expect(r2.remaining).toBe(1);
+    const r3 = limiter.check("client-a");
+    expect(r3.allowed).toBe(true);
+    expect(r3.remaining).toBe(0);
+  });
+
+  it("blocks requests over the limit", () => {
+    const limiter = new RateLimiter(2, 60000);
+    limiter.check("client-b");
+    limiter.check("client-b");
+    const r3 = limiter.check("client-b");
+    expect(r3.allowed).toBe(false);
+    expect(r3.remaining).toBe(0);
+  });
+
+  it("tracks clients independently", () => {
+    const limiter = new RateLimiter(1, 60000);
+    limiter.check("client-c");
+    const r2 = limiter.check("client-c");
+    expect(r2.allowed).toBe(false);
+
+    const r3 = limiter.check("client-d");
+    expect(r3.allowed).toBe(true);
+  });
+
+  it("resets window after expiry", () => {
+    vi.useFakeTimers();
+    try {
+      const limiter = new RateLimiter(1, 1000);
+      limiter.check("client-e");
+      const r2 = limiter.check("client-e");
+      expect(r2.allowed).toBe(false);
+
+      vi.advanceTimersByTime(1001);
+
+      const r3 = limiter.check("client-e");
+      expect(r3.allowed).toBe(true);
+      expect(r3.remaining).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prune removes expired entries", () => {
+    vi.useFakeTimers();
+    try {
+      const limiter = new RateLimiter(10, 500);
+      limiter.check("client-f");
+      limiter.check("client-g");
+
+      limiter.prune();
+      const rf = limiter.check("client-f");
+      expect(rf.remaining).toBe(8); // 10 - 2
+
+      vi.advanceTimersByTime(600);
+      limiter.prune();
+
+      const rf2 = limiter.check("client-f");
+      expect(rf2.allowed).toBe(true);
+      expect(rf2.remaining).toBe(9); // fresh window
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns correct resetAt timestamp", () => {
+    vi.useFakeTimers({ now: 10000 });
+    try {
+      const limiter = new RateLimiter(5, 2000);
+      const result = limiter.check("client-h");
+      expect(result.resetAt).toBe(12000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ─── WebSocket Tests ────────────────────────────────────────────────
+
+describe("ApiServer WebSocket", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let permissions: PermissionEngine;
+  let runtime: ToolRuntime;
+  let apiServer: ApiServer;
+  let server: ReturnType<typeof createServer>;
+  let port: number;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    registry = new ToolRegistry();
+    registry.register(testTool);
+    permissions = new PermissionEngine(journal, async () => "allow_session" as ApprovalDecision);
+    runtime = new ToolRuntime(registry, permissions, journal);
+    apiServer = new ApiServer({
+      toolRegistry: registry,
+      toolRuntime: runtime,
+      journal,
+      permissions,
+      planner: new MockPlanner(),
+      defaultMode: "mock",
+      defaultLimits: { max_steps: 10, max_duration_ms: 60000, max_cost_usd: 1, max_tokens: 10000 },
+      defaultPolicy: { allowed_paths: ["/tmp"], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: false },
+      insecure: true,
+    });
+
+    server = apiServer.listen(0);
+    port = (server.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    await apiServer.shutdown();
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  function connectWs(): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/api/ws`);
+      ws.on("open", () => resolve(ws));
+      ws.on("error", reject);
+    });
+  }
+
+  function waitForMessage(ws: WebSocket): Promise<Record<string, unknown>> {
+    return new Promise((resolve) => {
+      ws.once("message", (data) => {
+        resolve(JSON.parse(data.toString()));
+      });
+    });
+  }
+
+  it("responds to ping with pong", async () => {
+    const ws = await connectWs();
+    try {
+      const msgPromise = waitForMessage(ws);
+      ws.send(JSON.stringify({ type: "ping" }));
+      const msg = await msgPromise;
+      expect(msg.type).toBe("pong");
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("returns error for invalid JSON", async () => {
+    const ws = await connectWs();
+    try {
+      const msgPromise = waitForMessage(ws);
+      ws.send("not valid json{{{");
+      const msg = await msgPromise;
+      expect(msg.type).toBe("error");
+      expect(msg.message).toBe("Invalid JSON");
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("returns error for unknown message type", async () => {
+    const ws = await connectWs();
+    try {
+      const msgPromise = waitForMessage(ws);
+      ws.send(JSON.stringify({ type: "unknown_type" }));
+      const msg = await msgPromise;
+      expect(msg.type).toBe("error");
+      expect(msg.message).toContain("Unknown message type");
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("submit creates a session and returns session.created", async () => {
+    const ws = await connectWs();
+    try {
+      const msgPromise = waitForMessage(ws);
+      ws.send(JSON.stringify({ type: "submit", text: "WS test task" }));
+      const msg = await msgPromise;
+      expect(msg.type).toBe("session.created");
+      expect(msg.session_id).toBeTruthy();
+      expect((msg.task as Record<string, unknown>).text).toBe("WS test task");
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("submit rejects empty text", async () => {
+    const ws = await connectWs();
+    try {
+      const msgPromise = waitForMessage(ws);
+      ws.send(JSON.stringify({ type: "submit", text: "" }));
+      const msg = await msgPromise;
+      expect(msg.type).toBe("error");
+      expect(msg.message).toContain("text is required");
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("submit rejects oversized text", async () => {
+    const ws = await connectWs();
+    try {
+      const msgPromise = waitForMessage(ws);
+      ws.send(JSON.stringify({ type: "submit", text: "x".repeat(10001) }));
+      const msg = await msgPromise;
+      expect(msg.type).toBe("error");
+      expect(msg.message).toContain("10000");
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("submit receives journal events for the session", async () => {
+    const ws = await connectWs();
+    try {
+      const messages: Record<string, unknown>[] = [];
+      const collectDone = new Promise<void>((resolve) => {
+        ws.on("message", (data) => {
+          messages.push(JSON.parse(data.toString()));
+          if (messages.length >= 3) resolve();
+        });
+      });
+
+      ws.send(JSON.stringify({ type: "submit", text: "Events test" }));
+
+      await Promise.race([collectDone, new Promise((r) => setTimeout(r, 2000))]);
+
+      expect(messages.length).toBeGreaterThanOrEqual(2);
+      expect(messages[0]!.type).toBe("session.created");
+      expect(messages[1]!.type).toBe("event");
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("approve resolves a pending approval via WebSocket", async () => {
+    const ws = await connectWs();
+    try {
+      let resolvedDecision: ApprovalDecision | null = null;
+      apiServer.registerApproval("ws-approve-1", { tool: "test" }, (decision) => {
+        resolvedDecision = decision;
+      });
+
+      ws.send(JSON.stringify({ type: "approve", request_id: "ws-approve-1", decision: "allow_session" }));
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(resolvedDecision).toBe("allow_session");
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("cleans up client on close", async () => {
+    const ws = await connectWs();
+    const msgPromise = waitForMessage(ws);
+    ws.send(JSON.stringify({ type: "submit", text: "Cleanup test" }));
+    await msgPromise;
+
+    ws.close();
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(() => apiServer.broadcastEvent("any-session", { type: "test" })).not.toThrow();
+  });
+});
+
+describe("ApiServer WebSocket authentication", () => {
+  const API_TOKEN = "ws-auth-token-123";
+
+  it("rejects WebSocket without token when auth is required", async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    const registry = new ToolRegistry();
+    const apiServer = new ApiServer({
+      toolRegistry: registry,
+      journal,
+      apiToken: API_TOKEN,
+    });
+
+    const server = apiServer.listen(0);
+    const port = (server.address() as AddressInfo).port;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/api/ws`);
+        ws.on("error", () => resolve());
+        ws.on("unexpected-response", () => resolve());
+        ws.on("open", () => {
+          ws.close();
+          reject(new Error("Should not have connected"));
+        });
+        setTimeout(() => resolve(), 1000);
+      });
+    } finally {
+      await apiServer.shutdown();
+      try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("accepts WebSocket with valid token", async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    const registry = new ToolRegistry();
+    const apiServer = new ApiServer({
+      toolRegistry: registry,
+      journal,
+      apiToken: API_TOKEN,
+    });
+
+    const server = apiServer.listen(0);
+    const port = (server.address() as AddressInfo).port;
+
+    try {
+      const ws = await new Promise<WebSocket>((resolve, reject) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/api/ws?token=${API_TOKEN}`);
+        ws.on("open", () => resolve(ws));
+        ws.on("error", reject);
+        setTimeout(() => reject(new Error("Timeout")), 2000);
+      });
+
+      const msgPromise = new Promise<Record<string, unknown>>((resolve) => {
+        ws.once("message", (data) => resolve(JSON.parse(data.toString())));
+      });
+      ws.send(JSON.stringify({ type: "ping" }));
+      const msg = await msgPromise;
+      expect(msg.type).toBe("pong");
+
+      ws.close();
+    } finally {
+      await apiServer.shutdown();
+      try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    }
+  });
+});
+
+// ─── SSE Tests ──────────────────────────────────────────────────────
+
+describe("ApiServer SSE streaming", () => {
+  it("receives events via SSE after journal emit", async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    const registry = new ToolRegistry();
+    const apiServer = new ApiServer(registry, journal);
+
+    const httpServer = await new Promise<ReturnType<typeof createServer>>((resolve) => {
+      const s = createServer(apiServer.getExpressApp());
+      s.listen(0, () => resolve(s));
+    });
+    const baseUrl = `http://127.0.0.1:${(httpServer.address() as AddressInfo).port}`;
+
+    try {
+      const events: string[] = [];
+      let contentType = "";
+      const gotEvent = new Promise<void>((resolve) => {
+        const parsed = new URL(`${baseUrl}/api/sessions/sse-sess/stream`);
+        const req = require("node:http").request(parsed, (res: any) => {
+          contentType = res.headers["content-type"] ?? "";
+          res.on("data", (chunk: Buffer) => {
+            const text = chunk.toString();
+            for (const line of text.split("\n")) {
+              if (line.startsWith("data:")) {
+                events.push(line);
+                resolve();
+              }
+            }
+          });
+        });
+        req.on("error", () => {});
+        req.end();
+      });
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      await journal.emit("sse-sess", "step.started", { step_id: "s1" });
+
+      await Promise.race([gotEvent, new Promise((r) => setTimeout(r, 2000))]);
+      expect(events.length).toBeGreaterThanOrEqual(1);
+      expect(events[0]).toContain("step.started");
+      expect(contentType).toBe("text/event-stream");
+    } finally {
+      httpServer.closeAllConnections();
+      await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+      try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("rejects SSE connections over maxSseClientsPerSession", async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    const journal = new Journal(resolve(TEST_DIR, "sse-limit.jsonl"), { fsync: false, lock: false });
+    await journal.init();
+    const registry = new ToolRegistry();
+    const apiServer = new ApiServer({
+      toolRegistry: registry,
+      journal,
+      insecure: true,
+      maxSseClientsPerSession: 1,
+    });
+
+    const httpServer = await new Promise<ReturnType<typeof createServer>>((resolve) => {
+      const s = createServer(apiServer.getExpressApp());
+      s.listen(0, () => resolve(s));
+    });
+    const baseUrl = `http://127.0.0.1:${(httpServer.address() as AddressInfo).port}`;
+    const http = require("node:http");
+
+    try {
+      // First SSE connection — fire-and-forget (headers won't flush until data is written,
+      // but the server registers the SSE client synchronously)
+      const parsed = new URL(`${baseUrl}/api/sessions/limited-sse/stream`);
+      const req1 = http.request(parsed, { agent: false }, () => {});
+      req1.on("error", () => {});
+      req1.end();
+
+      // Wait for server to process the first request and register the SSE client
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Second connection — should be 429 (JSON response, not streaming, so it completes)
+      const res2 = await new Promise<{ status: number }>((resolve, reject) => {
+        const req = http.request(parsed, { agent: false }, (res: any) => {
+          res.on("data", () => {});
+          res.on("end", () => resolve({ status: res.statusCode }));
+        });
+        req.on("error", reject);
+        req.end();
+      });
+      expect(res2.status).toBe(429);
+    } finally {
+      httpServer.closeAllConnections();
+      await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+      try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    }
   });
 });

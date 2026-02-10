@@ -348,7 +348,7 @@ describe("ToolRuntime graduated permissions", () => {
     const runtime = new ToolRuntime(registry, permissions, journal);
 
     // Register a handler that takes longer than the constrained timeout
-    runtime.registerHandler("echo-tool", async (input) => {
+    runtime.registerHandler("echo-tool", async (_input) => {
       await new Promise((r) => setTimeout(r, 200));
       return { echo: "too slow" };
     });

@@ -889,7 +889,7 @@ export async function register(api) {
     registry.register(testTool);
     let callCount = 0;
     const multiIterPlanner: Planner = {
-      async generatePlan(task: Task, toolSchemas: ToolSchemaForPlanner[]) {
+      async generatePlan(_task: Task, _toolSchemas: ToolSchemaForPlanner[]) {
         callCount++;
         if (callCount <= 3) {
           return { plan: {
@@ -1042,7 +1042,7 @@ export async function register(api) {
 
     let callCount = 0;
     const replanPlanner: Planner = {
-      async generatePlan(task: Task, _schemas: ToolSchemaForPlanner[], stateSnapshot: Record<string, unknown>) {
+      async generatePlan(_task: Task, _schemas: ToolSchemaForPlanner[], stateSnapshot: Record<string, unknown>) {
         callCount++;
         if (callCount === 1) {
           // First iteration: step that will fail with replan policy
@@ -1136,7 +1136,7 @@ export async function register(api) {
     registry.register(testTool);
     let callCount = 0;
     const twoIterPlanner: Planner = {
-      async generatePlan(task: Task) {
+      async generatePlan(_task: Task) {
         callCount++;
         if (callCount <= 2) {
           return { plan: {
@@ -1570,7 +1570,7 @@ export async function register(api) {
 
     let receivedSnapshot: Record<string, unknown> = {};
     const capturingPlanner: Planner = {
-      async generatePlan(task: Task, schemas: ToolSchemaForPlanner[], snapshot: Record<string, unknown>): Promise<PlanResult> {
+      async generatePlan(task: Task, _schemas: ToolSchemaForPlanner[], snapshot: Record<string, unknown>): Promise<PlanResult> {
         receivedSnapshot = snapshot;
         return { plan: {
           plan_id: uuid(), schema_version: "0.1", goal: task.text,
@@ -1704,7 +1704,7 @@ export async function register(api) {
 
     let callCount = 0;
     const repeatingPlanner: Planner = {
-      async generatePlan(task: Task) {
+      async generatePlan(_task: Task) {
         callCount++;
         return { plan: {
           plan_id: uuid(), schema_version: "0.1", goal: `Attempt ${callCount}`,
@@ -1743,7 +1743,7 @@ export async function register(api) {
 
     let callCount = 0;
     const stagnantPlanner: Planner = {
-      async generatePlan(task: Task) {
+      async generatePlan(_task: Task) {
         callCount++;
         return { plan: {
           plan_id: uuid(), schema_version: "0.1", goal: `Stagnant iteration ${callCount}`,
@@ -1785,7 +1785,7 @@ export async function register(api) {
 
     let callCount = 0;
     const progressPlanner: Planner = {
-      async generatePlan(task: Task) {
+      async generatePlan(_task: Task) {
         callCount++;
         if (callCount <= 3) {
           // Each iteration adds more successful steps (growing step count)
@@ -1989,7 +1989,7 @@ export async function register(api) {
 
     let callCount = 0;
     const costPlanner: Planner = {
-      async generatePlan(task: Task) {
+      async generatePlan(_task: Task) {
         callCount++;
         return { plan: {
           plan_id: uuid(), schema_version: "0.1", goal: `Cost attempt ${callCount}`,
@@ -2030,7 +2030,7 @@ export async function register(api) {
     registry.register(testTool);
     let callCount = 0;
     const multiIterPlanner: Planner = {
-      async generatePlan(task: Task) {
+      async generatePlan(_task: Task) {
         callCount++;
         if (callCount <= 3) {
           return { plan: {
@@ -2103,7 +2103,7 @@ export async function register(api) {
     // Planner that generates high token usage to trigger checkpoint
     let iterCount = 0;
     const highTokenPlanner: Planner = {
-      async generatePlan(task, toolSchemas) {
+      async generatePlan(_task, _toolSchemas) {
         iterCount++;
         const usage = { input_tokens: 4000, output_tokens: 1000, total_tokens: 5000 };
         if (iterCount > 2) {
@@ -2148,7 +2148,7 @@ export async function register(api) {
     expect(["completed"]).toContain(session.status);
 
     const events = await journal.readSession(session.session_id);
-    const checkpointEvents = events.filter(e =>
+    const _checkpointEvents = events.filter(e =>
       e.type === "context.checkpoint_triggered" || e.type === "context.checkpoint_saved"
     );
     // May or may not fire depending on exact token accumulation timing
@@ -2170,7 +2170,7 @@ export async function register(api) {
     // Planner that uses browser tool (high-burn) to trigger delegation
     let iterCount = 0;
     const browserPlanner: Planner = {
-      async generatePlan(task, toolSchemas) {
+      async generatePlan(_task, _toolSchemas) {
         iterCount++;
         const usage = { input_tokens: 3000, output_tokens: 1000, total_tokens: 4000 };
         if (iterCount > 3) {
@@ -2218,7 +2218,7 @@ export async function register(api) {
     const events = await journal.readSession(session.session_id);
     const budgetEvents = events.filter(e => e.type.startsWith("context."));
     // Should have at least budget_assessed events after the first iteration
-    const assessEvents = budgetEvents.filter(e => e.type === "context.budget_assessed");
+    const _assessEvents = budgetEvents.filter(e => e.type === "context.budget_assessed");
     // assessEvents may exist depending on timing
   });
 
@@ -2227,7 +2227,7 @@ export async function register(api) {
 
     let iterCount = 0;
     const failPlanner: Planner = {
-      async generatePlan(task, toolSchemas) {
+      async generatePlan(_task, _toolSchemas) {
         iterCount++;
         const usage = { input_tokens: 3000, output_tokens: 1000, total_tokens: 4000 };
         if (iterCount > 3) {

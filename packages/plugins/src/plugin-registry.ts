@@ -1,6 +1,5 @@
 import type {
   PluginState,
-  PluginManifest,
   RouteHandler,
   CommandOptions,
 } from "@karnevil9/schemas";

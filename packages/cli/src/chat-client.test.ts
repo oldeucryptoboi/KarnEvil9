@@ -172,7 +172,7 @@ describe("ChatClient", () => {
 
     it("does not reconnect on user close", () => {
       const factory = vi.fn(() => new MockWebSocket());
-      const { client, terminal } = createClient({ wsFactory: factory });
+      const { client } = createClient({ wsFactory: factory });
       client.connect();
       client.close();
       vi.advanceTimersByTime(60000);
@@ -498,7 +498,7 @@ describe("ChatClient", () => {
 
   describe("state transitions", () => {
     it("full session cycle: created → event → completed", () => {
-      const { client, ws, terminal } = createClient();
+      const { client, ws } = createClient();
       client.connect();
       ws.simulateOpen();
 

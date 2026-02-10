@@ -7,10 +7,9 @@ import type {
   JobAction,
   Task,
   ExecutionMode,
-  ScheduleStatus,
 } from "@karnevil9/schemas";
 import { ScheduleStore } from "./schedule-store.js";
-import { parseInterval, computeNextCron, computeNextInterval } from "./interval.js";
+import { computeNextCron, computeNextInterval } from "./interval.js";
 
 export type SessionFactory = (
   task: Task,

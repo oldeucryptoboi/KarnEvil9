@@ -5,7 +5,7 @@ import { v4 as uuid } from "uuid";
 import { resolve } from "node:path";
 import * as readline from "node:readline";
 import { Journal } from "@karnevil9/journal";
-import { ToolRegistry, ToolRuntime, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, browserHandler, createBrowserHandler } from "@karnevil9/tools";
+import { ToolRegistry, ToolRuntime, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, createBrowserHandler } from "@karnevil9/tools";
 import type { BrowserDriverLike } from "@karnevil9/tools";
 import { PermissionEngine } from "@karnevil9/permissions";
 import { Kernel } from "@karnevil9/kernel";
@@ -21,6 +21,7 @@ import type { ChatWebSocket } from "./chat-client.js";
 // Global error handlers — prevent silent crashes from unhandled rejections/exceptions
 process.on("unhandledRejection", (reason) => {
   console.error("[karnevil9] Unhandled rejection:", reason);
+  process.exit(1);
 });
 process.on("uncaughtException", (err) => {
   console.error("[karnevil9] Uncaught exception:", err);

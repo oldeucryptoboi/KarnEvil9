@@ -3,7 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { v4 as uuid } from "uuid";
-import type { HookContext, HookRegistration, HookResult } from "@karnevil9/schemas";
+import type { HookContext, HookResult } from "@karnevil9/schemas";
 import { Journal } from "@karnevil9/journal";
 import { HookRunner } from "./hook-runner.js";
 
@@ -64,11 +64,11 @@ describe("HookRunner", () => {
   });
 
   it("trips circuit breaker after N failures", async () => {
-    let callCount = 0;
+    let _callCount = 0;
     runner.register({
       plugin_id: "failing", hook: "before_step",
       handler: async () => {
-        callCount++;
+        _callCount++;
         throw new Error("always fails");
       },
       priority: 100, timeout_ms: 5000,

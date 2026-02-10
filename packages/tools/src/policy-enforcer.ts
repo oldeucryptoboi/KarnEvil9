@@ -1,7 +1,6 @@
 import { resolve } from "node:path";
 import { realpath } from "node:fs/promises";
 import { lookup } from "node:dns/promises";
-import type { PolicyProfile } from "@karnevil9/schemas";
 import { KarnEvil9Error } from "@karnevil9/schemas";
 
 export class PolicyViolationError extends KarnEvil9Error {

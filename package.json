@@ -12,17 +12,19 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "clean": "pnpm -r clean",
     "dev": "pnpm -r --parallel dev",
-    "lint": "pnpm -r lint"
+    "lint": "biome lint packages/*/src"
   },
   "dependencies": {
     "@slack/bolt": "^4.1.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.3.14",
     "@karnevil9/api": "workspace:^",
     "@karnevil9/browser-relay": "workspace:^",
     "@karnevil9/cli": "workspace:^",
     "@karnevil9/journal": "workspace:^",
     "@karnevil9/kernel": "workspace:^",
+    "@karnevil9/memory": "workspace:^",
     "@karnevil9/metrics": "workspace:^",
     "@karnevil9/permissions": "workspace:^",
     "@karnevil9/planner": "workspace:^",

@@ -14,7 +14,6 @@ import type {
   ToolExecutionRequest,
   Planner,
   ModelPricing,
-  UsageMetrics,
   HookName,
   HookResult,
 } from "@karnevil9/schemas";

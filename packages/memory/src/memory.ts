@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid";
-import { readFile, writeFile, mkdir, rename, open } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile, mkdir, rename, open } from "node:fs/promises";
+import { dirname, } from "node:path";
 import type {
   Plan,
   StepResult,

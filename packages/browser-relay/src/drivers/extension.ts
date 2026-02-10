@@ -27,7 +27,6 @@ interface BridgeDetached {
   reason: string;
 }
 
-type BridgeControlMessage = BridgeHello | BridgeDetached;
 
 export class ExtensionDriver implements BrowserDriver {
   private cdp: CDPClient | null = null;
@@ -36,7 +35,6 @@ export class ExtensionDriver implements BrowserDriver {
   private wss: WebSocketServer | null = null;
   private extensionWs: WebSocket | null = null;
   private _active = false;
-  private tabInfo: { tabId: number; tabUrl: string; tabTitle: string } | null = null;
 
   constructor(options?: ExtensionDriverOptions) {
     this.bridgePort = options?.bridgePort ?? 9225;
@@ -247,7 +245,6 @@ export class ExtensionDriver implements BrowserDriver {
 
   async close(): Promise<void> {
     this._active = false;
-    this.tabInfo = null;
     if (this.cdp) {
       await this.cdp.disconnect();
       this.cdp = null;
@@ -295,7 +292,6 @@ export class ExtensionDriver implements BrowserDriver {
       if (this.extensionWs !== ws) return;
       this._active = false;
       this.extensionWs = null;
-      this.tabInfo = null;
       if (this.cdp) {
         this.cdp.disconnect();
         this.cdp = null;
@@ -303,9 +299,7 @@ export class ExtensionDriver implements BrowserDriver {
     });
   }
 
-  private async handleBridgeHello(ws: WebSocket, msg: BridgeHello): Promise<void> {
-    this.tabInfo = { tabId: msg.tabId, tabUrl: msg.tabUrl, tabTitle: msg.tabTitle };
-
+  private async handleBridgeHello(ws: WebSocket, _msg: BridgeHello): Promise<void> {
     // Clean up previous CDPClient (e.g. from duplicate hello on same WS)
     if (this.cdp) {
       this._active = false;
@@ -326,9 +320,8 @@ export class ExtensionDriver implements BrowserDriver {
     this._active = true;
   }
 
-  private handleBridgeDetached(msg: BridgeDetached): void {
+  private handleBridgeDetached(_msg: BridgeDetached): void {
     this._active = false;
-    this.tabInfo = null;
     if (this.cdp) {
       this.cdp.disconnect();
       this.cdp = null;

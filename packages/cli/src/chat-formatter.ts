@@ -97,7 +97,7 @@ function formatStepOutput(output: unknown): string {
   return JSON.stringify(output, null, 2);
 }
 
-export function formatEvent(sessionId: string, event: Record<string, unknown>): string | null {
+export function formatEvent(_sessionId: string, event: Record<string, unknown>): string | null {
   const type = String(event.type ?? "unknown");
   const ts = typeof event.timestamp === "string"
     ? event.timestamp.split("T")[1]?.slice(0, 8) ?? ""

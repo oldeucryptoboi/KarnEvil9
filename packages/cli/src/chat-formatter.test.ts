@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  dim, green, red, yellow, cyan, bold,
-  MAX_OUTPUT_LEN, TERMINAL_EVENTS,
+  dim, green, red, yellow, cyan, bold,TERMINAL_EVENTS,
   chatPrompt, colorForType, truncate, formatEvent, helpText,
 } from "./chat-formatter.js";
 

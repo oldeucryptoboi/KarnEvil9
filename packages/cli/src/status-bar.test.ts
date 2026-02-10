@@ -5,7 +5,6 @@ import {
   shortenModel,
   formatCost,
   type StatusBarWriter,
-  type StatusBarData,
 } from "./status-bar.js";
 
 // ─── Mock Writer ─────────────────────────────────────────────────

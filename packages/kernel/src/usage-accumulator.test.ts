@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { UsageAccumulator } from "./usage-accumulator.js";
-import type { UsageMetrics } from "@karnevil9/schemas";
 
 describe("UsageAccumulator", () => {
   it("starts at zero", () => {

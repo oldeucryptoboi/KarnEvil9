@@ -18,7 +18,7 @@ import { WebSocketServer, WebSocket } from "ws";
 
 // ─── Rate Limiter ──────────────────────────────────────────────────
 
-class RateLimiter {
+export class RateLimiter {
   private windows = new Map<string, { count: number; resetAt: number }>();
   private maxRequests: number;
   private windowMs: number;
@@ -174,7 +174,7 @@ export interface ApiServerConfig {
 export class ApiServer {
   private app: express.Application;
   private kernels = new Map<string, Kernel>();
-  private activeSessionCount = 0;
+  private activeSessions = new Set<string>();
   private toolRegistry: ToolRegistry;
   private toolRuntime?: ToolRuntime;
   private journal: Journal;
@@ -495,7 +495,7 @@ export class ApiServer {
       this.wsSend(client.ws, { type: "error", message: `text must be at most ${MAX_TEXT_LENGTH} characters` });
       return;
     }
-    if (this.activeSessionCount >= this.maxConcurrentSessions) {
+    if (this.activeSessions.size >= this.maxConcurrentSessions) {
       this.wsSend(client.ws, { type: "error", message: "Max concurrent sessions reached" });
       return;
     }
@@ -521,7 +521,7 @@ export class ApiServer {
 
     const session = await kernel.createSession(task);
     this.kernels.set(session.session_id, kernel);
-    this.activeSessionCount++;
+    this.activeSessions.add(session.session_id);
     client.activeSessionIds.add(session.session_id);
 
     this.wsSend(client.ws, { type: "session.created", session_id: session.session_id, task });
@@ -558,7 +558,7 @@ export class ApiServer {
       })
       .finally(() => {
         clearTimeout(sessionTimer!);
-        this.activeSessionCount = Math.max(0, this.activeSessionCount - 1);
+        this.activeSessions.delete(session.session_id);
         setTimeout(() => this.kernels.delete(session.session_id), 60000).unref();
       });
   }
@@ -607,7 +607,7 @@ export class ApiServer {
     router.get("/health", async (_req, res) => {
       const journalHealth = await this.journal.checkHealth();
       const toolCount = this.toolRegistry.list().length;
-      const activeSessionCount = this.activeSessionCount;
+      const activeSessionCount = this.activeSessions.size;
 
       const journalStatus = journalHealth.writable ? "ok" as const : "error" as const;
       const toolsStatus = toolCount > 0 ? "ok" as const : "warning" as const;
@@ -700,7 +700,7 @@ export class ApiServer {
       try {
         const validationError = validateSessionInput(req.body);
         if (validationError) { res.status(400).json({ error: validationError }); return; }
-        if (this.activeSessionCount >= this.maxConcurrentSessions) {
+        if (this.activeSessions.size >= this.maxConcurrentSessions) {
           res.status(429).json({ error: "Max concurrent sessions reached" });
           return;
         }
@@ -737,7 +737,7 @@ export class ApiServer {
           const kernel = new KernelClass(kernelConfig);
           const session = await kernel.createSession(task);
           this.kernels.set(session.session_id, kernel);
-          this.activeSessionCount++;
+          this.activeSessions.add(session.session_id);
 
           // Run in background — enforce outer timeout, clean up on completion
           const sessionTimeoutMs = effectiveLimits.max_duration_ms + 30000;
@@ -758,7 +758,7 @@ export class ApiServer {
             })
             .finally(() => {
               clearTimeout(sessionTimer!);
-              this.activeSessionCount = Math.max(0, this.activeSessionCount - 1);
+              this.activeSessions.delete(session.session_id);
               // Keep session queryable for 60s after completion, then evict
               setTimeout(() => this.kernels.delete(session.session_id), 60000).unref();
             });
@@ -808,7 +808,7 @@ export class ApiServer {
       const afterSeqParam = req.query.after_seq as string | undefined;
       const afterSeq = lastEventId !== undefined ? parseInt(lastEventId, 10) : afterSeqParam !== undefined ? parseInt(afterSeqParam, 10) : undefined;
 
-      if (afterSeq !== undefined && !isNaN(afterSeq)) {
+      if (afterSeq !== undefined && !Number.isNaN(afterSeq)) {
         const events = await this.journal.readSession(sessionId);
         let replayCount = 0;
         const MAX_REPLAY = 500;
@@ -905,7 +905,7 @@ export class ApiServer {
           res.status(409).json({ error: "Session already active" });
           return;
         }
-        if (this.activeSessionCount >= this.maxConcurrentSessions) {
+        if (this.activeSessions.size >= this.maxConcurrentSessions) {
           res.status(429).json({ error: "Max concurrent sessions reached" });
           return;
         }
@@ -929,7 +929,7 @@ export class ApiServer {
           return;
         }
         this.kernels.set(sessionId, kernel);
-        this.activeSessionCount++;
+        this.activeSessions.add(sessionId);
 
         // Apply same lifecycle management as POST /sessions
         const sessionTimeoutMs = this.defaultLimits.max_duration_ms + 30000;
@@ -950,7 +950,7 @@ export class ApiServer {
           })
           .finally(() => {
             clearTimeout(sessionTimer!);
-            this.activeSessionCount = Math.max(0, this.activeSessionCount - 1);
+            this.activeSessions.delete(sessionId);
             setTimeout(() => this.kernels.delete(sessionId), 60000).unref();
           });
 
@@ -990,11 +990,20 @@ export class ApiServer {
 
     // ─── Plugin-Provided Routes ─────────────────────────────────────
 
+    const registerRoute = (method: string, path: string, handler: (req: express.Request, res: express.Response) => Promise<void>) => {
+      switch (method) {
+        case "get": router.get(path, handler); break;
+        case "post": router.post(path, handler); break;
+        case "put": router.put(path, handler); break;
+        case "delete": router.delete(path, handler); break;
+        case "patch": router.patch(path, handler); break;
+      }
+    };
+
     if (this.pluginRegistry) {
       for (const route of this.pluginRegistry.getRoutes()) {
         const method = route.method.toLowerCase();
-        if (method === "get" || method === "post" || method === "put" || method === "delete" || method === "patch") {
-          (router as any)[method](route.path.replace("/api/", "/"), async (req: express.Request, res: express.Response) => {
+        registerRoute(method, route.path.replace("/api/", "/"), async (req: express.Request, res: express.Response) => {
             try {
               await route.handler(
                 {
@@ -1022,7 +1031,6 @@ export class ApiServer {
               console.error("[api] plugin route error:", err); res.status(500).json({ error: "Internal server error" });
             }
           });
-        }
       }
     }
 
@@ -1032,8 +1040,7 @@ export class ApiServer {
       const schedulerRoutes = createSchedulerRoutes(this.scheduler);
       for (const route of schedulerRoutes) {
         const method = route.method.toLowerCase();
-        if (method === "get" || method === "post" || method === "put" || method === "delete") {
-          (router as any)[method](route.path, async (req: express.Request, res: express.Response) => {
+        registerRoute(method, route.path, async (req: express.Request, res: express.Response) => {
             try {
               await route.handler(
                 {
@@ -1062,7 +1069,6 @@ export class ApiServer {
               res.status(500).json({ error: "Internal server error" });
             }
           });
-        }
       }
     }
 

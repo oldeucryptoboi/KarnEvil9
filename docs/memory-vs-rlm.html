@@ -270,7 +270,6 @@
     min-width: 180px;
     flex: 1;
   }
-  .diagram-box .icon { font-size: 2rem; margin-bottom: 0.5rem; }
   .diagram-box .name { font-weight: 600; font-size: 0.95rem; color: var(--text); }
   .diagram-box .desc { font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem; }
 
@@ -561,19 +560,19 @@
 
 <div class="diagram">
   <div class="diagram-box">
-    <div class="icon">&#x1F916;</div>
+
     <div class="name">LLM (Claude)</div>
     <div class="desc">Strategic reasoning<br>+ lesson extraction</div>
   </div>
   <div class="flow-arrow">+</div>
   <div class="diagram-box">
-    <div class="icon">&#x1F9E0;</div>
+
     <div class="name">ActiveMemory</div>
     <div class="desc">JSONL lesson store<br>persists across runs</div>
   </div>
   <div class="flow-arrow">+</div>
   <div class="diagram-box">
-    <div class="icon">&#x2699;&#xFE0F;</div>
+
     <div class="name">Programmatic Rules</div>
     <div class="desc">Deterministic overrides<br>activated by lesson count</div>
   </div>
@@ -658,17 +657,17 @@
 
 <div class="diagram">
   <div class="diagram-box" style="border-color: var(--yellow);">
-    <div class="icon">&#x1F3DF;&#xFE0F;</div>
+
     <div class="name">Referee</div>
     <div class="desc">Port 3200<br>Coordinates games<br>Delegates moves</div>
   </div>
   <div class="diagram-box" style="border-color: var(--red);">
-    <div class="icon">&#x1F3AF;</div>
+
     <div class="name">Expert (X)</div>
     <div class="desc">Port 3201<br>Deterministic minimax<br>10% random blunder</div>
   </div>
   <div class="diagram-box" style="border-color: var(--accent);">
-    <div class="icon">&#x1F4DA;</div>
+
     <div class="name">Learner (O)</div>
     <div class="desc">Port 3202<br>Claude + Memory<br>Moves first (advantage)</div>
   </div>

@@ -90,7 +90,7 @@ Connect to `ws://localhost:3100/api/ws` for interactive sessions. The chat CLI u
 
 ## Architecture
 
-KarnEvil9 is a pnpm monorepo with 13 packages under `packages/`, all scoped as `@karnevil9/*`:
+KarnEvil9 is a pnpm monorepo with 14 packages under `packages/`, all scoped as `@karnevil9/*`:
 
 ```
 schemas                       <- Foundation: types, validators, error codes
@@ -103,7 +103,7 @@ planner, plugins              <- LLM adapters & extensibility
   |
 kernel                        <- Orchestrator: session lifecycle, execution phases
   |
-metrics, scheduler            <- Observability & scheduled jobs
+metrics, scheduler, swarm     <- Observability, scheduled jobs & P2P mesh
   |
 api                           <- REST/WebSocket server
   |
@@ -163,9 +163,14 @@ The entry module exports a `register(api)` function that can call `registerTool(
 
 | Plugin | Description |
 |--------|-------------|
+| `claude-code` | Delegates coding tasks to Claude Code via the Anthropic agent SDK |
+| `openai-codex` | Delegates coding tasks to OpenAI Codex via the Codex SDK |
 | `example-logger` | Reference plugin demonstrating hooks and event logging |
 | `scheduler-tool` | Exposes the scheduler as a tool for creating scheduled jobs |
 | `slack` | Bidirectional Slack integration: receive tasks, post progress, approval buttons |
+| `swarm` | P2P mesh for distributing tasks across KarnEvil9 instances |
+
+See [docs/claude-code-hello-world.md](docs/claude-code-hello-world.md) for a walkthrough of the Claude Code plugin.
 
 ## Metrics & Monitoring
 
@@ -235,8 +240,14 @@ pnpm --filter @karnevil9/kernel test
 | `KARNEVIL9_CORS_ORIGINS` | No | Comma-separated allowed CORS origins |
 | `KARNEVIL9_APPROVAL_TIMEOUT_MS` | No | Approval timeout (default: 300000) |
 | `KARNEVIL9_MAX_SESSIONS` | No | Max concurrent sessions (default: 50) |
+| `KARNEVIL9_CLAUDE_CODE_MODEL` | No | Claude Code model override |
+| `KARNEVIL9_CLAUDE_CODE_MAX_TURNS` | No | Max agentic turns per Claude Code invocation (default: 30) |
+| `KARNEVIL9_CODEX_MODEL` | No | OpenAI Codex model override |
 | `SLACK_BOT_TOKEN` | For Slack plugin | Slack bot token |
 | `SLACK_APP_TOKEN` | For Slack socket mode | Slack app-level token |
+| `KARNEVIL9_SWARM_ENABLED` | No | Enable swarm mesh (`true`/`false`) |
+| `KARNEVIL9_SWARM_TOKEN` | For swarm auth | Shared secret for peer authentication |
+| `KARNEVIL9_SWARM_SEEDS` | No | Comma-separated seed URLs for peer discovery |
 
 Create a `.env` file in the project root (gitignored).
 

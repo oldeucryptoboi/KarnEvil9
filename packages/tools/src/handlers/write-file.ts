@@ -2,7 +2,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import type { ToolHandler } from "../tool-runtime.js";
 import type { ExecutionMode, PolicyProfile } from "@karnevil9/schemas";
-import { assertPathAllowed, assertPathAllowedReal, PolicyViolationError } from "../policy-enforcer.js";
+import { assertPathAllowed, assertPathAllowedReal, assertNotSensitiveFile, PolicyViolationError } from "../policy-enforcer.js";
 
 export const writeFileHandler: ToolHandler = async (
   input: Record<string, unknown>, mode: ExecutionMode, policy: PolicyProfile
@@ -25,6 +25,7 @@ export const writeFileHandler: ToolHandler = async (
 
   const fullPath = resolve(process.cwd(), path);
   assertPathAllowed(fullPath, policy.allowed_paths);
+  assertNotSensitiveFile(fullPath);
 
   // Enforce writable_paths constraint: writes only allowed within writable_paths
   if (policy.writable_paths && policy.writable_paths.length > 0) {

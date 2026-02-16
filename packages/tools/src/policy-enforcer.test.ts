@@ -5,6 +5,7 @@ import {
   assertCommandAllowed,
   assertEndpointAllowed,
   assertEndpointAllowedAsync,
+  assertNotSensitiveFile,
   PolicyViolationError,
   SsrfError,
   isPrivateIP,
@@ -315,5 +316,91 @@ describe("isPrivateIP — additional edge cases", () => {
 
   it("handles empty string", () => {
     expect(isPrivateIP("")).toBe(false);
+  });
+});
+
+describe("assertNotSensitiveFile", () => {
+  it("blocks .env", () => {
+    expect(() => assertNotSensitiveFile("/workspace/.env")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks .env.local", () => {
+    expect(() => assertNotSensitiveFile("/workspace/.env.local")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks .env.production", () => {
+    expect(() => assertNotSensitiveFile("/workspace/.env.production")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks credentials.json", () => {
+    expect(() => assertNotSensitiveFile("/workspace/credentials.json")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks service-account.json", () => {
+    expect(() => assertNotSensitiveFile("/gcp/service-account.json")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks id_rsa", () => {
+    expect(() => assertNotSensitiveFile("/home/user/.ssh/id_rsa")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks id_ed25519", () => {
+    expect(() => assertNotSensitiveFile("/home/user/id_ed25519")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks .pem files", () => {
+    expect(() => assertNotSensitiveFile("/certs/server.pem")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks .key files", () => {
+    expect(() => assertNotSensitiveFile("/certs/private.key")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks .p12 files", () => {
+    expect(() => assertNotSensitiveFile("/certs/cert.p12")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks .pfx files", () => {
+    expect(() => assertNotSensitiveFile("/certs/cert.pfx")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks .jks files", () => {
+    expect(() => assertNotSensitiveFile("/java/keystore.jks")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks .keystore files", () => {
+    expect(() => assertNotSensitiveFile("/java/my.keystore")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks files under .ssh/", () => {
+    expect(() => assertNotSensitiveFile("/home/user/.ssh/config")).toThrow(PolicyViolationError);
+    expect(() => assertNotSensitiveFile("/home/user/.ssh/known_hosts")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks files under .gnupg/", () => {
+    expect(() => assertNotSensitiveFile("/home/user/.gnupg/trustdb.gpg")).toThrow(PolicyViolationError);
+  });
+
+  it("blocks files under .aws/", () => {
+    expect(() => assertNotSensitiveFile("/home/user/.aws/credentials")).toThrow(PolicyViolationError);
+    expect(() => assertNotSensitiveFile("/home/user/.aws/config")).toThrow(PolicyViolationError);
+  });
+
+  it("allows normal files", () => {
+    expect(() => assertNotSensitiveFile("/workspace/config.ts")).not.toThrow();
+    expect(() => assertNotSensitiveFile("/workspace/readme.md")).not.toThrow();
+    expect(() => assertNotSensitiveFile("/workspace/src/index.ts")).not.toThrow();
+  });
+
+  it("allows .envrc (not .env)", () => {
+    expect(() => assertNotSensitiveFile("/workspace/.envrc")).not.toThrow();
+  });
+
+  it("allows .env-example (not .env.*)", () => {
+    expect(() => assertNotSensitiveFile("/workspace/.env-example")).not.toThrow();
+  });
+
+  it("allows files with 'key' in the name but wrong extension", () => {
+    expect(() => assertNotSensitiveFile("/workspace/keyboard.ts")).not.toThrow();
   });
 });

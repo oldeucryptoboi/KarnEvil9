@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ToolHandler } from "../tool-runtime.js";
 import type { ExecutionMode, PolicyProfile } from "@karnevil9/schemas";
-import { assertPathAllowed, assertPathAllowedReal } from "../policy-enforcer.js";
+import { assertPathAllowed, assertPathAllowedReal, assertNotSensitiveFile } from "../policy-enforcer.js";
 
 export const readFileHandler: ToolHandler = async (
   input: Record<string, unknown>, mode: ExecutionMode, policy: PolicyProfile
@@ -15,6 +15,7 @@ export const readFileHandler: ToolHandler = async (
   const fullPath = resolve(process.cwd(), path);
   // Quick check first (sync), then symlink-safe check before actual read
   assertPathAllowed(fullPath, policy.allowed_paths);
+  assertNotSensitiveFile(fullPath);
   if (mode === "dry_run") {
     return { content: `[dry_run] Would read file: ${fullPath}`, exists: existsSync(fullPath), size_bytes: 0 };
   }

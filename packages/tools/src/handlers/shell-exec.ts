@@ -7,6 +7,53 @@ import { assertCommandAllowed, assertPathAllowed } from "../policy-enforcer.js";
 const SENSITIVE_ENV_PREFIXES = ["AWS_", "AZURE_", "GCP_", "GOOGLE_", "OPENAI_", "ANTHROPIC_", "GITHUB_", "GITLAB_", "NPM_TOKEN", "DOCKER_", "KARNEVIL9_"];
 const SENSITIVE_ENV_KEYS = new Set(["TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "API_KEY", "PRIVATE_KEY", "DATABASE_URL"]);
 
+// Patterns that look like leaked API keys / tokens in stdout/stderr
+const SECRET_VALUE_PATTERNS = [
+  /sk-[A-Za-z0-9_-]{20,}/g,              // OpenAI / Anthropic keys
+  /sk-ant-[A-Za-z0-9_-]{20,}/g,          // Anthropic keys
+  /xoxb-[A-Za-z0-9-]+/g,                 // Slack bot tokens
+  /xoxp-[A-Za-z0-9-]+/g,                 // Slack user tokens
+  /ghp_[A-Za-z0-9]{36,}/g,               // GitHub personal access tokens
+  /gho_[A-Za-z0-9]{36,}/g,               // GitHub OAuth tokens
+  /ghs_[A-Za-z0-9]{36,}/g,               // GitHub server tokens
+  /github_pat_[A-Za-z0-9_]{22,}/g,       // GitHub fine-grained PATs
+  /AKIA[0-9A-Z]{16}/g,                   // AWS access key IDs
+  /Bearer\s+[A-Za-z0-9_.\-\/+=]{20,}/g,  // Bearer tokens
+];
+
+const SENSITIVE_KEY_PATTERN = new RegExp(
+  "^(" +
+    SENSITIVE_ENV_PREFIXES.map((p) => p.replace("_", "_?")).join("|") +
+    "|" +
+    [...SENSITIVE_ENV_KEYS].join("|") +
+    "|[A-Z_]*(SECRET|TOKEN|KEY|PASSWORD|CREDENTIAL|API_KEY|PRIVATE_KEY)[A-Z_]*" +
+  ")=",
+  "i"
+);
+
+/**
+ * Redact secrets from shell output to prevent leaking credentials
+ * even when commands like `cat .env` are executed.
+ */
+export function redactSecrets(text: string): string {
+  let result = text;
+
+  // Redact key=value lines where the key looks sensitive
+  result = result.replace(/^([A-Z_a-z][A-Za-z0-9_]*)=(.+)$/gm, (match, key: string, value: string) => {
+    if (SENSITIVE_KEY_PATTERN.test(`${key}=`)) {
+      return `${key}=[REDACTED]`;
+    }
+    return match;
+  });
+
+  // Redact known secret value patterns anywhere in the output
+  for (const pattern of SECRET_VALUE_PATTERNS) {
+    result = result.replace(pattern, "[REDACTED]");
+  }
+
+  return result;
+}
+
 function sanitizeEnv(): Record<string, string> {
   const clean: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -83,7 +130,7 @@ export const shellExecHandler: ToolHandler = async (
       const errorDetail = error && typeof error.code === "string"
         ? `${stderrStr}${stderrStr ? "\n" : ""}${error.code}: ${error.message}`
         : stderrStr;
-      resolvePromise({ exit_code: exitCode, stdout: stdout.toString(), stderr: errorDetail });
+      resolvePromise({ exit_code: exitCode, stdout: redactSecrets(stdout.toString()), stderr: redactSecrets(errorDetail) });
     });
   });
 };

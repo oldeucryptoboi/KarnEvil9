@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import type { PolicyProfile } from "@karnevil9/schemas";
 import { readFileHandler } from "./read-file.js";
 import { writeFileHandler } from "./write-file.js";
-import { shellExecHandler } from "./shell-exec.js";
+import { shellExecHandler, redactSecrets } from "./shell-exec.js";
 import { httpRequestHandler } from "./http-request.js";
 import { PolicyViolationError } from "../policy-enforcer.js";
 
@@ -745,5 +745,171 @@ describe("browserHandler — DNS rebinding protection", () => {
       { action: "navigate", url: "http://127.0.0.1/admin" }, "dry_run", openPolicy
     )) as any;
     expect(result.url).toContain("[dry_run]");
+  });
+});
+
+describe("redactSecrets", () => {
+  it("redacts ANTHROPIC_API_KEY=sk-... pattern", () => {
+    const input = "ANTHROPIC_API_KEY=sk-ant-abc123def456ghi789";
+    const result = redactSecrets(input);
+    expect(result).toBe("ANTHROPIC_API_KEY=[REDACTED]");
+  });
+
+  it("redacts AWS_SECRET_ACCESS_KEY=value", () => {
+    const input = "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+    const result = redactSecrets(input);
+    expect(result).toBe("AWS_SECRET_ACCESS_KEY=[REDACTED]");
+  });
+
+  it("redacts GITHUB_TOKEN=value", () => {
+    const input = "GITHUB_TOKEN=ghp_abc123def456";
+    const result = redactSecrets(input);
+    expect(result).toBe("GITHUB_TOKEN=[REDACTED]");
+  });
+
+  it("redacts DATABASE_URL=value", () => {
+    const input = "DATABASE_URL=postgres://user:pass@host/db";
+    const result = redactSecrets(input);
+    expect(result).toBe("DATABASE_URL=[REDACTED]");
+  });
+
+  it("redacts variables ending with _SECRET", () => {
+    const input = "MY_APP_SECRET=supersecretvalue123";
+    const result = redactSecrets(input);
+    expect(result).toBe("MY_APP_SECRET=[REDACTED]");
+  });
+
+  it("redacts variables ending with _PASSWORD", () => {
+    const input = "DB_PASSWORD=hunter2";
+    const result = redactSecrets(input);
+    expect(result).toBe("DB_PASSWORD=[REDACTED]");
+  });
+
+  it("redacts Bearer tokens in output", () => {
+    const input = "Authorization: Bearer sk-ant-api03-longtoken123456789abcdef";
+    const result = redactSecrets(input);
+    expect(result).toContain("[REDACTED]");
+    expect(result).not.toContain("sk-ant-api03");
+  });
+
+  it("redacts GitHub PAT patterns inline", () => {
+    const input = "Token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl";
+    const result = redactSecrets(input);
+    expect(result).toContain("[REDACTED]");
+    expect(result).not.toContain("ghp_ABCDEF");
+  });
+
+  it("redacts AWS access key IDs", () => {
+    const input = "aws_access_key_id = AKIAIOSFODNN7EXAMPLE";
+    const result = redactSecrets(input);
+    expect(result).toContain("[REDACTED]");
+    expect(result).not.toContain("AKIAIOSFODNN7EXAMPLE");
+  });
+
+  it("redacts Slack bot tokens inline", () => {
+    const input = "SLACK_BOT_TOKEN=xoxb-123456789-abcdef";
+    const result = redactSecrets(input);
+    expect(result).toBe("SLACK_BOT_TOKEN=[REDACTED]");
+  });
+
+  it("passes through normal output", () => {
+    const input = "Hello world\nPATH=/usr/bin:/usr/local/bin\nHOME=/home/user";
+    const result = redactSecrets(input);
+    expect(result).toBe(input);
+  });
+
+  it("handles multiline output with mixed sensitive and normal lines", () => {
+    const input = "NODE_ENV=production\nANTHROPIC_API_KEY=sk-ant-secret123456789abcdef\nPATH=/usr/bin";
+    const result = redactSecrets(input);
+    expect(result).toContain("NODE_ENV=production");
+    expect(result).toContain("ANTHROPIC_API_KEY=[REDACTED]");
+    expect(result).toContain("PATH=/usr/bin");
+  });
+
+  it("redacts OPENAI_API_KEY", () => {
+    const input = "OPENAI_API_KEY=sk-proj-abc123def456ghi789jkl012";
+    const result = redactSecrets(input);
+    expect(result).toBe("OPENAI_API_KEY=[REDACTED]");
+  });
+});
+
+describe("readFileHandler — sensitive file protection", () => {
+  let tmpDir: string;
+  let policy: PolicyProfile;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "handler-test-"));
+    policy = { ...openPolicy, allowed_paths: [tmpDir] };
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("blocks reading .env files", async () => {
+    const envPath = join(tmpDir, ".env");
+    await writeFile(envPath, "SECRET=value", "utf-8");
+    await expect(
+      readFileHandler({ path: envPath }, "real", policy)
+    ).rejects.toThrow(PolicyViolationError);
+  });
+
+  it("blocks reading .env.local files", async () => {
+    const envPath = join(tmpDir, ".env.local");
+    await writeFile(envPath, "SECRET=value", "utf-8");
+    await expect(
+      readFileHandler({ path: envPath }, "real", policy)
+    ).rejects.toThrow(PolicyViolationError);
+  });
+
+  it("blocks reading .pem files", async () => {
+    const pemPath = join(tmpDir, "server.pem");
+    await writeFile(pemPath, "-----BEGIN CERTIFICATE-----", "utf-8");
+    await expect(
+      readFileHandler({ path: pemPath }, "real", policy)
+    ).rejects.toThrow(PolicyViolationError);
+  });
+
+  it("blocks reading .key files", async () => {
+    const keyPath = join(tmpDir, "private.key");
+    await writeFile(keyPath, "-----BEGIN PRIVATE KEY-----", "utf-8");
+    await expect(
+      readFileHandler({ path: keyPath }, "real", policy)
+    ).rejects.toThrow(PolicyViolationError);
+  });
+});
+
+describe("writeFileHandler — sensitive file protection", () => {
+  let tmpDir: string;
+  let policy: PolicyProfile;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "handler-test-"));
+    policy = { ...openPolicy, allowed_paths: [tmpDir] };
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("blocks writing to .env files", async () => {
+    const envPath = join(tmpDir, ".env");
+    await expect(
+      writeFileHandler({ path: envPath, content: "SECRET=value" }, "real", policy)
+    ).rejects.toThrow(PolicyViolationError);
+  });
+
+  it("blocks writing to .key files", async () => {
+    const keyPath = join(tmpDir, "private.key");
+    await expect(
+      writeFileHandler({ path: keyPath, content: "key data" }, "real", policy)
+    ).rejects.toThrow(PolicyViolationError);
+  });
+
+  it("blocks writing to credentials.json", async () => {
+    const credPath = join(tmpDir, "credentials.json");
+    await expect(
+      writeFileHandler({ path: credPath, content: "{}" }, "real", policy)
+    ).rejects.toThrow(PolicyViolationError);
   });
 });

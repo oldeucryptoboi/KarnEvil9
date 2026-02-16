@@ -122,6 +122,61 @@ async function resolveReal(targetPath: string): Promise<string> {
   }
 }
 
+const SENSITIVE_BASENAMES = new Set([
+  ".env", "credentials.json", "service-account.json",
+  "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa",
+]);
+
+const SENSITIVE_EXTENSIONS = new Set([
+  ".pem", ".key", ".p12", ".pfx", ".jks", ".keystore",
+]);
+
+const SENSITIVE_DIRS = [".ssh", ".gnupg", ".aws"];
+
+/**
+ * Defense-in-depth: blocks reads/writes to files that are very likely secrets.
+ * Not configurable — this is a safety net that applies regardless of policy.
+ */
+export function assertNotSensitiveFile(targetPath: string): void {
+  const resolved = resolve(targetPath);
+  const segments = resolved.split("/");
+  const basename = segments[segments.length - 1] ?? "";
+
+  // Exact basename match
+  if (SENSITIVE_BASENAMES.has(basename)) {
+    throw new PolicyViolationError(
+      `Access to sensitive file "${basename}" is blocked`
+    );
+  }
+
+  // .env.* variants (e.g. .env.local, .env.production)
+  if (/^\.env\..+$/.test(basename)) {
+    throw new PolicyViolationError(
+      `Access to sensitive file "${basename}" is blocked`
+    );
+  }
+
+  // Extension match
+  const dotIdx = basename.lastIndexOf(".");
+  if (dotIdx > 0) {
+    const ext = basename.slice(dotIdx);
+    if (SENSITIVE_EXTENSIONS.has(ext)) {
+      throw new PolicyViolationError(
+        `Access to sensitive file "${basename}" is blocked (extension ${ext})`
+      );
+    }
+  }
+
+  // Directory pattern match
+  for (const dir of SENSITIVE_DIRS) {
+    if (segments.includes(dir)) {
+      throw new PolicyViolationError(
+        `Access to files under "${dir}/" is blocked`
+      );
+    }
+  }
+}
+
 export function assertCommandAllowed(
   command: string,
   allowedCommands: string[]

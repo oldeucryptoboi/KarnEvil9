@@ -436,6 +436,12 @@ program.command("server").description("Start the API server")
           apiBaseUrl: `http://localhost:${port}`,
           apiToken,
         },
+        "gmail": {
+          sessionFactory: sharedSessionFactory,
+          journal,
+          apiBaseUrl: `http://localhost:${port}`,
+          apiToken,
+        },
         "swarm": {
           meshManager,
           workDistributor,

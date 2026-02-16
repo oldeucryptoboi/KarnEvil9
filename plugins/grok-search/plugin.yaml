@@ -1,0 +1,28 @@
+id: grok-search
+name: Grok X Search
+version: "1.0.0"
+description: Search and analyze X/Twitter posts via the xAI Grok Responses API
+entry: index.js
+permissions:
+  - search:read:x_posts
+config_schema:
+  type: object
+  properties:
+    journal:
+      description: Journal instance for event emission (injected at runtime)
+    apiKey:
+      description: xAI API key (falls back to XAI_API_KEY env var)
+    model:
+      description: Model name override (default grok-4-1-fast-reasoning)
+provides:
+  tools:
+    - search-x
+    - analyze-x-thread
+  hooks:
+    - before_plan
+    - before_tool_call
+    - after_session_end
+  routes:
+    - status
+  services:
+    - grok-search

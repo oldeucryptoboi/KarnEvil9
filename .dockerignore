@@ -1,0 +1,17 @@
+.git
+node_modules
+dist
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+journal/
+sessions/
+.claude/
+*.test.ts
+*.test.js
+coverage/
+.nyc_output/
+.DS_Store

@@ -113,6 +113,7 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
       browserDriver = new ManagedDriver({ headless: false, channel: "chrome", userDataDir: resolve("sessions/browser-profile") });
     }
     const { journal, registry, permissions, runtime } = await createRuntime(policy, undefined, browserDriver);
+    const removeShutdownHandler = journal.registerShutdownHandler();
     const task: Task = { task_id: uuid(), text: taskText, created_at: new Date().toISOString() };
 
     const pluginsDir = resolve(opts.pluginsDir);
@@ -207,6 +208,7 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
         console.log(`Estimated cost: $${usage.total_cost_usd.toFixed(4)}`);
       }
     }
+    removeShutdownHandler();
     await journal.close();
   });
 
@@ -448,6 +450,12 @@ program.command("server").description("Start the API server")
           apiBaseUrl: `http://localhost:${port}`,
           apiToken,
         },
+        "whatsapp": {
+          sessionFactory: sharedSessionFactory,
+          journal,
+          apiBaseUrl: `http://localhost:${port}`,
+          apiToken,
+        },
         "swarm": {
           meshManager,
           workDistributor,
@@ -457,6 +465,11 @@ program.command("server").description("Start the API server")
         "claude-code": { journal, apiKey: process.env.ANTHROPIC_API_KEY, model: process.env.KARNEVIL9_CLAUDE_CODE_MODEL, maxTurns: process.env.KARNEVIL9_CLAUDE_CODE_MAX_TURNS ? parseInt(process.env.KARNEVIL9_CLAUDE_CODE_MAX_TURNS, 10) : undefined },
         "openai-codex": { journal, apiKey: process.env.OPENAI_API_KEY, model: process.env.KARNEVIL9_CODEX_MODEL },
         "grok-search": { journal, apiKey: process.env.XAI_API_KEY ?? process.env.XAI_KEY, model: process.env.KARNEVIL9_GROK_MODEL },
+        "vault": {
+          journal,
+          vaultRoot: process.env.KARNEVIL9_VAULT_ROOT ?? resolve("vault"),
+          classifierModel: process.env.KARNEVIL9_VAULT_CLASSIFIER_MODEL,
+        },
       },
     });
     await pluginRegistry.discoverAndLoadAll();

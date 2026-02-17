@@ -1,0 +1,29 @@
+id: whatsapp
+name: WhatsApp Integration
+version: "1.0.0"
+description: Bidirectional WhatsApp integration via Baileys — receive tasks via DMs, post progress, handle approvals
+entry: index.js
+permissions:
+  - whatsapp:send:messages
+  - whatsapp:receive:events
+config_schema:
+  type: object
+  properties:
+    sessionFactory:
+      description: Session factory function (injected at runtime)
+    journal:
+      description: Journal instance for event subscription (injected at runtime)
+    apiBaseUrl:
+      description: Base URL of the KarnEvil9 API server (injected at runtime)
+    apiToken:
+      description: KarnEvil9 API token for authenticated calls (injected at runtime)
+provides:
+  tools:
+    - send-whatsapp-message
+  hooks:
+    - after_session_end
+  routes:
+    - status
+    - conversations
+  services:
+    - whatsapp-connection

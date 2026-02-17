@@ -14,6 +14,7 @@ export async function register(api) {
   const meshManager = config.meshManager;
   const workDistributor = config.workDistributor;
   const sessionFactory = config.sessionFactory;
+  const swarmToken = process.env.KARNEVIL9_SWARM_TOKEN ?? config.swarmToken;
 
   if (!meshManager) {
     api.logger.warn("No meshManager provided — Swarm plugin will register stubs (graceful degradation)");
@@ -75,7 +76,7 @@ export async function register(api) {
   });
 
   // ── Register routes ──
-  const routes = createSwarmRoutes(meshManager, workDistributor);
+  const routes = createSwarmRoutes(meshManager, workDistributor, swarmToken);
   for (const route of routes) {
     // Strip /plugins/swarm/ prefix — plugin system adds it automatically
     const routePath = route.path.replace("/plugins/swarm/", "");

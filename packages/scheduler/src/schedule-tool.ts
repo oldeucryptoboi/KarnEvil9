@@ -60,6 +60,14 @@ export function createScheduleToolHandler(scheduler: Scheduler): ToolHandler {
         if (!input.action || typeof input.action !== "object") {
           throw new Error("action is required for create operation");
         }
+        // Enforce minimum interval to prevent DoS via rapid schedule execution
+        const trigger = input.trigger as ScheduleTrigger;
+        if (trigger.type === "every") {
+          const intervalMs = parseIntervalMs(trigger.interval as string);
+          if (intervalMs !== null && intervalMs < 60_000) {
+            throw new Error("Minimum interval for 'every' triggers is 60 seconds");
+          }
+        }
         const schedule = await scheduler.createSchedule({
           name: input.name as string,
           trigger: input.trigger as ScheduleTrigger,
@@ -120,6 +128,22 @@ export function createScheduleToolHandler(scheduler: Scheduler): ToolHandler {
         throw new Error(`Unknown operation: ${op}`);
     }
   };
+}
+
+/** Parse an interval string (e.g. "5m", "30s", "1h") to milliseconds. Returns null if unparseable. */
+function parseIntervalMs(interval: string): number | null {
+  const match = interval.match(/^(\d+)\s*(ms|s|m|h|d)$/i);
+  if (!match) return null;
+  const value = parseInt(match[1]!, 10);
+  const unit = match[2]!.toLowerCase();
+  switch (unit) {
+    case "ms": return value;
+    case "s": return value * 1000;
+    case "m": return value * 60_000;
+    case "h": return value * 3_600_000;
+    case "d": return value * 86_400_000;
+    default: return null;
+  }
 }
 
 function mockResponse(op: string, input: Record<string, unknown>): unknown {

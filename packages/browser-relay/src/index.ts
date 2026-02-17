@@ -1,5 +1,6 @@
 export { RelayServer, type RelayServerConfig } from "./server.js";
 export { ManagedDriver, type ManagedDriverOptions } from "./drivers/managed.js";
+export { StealthDriver } from "./drivers/stealth.js";
 export { ExtensionDriver, type ExtensionDriverOptions } from "./drivers/extension.js";
 export type { BrowserDriver, ActionRequest, ActionResult, Target } from "./drivers/types.js";
 

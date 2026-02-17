@@ -21,8 +21,8 @@ export class AccessControl {
    * @returns {boolean}
    */
   isAllowed(sender) {
-    // Empty allowlist = allow all
-    if (this.allowedSenders.size === 0) return true;
+    // Empty allowlist = deny all (require explicit opt-in via GMAIL_ALLOWED_SENDERS)
+    if (this.allowedSenders.size === 0) return false;
     return this.allowedSenders.has(sender.toLowerCase());
   }
 }

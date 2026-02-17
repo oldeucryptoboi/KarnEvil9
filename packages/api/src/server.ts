@@ -879,6 +879,11 @@ export class ApiServer {
       clearTimeout(approval.timer);
       approval.resolve(decision);
       this.pendingApprovals.delete(req.params.id!);
+      // Audit trail: log who approved what
+      const requestId = req.params.id!;
+      const sourceIp = getClientIP(req);
+      const decisionStr = typeof decision === "string" ? decision : (decision as unknown as Record<string,unknown>).type;
+      console.log(`[api] Approval resolved: request_id=${requestId} decision=${decisionStr} source_ip=${sourceIp}`);
       res.json({ status: "resolved", decision });
     });
 
@@ -1021,6 +1026,7 @@ export class ApiServer {
                   params: req.params as Record<string, string>,
                   query: req.query as Record<string, string>,
                   body: req.body,
+                  headers: req.headers as Record<string, string>,
                 },
                 {
                   json: (data: unknown) => res.json(data),

@@ -95,7 +95,12 @@ export class Kernel {
   private running = false;
   private sessionStartTime = 0;
 
-  constructor(config: KernelConfig) { this.config = config; }
+  constructor(config: KernelConfig) {
+    this.config = config;
+    if (!config.permissions) {
+      console.warn("[kernel] WARNING: No PermissionEngine configured — all tool executions will bypass permission checks.");
+    }
+  }
 
   private async runHook(hookName: HookName, context: Record<string, unknown>): Promise<HookResult> {
     if (!this.config.pluginRegistry) return { action: "continue" };
@@ -465,6 +470,9 @@ export class Kernel {
       const batchFns = ready.map((step) => async () => {
         const resolvedStep = this.resolveInputBindings(step, results);
         await this.executeStep(resolvedStep);
+        // Clear step-level permissions immediately after each step completes
+        // (prevents allow_once grants from leaking to concurrent/subsequent steps)
+        this.config.permissions?.clearStep(this.session!.session_id);
         const result = this.taskState!.getStepResult(step.step_id);
         if (result) {
           results.set(step.step_id, result);
@@ -517,12 +525,6 @@ export class Kernel {
             step_id: failedStep.step_id,
           });
           return;
-        }
-      }
-
-      for (const step of ready) {
-        if (completed.has(step.step_id) || failed.has(step.step_id)) {
-          this.config.permissions?.clearStep(this.session!.session_id);
         }
       }
     }
@@ -882,10 +884,20 @@ export class Kernel {
       }
       if (beforeToolResult.action === "modify" && beforeToolResult.data) {
         if (beforeToolResult.data.input) {
+          const originalInput = request.input;
           request.input = beforeToolResult.data.input as Record<string, unknown>;
+          // Audit trail: log hook-modified input so policy enforcement can be verified
+          await this.config.journal.tryEmit(this.session!.session_id, "hook.input_modified", {
+            step_id: step.step_id,
+            tool_name: request.tool_name,
+            original_keys: Object.keys(originalInput),
+            modified_keys: Object.keys(request.input),
+          });
         }
       }
 
+      // Permission checks + policy enforcement happen inside toolRuntime.execute()
+      // after hook modifications, so modified input is still validated.
       const toolResult = await this.config.toolRuntime.execute(request);
 
       const afterToolResult = await this.runHook("after_tool_call", {

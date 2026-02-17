@@ -53,6 +53,12 @@ export async function register(api) {
     api.logger.warn("No sessionFactory provided — Slack will receive messages but cannot create sessions");
   }
 
+  // ── Parse allowed user IDs ──
+  const allowedUserIdsRaw = process.env.SLACK_ALLOWED_USER_IDS ?? config.allowedUserIds ?? "";
+  const allowedUserIds = typeof allowedUserIdsRaw === "string"
+    ? allowedUserIdsRaw.split(",").map((id) => id.trim()).filter(Boolean)
+    : allowedUserIdsRaw;
+
   // ── Build components ──
   const slackApp = new SlackApp({
     botToken,
@@ -65,6 +71,7 @@ export async function register(api) {
   const accessControl = new AccessControl({
     defaultRequireMention: config.defaultRequireMention ?? true,
     channelOverrides: config.channelOverrides ?? {},
+    allowedUserIds,
   });
 
   const sessionBridge = new SessionBridge({
@@ -87,11 +94,16 @@ export async function register(api) {
   const slashCommand = new SlashCommand({
     slackApp,
     sessionBridge,
+    accessControl,
     logger: api.logger,
   });
 
   // ── Initialize Slack app (must happen before registering handlers) ──
   await slackApp.init();
+
+  // ── Pending task confirmations (userId -> { taskText, channel, threadTs, expiresAt }) ──
+  const pendingConfirmations = new Map();
+  const CONFIRMATION_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   // ── Wire message handlers ──
   const handleIncoming = async (event, say) => {
@@ -109,6 +121,13 @@ export async function register(api) {
     const isMention = event.type === "app_mention";
     if (requireMention && !isMention) return;
 
+    // User-level access control check
+    const userId = event.user;
+    if (!accessControl.isUserAllowed(userId)) {
+      api.logger.warn("Slack message rejected — user not allowed", { user_id: userId });
+      return;
+    }
+
     // Strip mention from text
     let taskText = event.text ?? "";
     if (slackApp.botUserId) {
@@ -117,30 +136,64 @@ export async function register(api) {
     taskText = taskText.trim();
     if (!taskText) return;
 
+    // Check if user already has an active session
+    if (sessionBridge.hasActiveSession(userId)) {
+      await say({ text: "A session is already running. Say \"cancel\" to stop it, or \"status\" to check progress.", thread_ts: event.ts });
+      return;
+    }
+
+    // Check for confirmation of a pending task
+    const pending = pendingConfirmations.get(userId);
+    if (pending && Date.now() < pending.expiresAt) {
+      const reply = taskText.toLowerCase();
+      if (reply === "yes" || reply === "y" || reply === "confirm") {
+        pendingConfirmations.delete(userId);
+        if (!sessionFactory) {
+          await say({ text: ":warning: KarnEvil9 session factory not configured", thread_ts: pending.threadTs });
+          return;
+        }
+        try {
+          const result = await sessionBridge.createSession({
+            taskText: pending.taskText,
+            channel: pending.channel,
+            threadTs: pending.threadTs,
+            userId,
+          });
+          await say({ text: `:white_check_mark: Session \`${result.session_id}\` started`, thread_ts: pending.threadTs });
+        } catch (err) {
+          api.logger.error("Failed to create session from Slack", { error: err.message });
+          await say({ text: `:x: Failed to start session: ${err.message}`, thread_ts: pending.threadTs });
+        }
+        return;
+      } else if (reply === "no" || reply === "n" || reply === "cancel") {
+        pendingConfirmations.delete(userId);
+        await say({ text: "Task cancelled.", thread_ts: pending.threadTs });
+        return;
+      }
+      // Not yes/no — treat as new task request (fall through)
+      pendingConfirmations.delete(userId);
+    } else if (pending) {
+      pendingConfirmations.delete(userId);
+    }
+
+    // New task — require confirmation before creating session
     if (!sessionFactory) {
       await say({ text: ":warning: KarnEvil9 session factory not configured", thread_ts: event.ts });
       return;
     }
 
-    try {
-      const result = await sessionBridge.createSession({
-        taskText,
-        channel: channelId,
-        threadTs: event.ts,
-        userId: event.user,
-      });
+    pendingConfirmations.set(userId, {
+      taskText,
+      channel: channelId,
+      threadTs: event.ts,
+      expiresAt: Date.now() + CONFIRMATION_TTL_MS,
+    });
 
-      await say({
-        text: `:white_check_mark: Session \`${result.session_id}\` started`,
-        thread_ts: event.ts,
-      });
-    } catch (err) {
-      api.logger.error("Failed to create session from Slack", { error: err.message });
-      await say({
-        text: `:x: Failed to start session: ${err.message}`,
-        thread_ts: event.ts,
-      });
-    }
+    const preview = taskText.length > 200 ? taskText.substring(0, 200) + "..." : taskText;
+    await say({
+      text: `:question: Run this task?\n\n> ${preview}\n\nReply *YES* to confirm or *NO* to cancel. (Expires in 5 min)`,
+      thread_ts: event.ts,
+    });
   };
 
   slackApp.onMention(handleIncoming);

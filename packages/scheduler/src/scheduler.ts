@@ -197,6 +197,8 @@ export class Scheduler {
       schedule_id: schedule.schedule_id,
       name: schedule.name,
       action_type: schedule.action.type,
+      created_by: schedule.created_by,
+      task_text: schedule.action.type === "createSession" ? schedule.action.task_text : undefined,
     });
 
     try {

@@ -84,6 +84,10 @@ export async function register(api) {
     logger: api.logger,
   });
 
+  // ── Pending task confirmations (sender -> { taskText, expiresAt }) ──
+  const pendingConfirmations = new Map();
+  const CONFIRMATION_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
   // ── Wire message handler ──
   signalClient.onMessage(async ({ sender, text }) => {
     // 1. Access control check
@@ -113,32 +117,50 @@ export async function register(api) {
       return;
     }
 
-    // 5. Create new session
+    // 5. Check for confirmation of a pending task
+    const pending = pendingConfirmations.get(sender);
+    if (pending && Date.now() < pending.expiresAt) {
+      const reply = text.trim().toLowerCase();
+      if (reply === "yes" || reply === "y" || reply === "confirm") {
+        pendingConfirmations.delete(sender);
+        if (!sessionFactory) {
+          await signalClient.sendMessage({ recipient: sender, message: "\u26A0\uFE0F KarnEvil9 session factory not configured" });
+          return;
+        }
+        try {
+          await signalClient.sendTyping(sender);
+          const result = await sessionBridge.createSession({ taskText: pending.taskText, sender });
+          await signalClient.sendMessage({ recipient: sender, message: `\u2705 Session ${result.session_id} started` });
+        } catch (err) {
+          api.logger.error("Failed to create session from Signal", { error: err.message });
+          await signalClient.sendMessage({ recipient: sender, message: `\u274C Failed to start session: ${err.message}` });
+        }
+        return;
+      } else if (reply === "no" || reply === "n" || reply === "cancel") {
+        pendingConfirmations.delete(sender);
+        await signalClient.sendMessage({ recipient: sender, message: "Task cancelled." });
+        return;
+      }
+      // Not yes/no — treat as new task request (fall through)
+      pendingConfirmations.delete(sender);
+    } else if (pending) {
+      pendingConfirmations.delete(sender);
+    }
+
+    // 6. New task — require confirmation before creating session
     const taskText = text.trim();
     if (!taskText) return;
 
-    if (!sessionFactory) {
-      await signalClient.sendMessage({
-        recipient: sender,
-        message: "\u26A0\uFE0F KarnEvil9 session factory not configured",
-      });
-      return;
-    }
+    pendingConfirmations.set(sender, {
+      taskText,
+      expiresAt: Date.now() + CONFIRMATION_TTL_MS,
+    });
 
-    try {
-      await signalClient.sendTyping(sender);
-      const result = await sessionBridge.createSession({ taskText, sender });
-      await signalClient.sendMessage({
-        recipient: sender,
-        message: `\u2705 Session ${result.session_id} started`,
-      });
-    } catch (err) {
-      api.logger.error("Failed to create session from Signal", { error: err.message });
-      await signalClient.sendMessage({
-        recipient: sender,
-        message: `\u274C Failed to start session: ${err.message}`,
-      });
-    }
+    const preview = taskText.length > 200 ? taskText.substring(0, 200) + "..." : taskText;
+    await signalClient.sendMessage({
+      recipient: sender,
+      message: `\u2753 Run this task?\n\n"${preview}"\n\nReply YES to confirm or NO to cancel. (Expires in 5 min)`,
+    });
   });
 
   // ── Register tool: send-signal-message ──

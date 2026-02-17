@@ -1,7 +1,7 @@
 /**
  * AccessControl — phone number allowlist for Signal integration.
  * Uses SIGNAL_ALLOWED_NUMBERS env var (comma-separated E.164 numbers).
- * Empty list = allow all.
+ * Empty list = deny all (require explicit opt-in).
  */
 export class AccessControl {
   /**
@@ -19,8 +19,8 @@ export class AccessControl {
    * @returns {boolean}
    */
   isAllowed(sender) {
-    // Empty allowlist = allow all
-    if (this.allowedNumbers.size === 0) return true;
+    // Empty allowlist = deny all (require explicit opt-in via SIGNAL_ALLOWED_NUMBERS)
+    if (this.allowedNumbers.size === 0) return false;
     return this.allowedNumbers.has(sender);
   }
 }

@@ -93,6 +93,10 @@ export async function register(api) {
     logger: api.logger,
   });
 
+  // ── Pending task confirmations (sender -> { taskText, threadId, subject, expiresAt }) ──
+  const pendingConfirmations = new Map();
+  const CONFIRMATION_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
   // ── Wire message handler ──
   gmailClient.onMessage(async ({ sender, text, subject, threadId }) => {
     // 1. Access control check
@@ -124,37 +128,79 @@ export async function register(api) {
       return;
     }
 
-    // 5. Create new session
+    // 5. Check for confirmation of a pending task
+    const senderLower = sender.toLowerCase();
+    const pending = pendingConfirmations.get(senderLower);
+    if (pending && Date.now() < pending.expiresAt) {
+      const reply = text.trim().toLowerCase();
+      if (reply === "yes" || reply === "y" || reply === "confirm") {
+        pendingConfirmations.delete(senderLower);
+        if (!sessionFactory) {
+          await gmailClient.sendReply({
+            to: sender,
+            subject: `Re: ${pending.subject}`,
+            body: "\u26A0\uFE0F KarnEvil9 session factory not configured",
+            threadId: pending.threadId,
+          });
+          return;
+        }
+        try {
+          const result = await sessionBridge.createSession({
+            taskText: pending.taskText,
+            sender,
+            threadId: pending.threadId,
+            subject: pending.subject,
+          });
+          await gmailClient.sendReply({
+            to: sender,
+            subject: `Re: ${pending.subject}`,
+            body: `\u2705 Session ${result.session_id} started`,
+            threadId: pending.threadId,
+          });
+        } catch (err) {
+          api.logger.error("Failed to create session from Gmail", { error: err.message });
+          await gmailClient.sendReply({
+            to: sender,
+            subject: `Re: ${pending.subject}`,
+            body: `\u274C Failed to start session: ${err.message}`,
+            threadId: pending.threadId,
+          });
+        }
+        return;
+      } else if (reply === "no" || reply === "n" || reply === "cancel") {
+        pendingConfirmations.delete(senderLower);
+        await gmailClient.sendReply({
+          to: sender,
+          subject: `Re: ${pending.subject}`,
+          body: "Task cancelled.",
+          threadId: pending.threadId,
+        });
+        return;
+      }
+      // Not a yes/no — treat as a new task request (fall through)
+      pendingConfirmations.delete(senderLower);
+    } else if (pending) {
+      // Expired confirmation
+      pendingConfirmations.delete(senderLower);
+    }
+
+    // 6. New task — require confirmation before creating session
     const taskText = text.trim();
     if (!taskText) return;
 
-    if (!sessionFactory) {
-      await gmailClient.sendReply({
-        to: sender,
-        subject: `Re: ${subject}`,
-        body: "\u26A0\uFE0F KarnEvil9 session factory not configured",
-        threadId,
-      });
-      return;
-    }
+    pendingConfirmations.set(senderLower, {
+      taskText,
+      threadId,
+      subject,
+      expiresAt: Date.now() + CONFIRMATION_TTL_MS,
+    });
 
-    try {
-      const result = await sessionBridge.createSession({ taskText, sender, threadId, subject });
-      await gmailClient.sendReply({
-        to: sender,
-        subject: `Re: ${subject}`,
-        body: `\u2705 Session ${result.session_id} started`,
-        threadId,
-      });
-    } catch (err) {
-      api.logger.error("Failed to create session from Gmail", { error: err.message });
-      await gmailClient.sendReply({
-        to: sender,
-        subject: `Re: ${subject}`,
-        body: `\u274C Failed to start session: ${err.message}`,
-        threadId,
-      });
-    }
+    await gmailClient.sendReply({
+      to: sender,
+      subject: `Re: ${subject}`,
+      body: `\u2753 Run this task?\n\n\"${taskText.length > 200 ? taskText.substring(0, 200) + "..." : taskText}\"\n\nReply YES to confirm or NO to cancel. (Expires in 5 minutes)`,
+      threadId,
+    });
   });
 
   // ── Register tool: send-gmail-message ──

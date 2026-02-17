@@ -177,16 +177,38 @@ export function assertNotSensitiveFile(targetPath: string): void {
   }
 }
 
+/** Flags that can turn safe commands into destructive ones. */
+const DANGEROUS_FLAGS: Record<string, string[]> = {
+  find: ["-delete", "-exec", "-execdir", "-ok", "-okdir"],
+  sed: ["-i", "--in-place"],
+  rm: ["-r", "-rf", "-fr", "--recursive", "--force"],
+  chmod: ["-R", "--recursive"],
+  chown: ["-R", "--recursive"],
+  xargs: ["-I", "--replace"],
+};
+
 export function assertCommandAllowed(
   command: string,
   allowedCommands: string[]
 ): void {
   if (allowedCommands.length === 0) return;
-  const binary = command.trim().split(/\s+/)[0]!;
+  const parts = command.trim().split(/\s+/);
+  const binary = parts[0]!;
   if (!allowedCommands.includes(binary)) {
     throw new PolicyViolationError(
       `Command "${binary}" is not in allowed commands: ${allowedCommands.join(", ")}`
     );
+  }
+  // Check for dangerous flags on known commands
+  const dangerous = DANGEROUS_FLAGS[binary];
+  if (dangerous) {
+    for (const arg of parts.slice(1)) {
+      if (dangerous.includes(arg)) {
+        throw new PolicyViolationError(
+          `Dangerous flag "${arg}" is not allowed for command "${binary}"`
+        );
+      }
+    }
   }
 }
 

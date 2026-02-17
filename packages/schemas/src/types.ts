@@ -356,7 +356,8 @@ export type JournalEventType =
   | "agent.tool_call"
   | "agent.completed"
   | "agent.failed"
-  | "agent.aborted";
+  | "agent.aborted"
+  | "hook.input_modified";
 
 // ─── Context Budget / Checkpoint ────────────────────────────────────
 
@@ -538,7 +539,7 @@ export interface PluginLogger {
 }
 
 export type RouteHandler = (
-  req: { method: string; path: string; params: Record<string, string>; query: Record<string, string>; body: unknown },
+  req: { method: string; path: string; params: Record<string, string>; query: Record<string, string>; body: unknown; headers?: Record<string, string> },
   res: {
     json(data: unknown): void;
     text(data: string, contentType?: string): void;

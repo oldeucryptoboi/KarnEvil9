@@ -17,7 +17,9 @@
     "ws": "^8.0.0"
   },
   "optionalDependencies": {
-    "playwright": "^1.58.2"
+    "playwright": "^1.58.2",
+    "playwright-extra": "^4.3.0",
+    "puppeteer-extra-plugin-stealth": "^2.11.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",

@@ -12,6 +12,7 @@ export interface SwarmRoute {
 export function createSwarmRoutes(
   meshManager: MeshManager,
   workDistributor?: WorkDistributor,
+  swarmToken?: string,
 ): SwarmRoute[] {
   const identity: RouteHandler = async (_req, res) => {
     res.json(meshManager.getIdentity());
@@ -39,7 +40,19 @@ export function createSwarmRoutes(
     });
   };
 
+  /** Reject request if swarm token is configured and not provided. */
+  const requireToken = (req: Parameters<RouteHandler>[0], res: Parameters<RouteHandler>[1]): boolean => {
+    if (!swarmToken) return false; // no token configured — open mesh
+    const auth = req.headers?.authorization;
+    if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== swarmToken) {
+      res.status(401).json({ error: "Unauthorized: invalid or missing swarm token" });
+      return true; // rejected
+    }
+    return false;
+  };
+
   const heartbeat: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     const body = req.body as HeartbeatMessage | undefined;
     if (!body || typeof body.node_id !== "string") {
       res.status(400).json({ error: "node_id is required" });
@@ -54,6 +67,7 @@ export function createSwarmRoutes(
   };
 
   const join: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     const body = req.body as JoinMessage | undefined;
     if (!body?.identity || typeof body.identity.node_id !== "string") {
       res.status(400).json({ error: "identity with node_id is required" });
@@ -64,6 +78,7 @@ export function createSwarmRoutes(
   };
 
   const leave: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     const body = req.body as LeaveMessage | undefined;
     if (!body || typeof body.node_id !== "string") {
       res.status(400).json({ error: "node_id is required" });
@@ -74,6 +89,7 @@ export function createSwarmRoutes(
   };
 
   const gossip: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     const body = req.body as GossipMessage | undefined;
     if (!body || typeof body.sender_node_id !== "string" || !Array.isArray(body.peers)) {
       res.status(400).json({ error: "sender_node_id and peers[] are required" });
@@ -84,6 +100,7 @@ export function createSwarmRoutes(
   };
 
   const taskHandler: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     const body = req.body as SwarmTaskRequest | undefined;
     if (!body || typeof body.task_id !== "string" || typeof body.task_text !== "string") {
       res.status(400).json({ error: "task_id and task_text are required" });
@@ -102,6 +119,7 @@ export function createSwarmRoutes(
   };
 
   const resultHandler: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     const body = req.body as SwarmTaskResult | undefined;
     if (!body || typeof body.task_id !== "string") {
       res.status(400).json({ error: "task_id is required" });

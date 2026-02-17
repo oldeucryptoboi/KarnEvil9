@@ -6,11 +6,13 @@ export class SlashCommand {
    * @param {object} opts
    * @param {import("./slack-app.js").SlackApp} opts.slackApp
    * @param {import("./session-bridge.js").SessionBridge} opts.sessionBridge
+   * @param {import("./access-control.js").AccessControl} [opts.accessControl]
    * @param {object} [opts.logger]
    */
-  constructor({ slackApp, sessionBridge, logger }) {
+  constructor({ slackApp, sessionBridge, accessControl, logger }) {
     this.slackApp = slackApp;
     this.sessionBridge = sessionBridge;
+    this.accessControl = accessControl;
     this.logger = logger;
   }
 
@@ -29,6 +31,13 @@ export class SlashCommand {
    * @param {Function} respond
    */
   async _handle(command, respond) {
+    // User-level access control check
+    if (this.accessControl && !this.accessControl.isUserAllowed(command.user_id)) {
+      this.logger?.warn("Slash command rejected — user not allowed", { user_id: command.user_id });
+      await respond({ text: "You are not authorized to use KarnEvil9.", response_type: "ephemeral" });
+      return;
+    }
+
     const text = (command.text ?? "").trim();
     const parts = text.split(/\s+/);
     const subcommand = parts[0]?.toLowerCase() ?? "help";

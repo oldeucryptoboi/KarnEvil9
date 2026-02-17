@@ -14,6 +14,8 @@ export interface JournalOptions {
   lock?: boolean;
   /** Maximum number of sessions to keep in the in-memory index (LRU eviction). Default: 10000 */
   maxSessionsIndexed?: number;
+  /** How to handle corruption on init. "truncate" (default) auto-repairs; "strict" throws. */
+  recovery?: "truncate" | "strict";
 }
 
 export type JournalListener = (event: JournalEvent) => void;
@@ -32,6 +34,7 @@ export class Journal {
   private lockEnabled: boolean;
   private lockPath: string;
   private locked = false;
+  private recovery: "truncate" | "strict";
 
   constructor(filePath: string, options?: JournalOptions) {
     this.filePath = filePath;
@@ -40,6 +43,7 @@ export class Journal {
     this.lockEnabled = options?.lock ?? true;
     this.lockPath = `${filePath}.lock`;
     this.maxSessionsIndexed = options?.maxSessionsIndexed ?? 10000;
+    this.recovery = options?.recovery ?? "truncate";
   }
 
   async init(): Promise<void> {
@@ -53,16 +57,41 @@ export class Journal {
     if (existsSync(this.filePath)) {
       const content = await readFile(this.filePath, "utf-8");
       const lines = content.trim().split("\n").filter(Boolean);
+
+      // Fix C1: Truncate incomplete last line from crash
+      if (lines.length > 0) {
+        try { JSON.parse(lines[lines.length - 1]!); }
+        catch {
+          lines.pop();
+          const cleanContent = lines.length > 0 ? lines.join("\n") + "\n" : "";
+          await writeFile(this.filePath, cleanContent, "utf-8");
+          console.error(`Journal: truncated incomplete last line from crash`);
+        }
+      }
+
       let maxSeq = -1;
       let prevHash: string | undefined;
       const tempIndex = new Map<string, JournalEvent[]>();
+      let validCount = lines.length;
       try {
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i]!;
           const event = JSON.parse(line) as JournalEvent;
           // Verify hash chain integrity during init
           if (i > 0 && event.hash_prev !== prevHash) {
-            throw new Error(`Journal integrity violation at event ${i} (seq=${event.seq}): hash chain broken`);
+            if (this.recovery === "strict") {
+              throw new Error(`Journal integrity violation at event ${i} (seq=${event.seq}): hash chain broken`);
+            }
+            // Truncate mode: keep valid prefix
+            validCount = i;
+            console.error(`Journal: recovered from corruption at event ${i}, truncated ${lines.length - i} events`);
+            // Rewrite file atomically with valid prefix
+            const validLines = lines.slice(0, i);
+            const tmpPath = `${this.filePath}.tmp`;
+            const repairContent = validLines.length > 0 ? validLines.join("\n") + "\n" : "";
+            await writeFile(tmpPath, repairContent, "utf-8");
+            await rename(tmpPath, this.filePath);
+            break;
           }
           prevHash = this.hash(line);
           const bucket = tempIndex.get(event.session_id);
@@ -83,7 +112,7 @@ export class Journal {
         this.sessionIndex.set(sid, events);
       }
       this.nextSeq = maxSeq + 1;
-      if (lines.length > 0) {
+      if (validCount > 0 && tempIndex.size > 0) {
         this.lastHash = prevHash;
       }
     }
@@ -130,6 +159,8 @@ export class Journal {
       }
 
       const line = JSON.stringify(event);
+      const lineHash = this.hash(line); // compute before write — pure function, no side effects
+
       if (this.fsync) {
         const fh = await open(this.filePath, "a");
         await fh.write(line + "\n", undefined, "utf-8");
@@ -141,7 +172,7 @@ export class Journal {
 
       // Only update in-memory state after successful write
       this.nextSeq = seq + 1;
-      this.lastHash = this.hash(line);
+      this.lastHash = lineHash;
 
       const bucket = this.sessionIndex.get(sessionId);
       if (bucket) {
@@ -330,6 +361,22 @@ export class Journal {
     if (this.lockEnabled && this.locked) {
       await this.releaseLock();
     }
+  }
+
+  /**
+   * Register SIGINT/SIGTERM handlers that flush pending writes before exit.
+   * Returns a cleanup function to remove the handlers.
+   */
+  registerShutdownHandler(): () => void {
+    const handler = () => {
+      this.close().finally(() => process.exit(0));
+    };
+    process.on("SIGINT", handler);
+    process.on("SIGTERM", handler);
+    return () => {
+      process.off("SIGINT", handler);
+      process.off("SIGTERM", handler);
+    };
   }
 
   getFilePath(): string {

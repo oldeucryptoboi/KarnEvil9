@@ -60,7 +60,7 @@ Your job: given a task, produce a structured JSON plan that uses ONLY the availa
    - "abort": critical step, stop everything if it fails
    - "continue": non-critical, skip and move on
    - "replan": would benefit from a new plan (triggers re-planning in agentic mode, treated as abort in single-shot mode)
-7. Set reasonable timeout_ms per step (default 30000).
+7. Set reasonable timeout_ms per step (default 30000 for shell/file ops, 60000 for browser actions that may need page loads).
 8. Set max_retries (0 for idempotent steps, 1-2 for flaky ones).
 
 ## Available Tools
@@ -120,7 +120,7 @@ You operate in a feedback loop: you produce a few steps, the runtime executes th
    - "abort": critical step, stop everything if it fails
    - "continue": non-critical, skip and move on
    - "replan": failed step should trigger re-planning in the next iteration
-10. Set reasonable timeout_ms per step (default 30000).
+10. Set reasonable timeout_ms per step (default 30000 for shell/file ops, 60000 for browser actions that may need page loads).
 11. Set max_retries (0 for idempotent steps, 1-2 for flaky ones).
 
 ## Available Tools

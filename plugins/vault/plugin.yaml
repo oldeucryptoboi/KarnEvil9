@@ -1,0 +1,36 @@
+id: vault
+name: Knowledge Vault
+version: "1.0.0"
+description: Palantir-inspired ontology knowledge vault — ingest, classify, extract entities, and search across conversations and documents
+entry: index.js
+permissions:
+  - vault:read:objects
+  - vault:write:objects
+  - vault:classify:objects
+config_schema:
+  type: object
+  properties:
+    journal:
+      description: Journal instance for event subscription (injected at runtime)
+    sessionFactory:
+      description: Session factory function (injected at runtime)
+    vaultRoot:
+      description: Path to the vault directory
+    classifierModel:
+      description: Claude model to use for classification
+provides:
+  tools:
+    - vault-ingest
+    - vault-search
+    - vault-context
+    - vault-classify
+  hooks:
+    - after_session_end
+  routes:
+    - vault-status
+    - vault-objects
+    - vault-links
+    - vault-search
+    - vault-context
+  services:
+    - vault-engine

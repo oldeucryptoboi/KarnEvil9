@@ -225,7 +225,7 @@ export class ApiServer {
       this.journal = journal;
       // toolRuntime, permissions, planner remain undefined (optional)
       this.defaultMode = "mock";
-      this.defaultLimits = { max_steps: 20, max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000 };
+      this.defaultLimits = { max_steps: 50, max_duration_ms: 600000, max_cost_usd: 10, max_tokens: 500000, max_iterations: 35 };
       this.defaultPolicy = { allowed_paths: [], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
       this.maxConcurrentSessions = 50;
       this.maxSseClientsPerSession = 10;
@@ -242,7 +242,7 @@ export class ApiServer {
       this.planner = config.planner;
       this.pluginRegistry = config.pluginRegistry;
       this.defaultMode = config.defaultMode ?? "mock";
-      this.defaultLimits = config.defaultLimits ?? { max_steps: 20, max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000 };
+      this.defaultLimits = config.defaultLimits ?? { max_steps: 50, max_duration_ms: 600000, max_cost_usd: 10, max_tokens: 500000, max_iterations: 35 };
       this.defaultPolicy = config.defaultPolicy ?? { allowed_paths: [], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
       this.maxConcurrentSessions = config.maxConcurrentSessions ?? 50;
       this.maxSseClientsPerSession = config.maxSseClientsPerSession ?? 10;
@@ -521,6 +521,7 @@ export class ApiServer {
       limits: this.defaultLimits,
       policy: this.defaultPolicy,
       agentic: this.agentic,
+      plannerTimeoutMs: 120_000,
     });
 
     const session = await kernel.createSession(task);
@@ -742,6 +743,7 @@ export class ApiServer {
             limits: effectiveLimits,
             policy: this.defaultPolicy,
             agentic: this.agentic,
+            plannerTimeoutMs: 120_000,
           };
           const kernel = new KernelClass(kernelConfig);
           const session = await kernel.createSession(task);
@@ -936,6 +938,7 @@ export class ApiServer {
           mode: this.defaultMode,
           limits: this.defaultLimits,
           policy: this.defaultPolicy,
+          plannerTimeoutMs: 120_000,
         });
         const session = await kernel.resumeSession(sessionId);
         if (!session) {

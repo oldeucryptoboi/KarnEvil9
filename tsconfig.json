@@ -12,6 +12,7 @@
     { "path": "packages/metrics" },
     { "path": "packages/scheduler" },
     { "path": "packages/swarm" },
+    { "path": "packages/vault" },
     { "path": "packages/api" },
     { "path": "packages/browser-relay" },
     { "path": "packages/cli" }

@@ -78,8 +78,8 @@ describe("Journal", () => {
     lines[1] = JSON.stringify(parsed);
     await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
 
-    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
-    // init() now verifies hash chain and throws on tampering (C3 fix)
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false, recovery: "strict" });
+    // init() with strict recovery throws on tampering
     await expect(journal2.init()).rejects.toThrow("Journal integrity violation at event 2");
   });
 
@@ -694,5 +694,271 @@ describe("Journal", () => {
     for (let i = 0; i < 50; i++) {
       expect(journal.getSessionEventCount(`sess-${i}`)).toBe(1);
     }
+  });
+
+  // ─── Anti-Corruption / Recovery Tests ─────────────────────────────
+
+  it("recovers from partial last line (crash mid-write)", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal1.init();
+    await journal1.emit("sess-1", "session.created", {});
+    await journal1.emit("sess-1", "session.started", {});
+
+    // Simulate crash mid-write: append incomplete JSON
+    const { appendFileSync, mkdirSync } = await import("node:fs");
+    if (!existsSync(TEST_DIR)) mkdirSync(TEST_DIR, { recursive: true });
+    appendFileSync(TEST_FILE, '{"incomplete');
+
+    // New journal should recover by truncating the partial line
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal2.init();
+
+    const events = await journal2.readAll();
+    expect(events).toHaveLength(2);
+
+    // Should be able to continue writing
+    await journal2.emit("sess-1", "session.completed", {});
+    const integrity = await journal2.verifyIntegrity();
+    expect(integrity.valid).toBe(true);
+    expect(await journal2.readAll()).toHaveLength(3);
+  });
+
+  it("recovers from hash chain break in truncate mode (default)", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal1.init();
+    await journal1.emit("sess-1", "session.created", {});
+    await journal1.emit("sess-1", "session.started", {});
+    await journal1.emit("sess-1", "step.started", { step_id: "s1" });
+    await journal1.emit("sess-1", "step.succeeded", { step_id: "s1" });
+    await journal1.emit("sess-1", "session.completed", {});
+
+    // Corrupt event 3's hash_prev to break the chain
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    const parsed = JSON.parse(lines[3]!);
+    parsed.hash_prev = "0000000000000000000000000000000000000000000000000000000000000000";
+    lines[3] = JSON.stringify(parsed);
+    await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
+
+    // Default recovery ("truncate") should keep events 0-2 and discard 3-4
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal2.init();
+
+    const events = await journal2.readAll();
+    expect(events).toHaveLength(3);
+
+    // Hash chain should be valid for the surviving events
+    const integrity = await journal2.verifyIntegrity();
+    expect(integrity.valid).toBe(true);
+
+    // Should be able to continue writing
+    const e = await journal2.emit("sess-1", "session.completed", {});
+    expect(e.seq).toBe(3);
+  });
+
+  it("strict recovery throws on hash chain break", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal1.init();
+    await journal1.emit("sess-1", "session.created", {});
+    await journal1.emit("sess-1", "session.started", {});
+    await journal1.emit("sess-1", "session.completed", {});
+
+    // Corrupt event 1's hash_prev
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    const parsed = JSON.parse(lines[1]!);
+    parsed.hash_prev = "bad_hash";
+    lines[1] = JSON.stringify(parsed);
+    await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
+
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false, recovery: "strict" });
+    await expect(journal2.init()).rejects.toThrow("Journal integrity violation at event 1");
+  });
+
+  it("recovers from empty file left after truncating all lines", async () => {
+    const { mkdirSync } = await import("node:fs");
+    if (!existsSync(TEST_DIR)) mkdirSync(TEST_DIR, { recursive: true });
+
+    // Write only an incomplete line (no valid events)
+    await writeFile(TEST_FILE, '{"broken\n', "utf-8");
+
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+
+    // Should start fresh
+    const events = await journal.readAll();
+    expect(events).toHaveLength(0);
+
+    // Should be able to write new events
+    const e = await journal.emit("sess-1", "session.created", {});
+    expect(e.seq).toBe(0);
+    expect(e.hash_prev).toBeUndefined();
+  });
+
+  it("truncate recovery preserves valid events in session index", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal1.init();
+    await journal1.emit("sess-1", "session.created", {});
+    await journal1.emit("sess-2", "session.created", {});
+    await journal1.emit("sess-1", "session.started", {});
+
+    // Corrupt event 2 (sess-1 session.started) to break chain
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    const parsed = JSON.parse(lines[2]!);
+    parsed.hash_prev = "corrupted";
+    lines[2] = JSON.stringify(parsed);
+    await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
+
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal2.init();
+
+    // Only events 0 and 1 should survive
+    expect(journal2.getSessionEventCount("sess-1")).toBe(1);
+    expect(journal2.getSessionEventCount("sess-2")).toBe(1);
+  });
+
+  it("hash chain break at event 1 leaves only event 0", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal1.init();
+    await journal1.emit("sess-1", "session.created", {});
+    await journal1.emit("sess-1", "session.started", {});
+    await journal1.emit("sess-1", "session.completed", {});
+
+    // Corrupt event 1's hash_prev — only event 0 should survive
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    const parsed = JSON.parse(lines[1]!);
+    parsed.hash_prev = "wrong";
+    lines[1] = JSON.stringify(parsed);
+    await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
+
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal2.init();
+
+    const events = await journal2.readAll();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("session.created");
+
+    // Continue writing — hash chain should be valid
+    const e = await journal2.emit("sess-1", "session.started", {});
+    expect(e.seq).toBe(1);
+    expect(e.hash_prev).toBeTruthy();
+    const integrity = await journal2.verifyIntegrity();
+    expect(integrity.valid).toBe(true);
+  });
+
+  it("partial line in strict mode is still truncated (strict only affects hash chain)", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal1.init();
+    await journal1.emit("sess-1", "session.created", {});
+
+    // Append partial line
+    const { appendFileSync } = await import("node:fs");
+    appendFileSync(TEST_FILE, '{"half_written');
+
+    // Strict mode should still recover from the partial line (it's a JSON issue, not a hash chain issue)
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false, recovery: "strict" });
+    await journal2.init();
+
+    const events = await journal2.readAll();
+    expect(events).toHaveLength(1);
+  });
+
+  it("partial line followed by hash chain break is handled (both corruptions)", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal1.init();
+    await journal1.emit("sess-1", "session.created", {});
+    await journal1.emit("sess-1", "session.started", {});
+    await journal1.emit("sess-1", "session.completed", {});
+
+    // Corrupt event 2's hash_prev AND append a partial line
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    const parsed = JSON.parse(lines[2]!);
+    parsed.hash_prev = "bad";
+    lines[2] = JSON.stringify(parsed);
+    await writeFile(TEST_FILE, lines.join("\n") + "\n" + '{"garbage', "utf-8");
+
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal2.init();
+
+    // Partial line trimmed first, then hash chain break truncates to 2 events
+    const events = await journal2.readAll();
+    expect(events).toHaveLength(2);
+    const integrity = await journal2.verifyIntegrity();
+    expect(integrity.valid).toBe(true);
+  });
+
+  it("recovered journal file is clean on re-init", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal1.init();
+    await journal1.emit("sess-1", "session.created", {});
+    await journal1.emit("sess-1", "session.started", {});
+    await journal1.emit("sess-1", "session.completed", {});
+
+    // Corrupt event 2
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    const parsed = JSON.parse(lines[2]!);
+    parsed.hash_prev = "corrupt";
+    lines[2] = JSON.stringify(parsed);
+    await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
+
+    // First init: recovers
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal2.init();
+    expect(await journal2.readAll()).toHaveLength(2);
+
+    // Second init: file should be clean — no recovery needed, no stderr output
+    const journal3 = new Journal(TEST_FILE, { fsync: false, lock: false, recovery: "strict" });
+    await journal3.init(); // would throw if file is still corrupted
+    expect(await journal3.readAll()).toHaveLength(2);
+    const integrity = await journal3.verifyIntegrity();
+    expect(integrity.valid).toBe(true);
+  });
+
+  it("atomic rewrite removes tmp file after hash chain recovery", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal1.init();
+    await journal1.emit("sess-1", "session.created", {});
+    await journal1.emit("sess-1", "session.started", {});
+
+    // Corrupt event 1
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    const parsed = JSON.parse(lines[1]!);
+    parsed.hash_prev = "broken";
+    lines[1] = JSON.stringify(parsed);
+    await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
+
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal2.init();
+
+    // tmp file should not linger after rename
+    expect(existsSync(TEST_FILE + ".tmp")).toBe(false);
+  });
+
+  it("registerShutdownHandler returns a working cleanup function", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+
+    const cleanup = journal.registerShutdownHandler();
+    expect(typeof cleanup).toBe("function");
+
+    // Cleanup should not throw
+    cleanup();
+  });
+
+  it("registerShutdownHandler can be called multiple times safely", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+
+    const cleanup1 = journal.registerShutdownHandler();
+    const cleanup2 = journal.registerShutdownHandler();
+
+    // Both cleanups should work
+    cleanup1();
+    cleanup2();
   });
 });

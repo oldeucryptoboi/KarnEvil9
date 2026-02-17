@@ -178,6 +178,10 @@ export const ErrorCodes = {
   SCHEDULE_NOT_FOUND: "SCHEDULE_NOT_FOUND",
   SCHEDULE_INVALID: "SCHEDULE_INVALID",
   SCHEDULER_NOT_RUNNING: "SCHEDULER_NOT_RUNNING",
+  VAULT_NOT_FOUND: "VAULT_NOT_FOUND",
+  VAULT_SCHEMA_INVALID: "VAULT_SCHEMA_INVALID",
+  VAULT_INGESTION_FAILED: "VAULT_INGESTION_FAILED",
+  VAULT_CLASSIFICATION_FAILED: "VAULT_CLASSIFICATION_FAILED",
 } as const;
 
 export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
@@ -357,7 +361,18 @@ export type JournalEventType =
   | "agent.completed"
   | "agent.failed"
   | "agent.aborted"
-  | "hook.input_modified";
+  | "hook.input_modified"
+  | "vault.ingestion_started"
+  | "vault.ingestion_completed"
+  | "vault.object_created"
+  | "vault.object_updated"
+  | "vault.object_classified"
+  | "vault.entity_extracted"
+  | "vault.entity_deduplicated"
+  | "vault.link_created"
+  | "vault.context_generated"
+  | "vault.janitor_completed"
+  | "vault.error";
 
 // ─── Context Budget / Checkpoint ────────────────────────────────────
 

@@ -112,8 +112,85 @@ export interface ContextBriefing {
   generated_at: string;
   recent_conversations: Array<{ title: string; date: string; entities: string[] }>;
   active_projects: Array<{ title: string; status: string }>;
-  key_entities: Array<{ name: string; type: string; mention_count: number }>;
+  key_entities: Array<{ name: string; type: string; mention_count: number; top_linked?: string[] }>;
   recent_lessons: string[];
+  open_threads?: Array<{ title: string; date: string; source: string }>;
+}
+
+// ─── Janitor ──────────────────────────────────────────────────────────
+
+export interface JanitorResult {
+  orphaned_links_removed: number;
+  frontmatter_fixed: number;
+  duplicates_merged: number;
+  stale_archived: number;
+  tracker_compacted: boolean;
+  wikilink_stubs_created: number;
+}
+
+// ─── Vector Pipeline ──────────────────────────────────────────────────
+
+export type EmbedderFn = (texts: string[]) => Promise<number[][]>;
+
+export interface VectorSearchResult {
+  object_id: string;
+  score: number;
+  title: string;
+  object_type: string;
+}
+
+export interface ClusterMember {
+  object_id: string;
+  classification: "core" | "border" | "noise";
+}
+
+export interface ClusterResult {
+  cluster_id: number;
+  members: ClusterMember[];
+  representative_id: string;
+  label?: string;
+}
+
+export interface DiscoverRelationshipsOptions {
+  cosine_threshold?: number;
+  max_candidates?: number;
+  label_via_llm?: boolean;
+  label_batch_size?: number;
+}
+
+export interface DiscoverRelationshipsResult {
+  embeddings_created: number;
+  clusters_found: number;
+  relationships_discovered: number;
+  links_created: number;
+}
+
+// ─── Dashboard & Insights ─────────────────────────────────────────────
+
+export interface DashboardData {
+  generated_at: string;
+  total_objects: number;
+  total_links: number;
+  unclassified_count: number;
+  embedding_coverage: number;
+  objects_by_type: Record<string, number>;
+  objects_by_category: Record<string, number>;
+  objects_by_source: Record<string, number>;
+  top_entities: Array<{ name: string; type: string; mention_count: number }>;
+  recent_activity: Array<{ title: string; source: string; ingested_at: string }>;
+  topic_clusters: ClusterResult[];
+}
+
+export type InsightsFn = (stats: DashboardData) => Promise<string>;
+
+// ─── DropZone ────────────────────────────────────────────────────────
+
+export interface DropZoneResult {
+  files_processed: number;
+  files_failed: number;
+  items_created: number;
+  items_updated: number;
+  items_skipped: number;
 }
 
 export const PARA_FOLDERS: Record<ParaCategory, string> = {

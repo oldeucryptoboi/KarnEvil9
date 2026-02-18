@@ -15,6 +15,16 @@ export type {
   IngestionRecord,
   VaultStats,
   ContextBriefing,
+  JanitorResult,
+  EmbedderFn,
+  VectorSearchResult,
+  ClusterMember,
+  ClusterResult,
+  DiscoverRelationshipsOptions,
+  DiscoverRelationshipsResult,
+  DashboardData,
+  InsightsFn,
+  DropZoneResult,
 } from "./types.js";
 
 export { PARA_FOLDERS } from "./types.js";
@@ -45,6 +55,15 @@ export type { ClassificationPipelineOptions } from "./classification-pipeline.js
 export { EntityExtractor } from "./entity-extractor.js";
 export type { ExtractedEntity, EntityExtractionResult } from "./entity-extractor.js";
 export { ContextGenerator } from "./context-generator.js";
+export { VectorStore, cosineSimilarity } from "./vector-store.js";
+export type { SimilarPair } from "./vector-store.js";
+export { OPTICSClusterer } from "./clusterer.js";
+export type { ClusterInput, OPTICSOptions } from "./clusterer.js";
+export { RelationshipDiscoverer } from "./relationship-discoverer.js";
+export type { RelationshipDiscovererOptions } from "./relationship-discoverer.js";
+export { DashboardGenerator } from "./dashboard-generator.js";
+export { DropZoneWatcher } from "./dropzone-watcher.js";
+export type { DropZoneFile } from "./dropzone-watcher.js";
 export { VaultManager } from "./vault-manager.js";
 export type { VaultManagerOptions } from "./vault-manager.js";
 

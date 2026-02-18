@@ -1,0 +1,76 @@
+import { describe, it, expect } from "vitest";
+import {
+  PARA_FOLDERS,
+  getDefaultSchema,
+  loadSchemaFromFile,
+  validateSchema,
+  getObjectType,
+  getObjectTypeNames,
+  getLinkType,
+  serializeSchemaToYaml,
+  serializeVaultObject,
+  deserializeVaultObject,
+  sanitizeFileName,
+  ObjectStore,
+  LinkStore,
+  IngestionTracker,
+  Deduplicator,
+  levenshtein,
+  ClassificationPipeline,
+  EntityExtractor,
+  ContextGenerator,
+  VectorStore,
+  cosineSimilarity,
+  OPTICSClusterer,
+  RelationshipDiscoverer,
+  DashboardGenerator,
+  DropZoneWatcher,
+  VaultManager,
+  BaseAdapter,
+  JournalAdapter,
+  ChatGPTAdapter,
+  ClaudeAdapter,
+  WhatsAppAdapter,
+  AppleNotesAdapter,
+  GmailAdapter,
+  GoogleDriveAdapter,
+} from "./index.js";
+
+describe("vault barrel exports", () => {
+  it("exports all expected classes and functions", () => {
+    expect(PARA_FOLDERS).toBeDefined();
+    expect(getDefaultSchema).toBeTypeOf("function");
+    expect(loadSchemaFromFile).toBeTypeOf("function");
+    expect(validateSchema).toBeTypeOf("function");
+    expect(getObjectType).toBeTypeOf("function");
+    expect(getObjectTypeNames).toBeTypeOf("function");
+    expect(getLinkType).toBeTypeOf("function");
+    expect(serializeSchemaToYaml).toBeTypeOf("function");
+    expect(serializeVaultObject).toBeTypeOf("function");
+    expect(deserializeVaultObject).toBeTypeOf("function");
+    expect(sanitizeFileName).toBeTypeOf("function");
+    expect(ObjectStore).toBeTypeOf("function");
+    expect(LinkStore).toBeTypeOf("function");
+    expect(IngestionTracker).toBeTypeOf("function");
+    expect(Deduplicator).toBeTypeOf("function");
+    expect(levenshtein).toBeTypeOf("function");
+    expect(ClassificationPipeline).toBeTypeOf("function");
+    expect(EntityExtractor).toBeTypeOf("function");
+    expect(ContextGenerator).toBeTypeOf("function");
+    expect(VectorStore).toBeTypeOf("function");
+    expect(cosineSimilarity).toBeTypeOf("function");
+    expect(OPTICSClusterer).toBeTypeOf("function");
+    expect(RelationshipDiscoverer).toBeTypeOf("function");
+    expect(DashboardGenerator).toBeTypeOf("function");
+    expect(DropZoneWatcher).toBeTypeOf("function");
+    expect(VaultManager).toBeTypeOf("function");
+    expect(BaseAdapter).toBeTypeOf("function");
+    expect(JournalAdapter).toBeTypeOf("function");
+    expect(ChatGPTAdapter).toBeTypeOf("function");
+    expect(ClaudeAdapter).toBeTypeOf("function");
+    expect(WhatsAppAdapter).toBeTypeOf("function");
+    expect(AppleNotesAdapter).toBeTypeOf("function");
+    expect(GmailAdapter).toBeTypeOf("function");
+    expect(GoogleDriveAdapter).toBeTypeOf("function");
+  });
+});

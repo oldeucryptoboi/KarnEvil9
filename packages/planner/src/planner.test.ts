@@ -295,6 +295,92 @@ describe("LLMPlanner prompt rendering", () => {
   });
 });
 
+describe("LLMPlanner vault context injection", () => {
+  it("includes vault context section when vault_context in snapshot", async () => {
+    let capturedPrompt = "";
+    const callModel = async (_system: string, user: string) => {
+      capturedPrompt = user;
+      return { text: JSON.stringify({
+        plan_id: uuid(), schema_version: "0.1", goal: "Test",
+        assumptions: [], steps: [{
+          step_id: uuid(), title: "Step", tool_ref: { name: "read-file" },
+          input: { path: "x" }, success_criteria: ["done"],
+          failure_policy: "abort", timeout_ms: 5000, max_retries: 0,
+        }], created_at: new Date().toISOString(),
+      }) };
+    };
+
+    const planner = new LLMPlanner(callModel);
+    await planner.generatePlan(makeTask(), toolSchemas, {
+      vault_context: "# Current Context\n\nRecent projects: Alpha, Beta",
+    }, {});
+    expect(capturedPrompt).toContain("Vault Context (Situational Awareness)");
+    expect(capturedPrompt).toContain("Recent projects: Alpha, Beta");
+  });
+
+  it("excludes vault context section when field absent", async () => {
+    let capturedPrompt = "";
+    const callModel = async (_system: string, user: string) => {
+      capturedPrompt = user;
+      return { text: JSON.stringify({
+        plan_id: uuid(), schema_version: "0.1", goal: "Test",
+        assumptions: [], steps: [{
+          step_id: uuid(), title: "Step", tool_ref: { name: "read-file" },
+          input: { path: "x" }, success_criteria: ["done"],
+          failure_policy: "abort", timeout_ms: 5000, max_retries: 0,
+        }], created_at: new Date().toISOString(),
+      }) };
+    };
+
+    const planner = new LLMPlanner(callModel);
+    await planner.generatePlan(makeTask(), toolSchemas, {}, {});
+    expect(capturedPrompt).not.toContain("Vault Context");
+  });
+
+  it("vault context is wrapped in UNTRUSTED delimiters", async () => {
+    let capturedPrompt = "";
+    const callModel = async (_system: string, user: string) => {
+      capturedPrompt = user;
+      return { text: JSON.stringify({
+        plan_id: uuid(), schema_version: "0.1", goal: "Test",
+        assumptions: [], steps: [{
+          step_id: uuid(), title: "Step", tool_ref: { name: "read-file" },
+          input: { path: "x" }, success_criteria: ["done"],
+          failure_policy: "abort", timeout_ms: 5000, max_retries: 0,
+        }], created_at: new Date().toISOString(),
+      }) };
+    };
+
+    const planner = new LLMPlanner(callModel);
+    await planner.generatePlan(makeTask(), toolSchemas, {
+      vault_context: "Some vault data",
+    }, {});
+    // Find the section with vault context and verify it's wrapped
+    const vaultIdx = capturedPrompt.indexOf("Vault Context");
+    const afterVault = capturedPrompt.slice(vaultIdx);
+    expect(afterVault).toContain("<<<UNTRUSTED_INPUT>>>");
+    expect(afterVault).toContain("<<<END_UNTRUSTED_INPUT>>>");
+  });
+
+  it("includes vault context in agentic prompt too", async () => {
+    let capturedPrompt = "";
+    const callModel = async (_system: string, user: string) => {
+      capturedPrompt = user;
+      return { text: JSON.stringify({
+        plan_id: uuid(), schema_version: "0.1", goal: "Done",
+        assumptions: [], steps: [], created_at: new Date().toISOString(),
+      }) };
+    };
+
+    const planner = new LLMPlanner(callModel, { agentic: true });
+    await planner.generatePlan(makeTask(), toolSchemas, {
+      vault_context: "# Briefing\n\nActive: Project X",
+    }, {});
+    expect(capturedPrompt).toContain("Vault Context (Situational Awareness)");
+    expect(capturedPrompt).toContain("Active: Project X");
+  });
+});
+
 describe("LLMPlanner prompt injection mitigations", () => {
   it("wraps task text in untrusted delimiters", async () => {
     let capturedPrompt = "";
@@ -535,6 +621,61 @@ describe("LLMPlanner agentic prompt content", () => {
     expect(capturedPrompt).toContain("Slow operation");
     expect(capturedPrompt).toContain("failed");
     expect(capturedPrompt).toContain("Tool timed out");
+  });
+
+  it("includes relevant_memories in agentic prompt", async () => {
+    let capturedPrompt = "";
+    const callModel = async (_system: string, user: string) => {
+      capturedPrompt = user;
+      return { text: JSON.stringify({
+        plan_id: uuid(), schema_version: "0.1", goal: "Done",
+        assumptions: [], steps: [], created_at: new Date().toISOString(),
+      }) };
+    };
+    const planner = new LLMPlanner(callModel, { agentic: true });
+    await planner.generatePlan(makeTask(), toolSchemas, {
+      relevant_memories: [
+        { task: "Previous task", outcome: "succeeded", lesson: "Use read-file first" },
+      ],
+    }, {});
+    expect(capturedPrompt).toContain("Past Experience");
+    expect(capturedPrompt).toContain("[succeeded] Task \"Previous task\"");
+    expect(capturedPrompt).toContain("Use read-file first");
+    expect(capturedPrompt).toContain("Consider these when planning");
+  });
+
+  it("includes task_domain in agentic prompt", async () => {
+    let capturedPrompt = "";
+    const callModel = async (_system: string, user: string) => {
+      capturedPrompt = user;
+      return { text: JSON.stringify({
+        plan_id: uuid(), schema_version: "0.1", goal: "Done",
+        assumptions: [], steps: [], created_at: new Date().toISOString(),
+      }) };
+    };
+    const planner = new LLMPlanner(callModel, { agentic: true });
+    await planner.generatePlan(makeTask(), toolSchemas, {
+      task_domain: "web_scraping",
+    }, {});
+    expect(capturedPrompt).toContain("Task Domain: web_scraping");
+    expect(capturedPrompt).toContain("Focus on web_scraping-specific approaches");
+  });
+
+  it("includes task constraints in agentic prompt", async () => {
+    let capturedPrompt = "";
+    const callModel = async (_system: string, user: string) => {
+      capturedPrompt = user;
+      return { text: JSON.stringify({
+        plan_id: uuid(), schema_version: "0.1", goal: "Done",
+        assumptions: [], steps: [], created_at: new Date().toISOString(),
+      }) };
+    };
+    const planner = new LLMPlanner(callModel, { agentic: true });
+    const task = makeTask("Test with constraints");
+    task.constraints = { max_files: 10 };
+    await planner.generatePlan(task, toolSchemas, {}, {});
+    expect(capturedPrompt).toContain("Task Constraints");
+    expect(capturedPrompt).toContain("max_files");
   });
 
   it("uses agentic system prompt with iterative instructions", async () => {

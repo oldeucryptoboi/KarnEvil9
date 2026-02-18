@@ -176,6 +176,12 @@ function buildUserPrompt(task: Task, stateSnapshot: Record<string, unknown>): st
     }
     prompt += `\nConsider these when planning.\n`;
   }
+  if (stateSnapshot.vault_context) {
+    prompt += `\n## Vault Context (Situational Awareness)\n`;
+    prompt += `The following is a briefing from the knowledge vault.\n`;
+    prompt += wrapUntrusted(String(stateSnapshot.vault_context), 4000);
+    prompt += `\n`;
+  }
   if (stateSnapshot.has_plan) prompt += `\n## Current State (replanning context)\n${wrapUntrusted(JSON.stringify(stateSnapshot, null, 2))}\n`;
   prompt += `\nProduce the plan JSON now.`;
   return prompt;
@@ -211,6 +217,13 @@ function buildAgenticUserPrompt(task: Task, stateSnapshot: Record<string, unknow
         }
       }
     }
+  }
+
+  if (stateSnapshot.vault_context) {
+    prompt += `\n## Vault Context (Situational Awareness)\n`;
+    prompt += `The following is a briefing from the knowledge vault.\n`;
+    prompt += wrapUntrusted(String(stateSnapshot.vault_context), 4000);
+    prompt += `\n`;
   }
 
   // Subagent findings (injected by context budget delegation)

@@ -426,6 +426,19 @@ export class Kernel {
     const completed = new Set<string>();
     const failed = new Set<string>();
 
+    // Pre-populate from TaskState for recovery (no-op for fresh sessions)
+    for (const step of plan.steps) {
+      const existing = this.taskState.getStepResult(step.step_id);
+      if (existing) {
+        results.set(step.step_id, existing);
+        if (existing.status === "succeeded") {
+          completed.add(step.step_id);
+        } else if (existing.status === "failed" || existing.status === "skipped") {
+          failed.add(step.step_id);
+        }
+      }
+    }
+
     while (completed.size + failed.size < plan.steps.length) {
       if (this.abortRequested || this.session.status !== "running") break;
 
@@ -530,15 +543,23 @@ export class Kernel {
     }
   }
 
-  private async agenticPhase(): Promise<void> {
+  private async agenticPhase(resumeFrom?: {
+    startIteration: number;
+    totalStepsExecuted: number;
+    previousPlanId: string | null;
+    lastPlan: Plan | null;
+    lastPlanCompleted: boolean;
+  }): Promise<void> {
     if (!this.session || !this.taskState) return;
 
     const maxIter = this.session.limits.max_iterations ?? 10;
-    let totalStepsExecuted = 0;
-    let previousPlanId: string | null = null;
+    let totalStepsExecuted = resumeFrom?.totalStepsExecuted ?? 0;
+    let previousPlanId: string | null = resumeFrom?.previousPlanId ?? null;
     let done = false;
+    const startIteration = resumeFrom?.startIteration ?? 0;
+    let skipPlanOnFirstIteration = !!(resumeFrom?.lastPlan && !resumeFrom.lastPlanCompleted);
 
-    for (let iteration = 0; iteration < maxIter; iteration++) {
+    for (let iteration = startIteration; iteration < maxIter; iteration++) {
       if (this.abortRequested || !["planning", "running"].includes(this.session.status)) break;
 
       // Duration limit check
@@ -647,79 +668,90 @@ export class Kernel {
         }
       }
 
-      // Plan next steps (allow empty steps as "done" signal)
-      const planResult = await this.planPhase({ allowEmptySteps: true, iteration: iteration + 1 });
-      if (!planResult) {
-        if (!["failed", "aborted"].includes(this.session.status)) {
-          await this.transition("failed");
-          await this.config.journal.tryEmit(this.session.session_id, "session.failed", {
-            reason: `Planner failed at iteration ${iteration + 1}`,
+      let plan: Plan;
+      let iterationUsage: import("@karnevil9/schemas").UsageMetrics | undefined;
+
+      if (skipPlanOnFirstIteration) {
+        // Resume mid-execution: skip planning, go straight to execute phase
+        plan = resumeFrom!.lastPlan!;
+        skipPlanOnFirstIteration = false;
+        iterationUsage = undefined;
+      } else {
+        // Plan next steps (allow empty steps as "done" signal)
+        const planResult = await this.planPhase({ allowEmptySteps: true, iteration: iteration + 1 });
+        if (!planResult) {
+          if (!["failed", "aborted"].includes(this.session.status)) {
+            await this.transition("failed");
+            await this.config.journal.tryEmit(this.session.session_id, "session.failed", {
+              reason: `Planner failed at iteration ${iteration + 1}`,
+            });
+          }
+          return;
+        }
+
+        plan = planResult.plan;
+        iterationUsage = planResult.usage;
+
+        // Token limit check
+        if (this.usageAccumulator && this.session.limits.max_tokens > 0) {
+          if (this.usageAccumulator.totalTokens > this.session.limits.max_tokens) {
+            await this.config.journal.tryEmit(this.session.session_id, "limit.exceeded", {
+              limit: "max_tokens", value: this.session.limits.max_tokens,
+              actual: this.usageAccumulator.totalTokens,
+            });
+            await this.transition("failed");
+            await this.config.journal.tryEmit(this.session.session_id, "session.failed", {
+              reason: `Token limit exceeded: ${this.usageAccumulator.totalTokens} > ${this.session.limits.max_tokens}`,
+            });
+            return;
+          }
+        }
+
+        // Cost limit check
+        if (this.usageAccumulator && this.session.limits.max_cost_usd > 0) {
+          if (this.usageAccumulator.totalCostUsd > this.session.limits.max_cost_usd) {
+            await this.config.journal.tryEmit(this.session.session_id, "limit.exceeded", {
+              limit: "max_cost_usd", value: this.session.limits.max_cost_usd,
+              actual: this.usageAccumulator.totalCostUsd,
+            });
+            await this.transition("failed");
+            await this.config.journal.tryEmit(this.session.session_id, "session.failed", {
+              reason: `Cost limit exceeded: $${this.usageAccumulator.totalCostUsd.toFixed(4)} > $${this.session.limits.max_cost_usd}`,
+            });
+            return;
+          }
+        }
+
+        // Empty steps = planner says task is complete
+        if (plan.steps.length === 0) {
+          done = true;
+          // Transition to running so run() can complete normally
+          if (this.session.status === "planning") {
+            await this.transition("running");
+          }
+          break;
+        }
+
+        // Emit plan.replaced for iterations after the first
+        if (previousPlanId) {
+          await this.config.journal.emit(this.session.session_id, "plan.replaced", {
+            previous_plan_id: previousPlanId, new_plan_id: plan.plan_id, iteration: iteration + 1,
           });
         }
-        return;
-      }
+        previousPlanId = plan.plan_id;
 
-      const { plan, usage: iterationUsage } = planResult;
-
-      // Token limit check
-      if (this.usageAccumulator && this.session.limits.max_tokens > 0) {
-        if (this.usageAccumulator.totalTokens > this.session.limits.max_tokens) {
+        // Check cumulative step limit
+        if (totalStepsExecuted + plan.steps.length > this.session.limits.max_steps) {
           await this.config.journal.tryEmit(this.session.session_id, "limit.exceeded", {
-            limit: "max_tokens", value: this.session.limits.max_tokens,
-            actual: this.usageAccumulator.totalTokens,
+            limit: "max_steps", value: this.session.limits.max_steps,
+            actual: totalStepsExecuted + plan.steps.length,
           });
           await this.transition("failed");
           await this.config.journal.tryEmit(this.session.session_id, "session.failed", {
-            reason: `Token limit exceeded: ${this.usageAccumulator.totalTokens} > ${this.session.limits.max_tokens}`,
+            reason: `Cumulative step limit exceeded: ${totalStepsExecuted + plan.steps.length} > ${this.session.limits.max_steps}`,
           });
           return;
         }
-      }
-
-      // Cost limit check
-      if (this.usageAccumulator && this.session.limits.max_cost_usd > 0) {
-        if (this.usageAccumulator.totalCostUsd > this.session.limits.max_cost_usd) {
-          await this.config.journal.tryEmit(this.session.session_id, "limit.exceeded", {
-            limit: "max_cost_usd", value: this.session.limits.max_cost_usd,
-            actual: this.usageAccumulator.totalCostUsd,
-          });
-          await this.transition("failed");
-          await this.config.journal.tryEmit(this.session.session_id, "session.failed", {
-            reason: `Cost limit exceeded: $${this.usageAccumulator.totalCostUsd.toFixed(4)} > $${this.session.limits.max_cost_usd}`,
-          });
-          return;
-        }
-      }
-
-      // Empty steps = planner says task is complete
-      if (plan.steps.length === 0) {
-        done = true;
-        // Transition to running so run() can complete normally
-        if (this.session.status === "planning") {
-          await this.transition("running");
-        }
-        break;
-      }
-
-      // Emit plan.replaced for iterations after the first
-      if (previousPlanId) {
-        await this.config.journal.emit(this.session.session_id, "plan.replaced", {
-          previous_plan_id: previousPlanId, new_plan_id: plan.plan_id, iteration: iteration + 1,
-        });
-      }
-      previousPlanId = plan.plan_id;
-
-      // Check cumulative step limit
-      if (totalStepsExecuted + plan.steps.length > this.session.limits.max_steps) {
-        await this.config.journal.tryEmit(this.session.session_id, "limit.exceeded", {
-          limit: "max_steps", value: this.session.limits.max_steps,
-          actual: totalStepsExecuted + plan.steps.length,
-        });
-        await this.transition("failed");
-        await this.config.journal.tryEmit(this.session.session_id, "session.failed", {
-          reason: `Cumulative step limit exceeded: ${totalStepsExecuted + plan.steps.length} > ${this.session.limits.max_steps}`,
-        });
-        return;
       }
 
       // Execute this iteration's steps
@@ -946,12 +978,15 @@ export class Kernel {
     const terminalTypes = new Set(["session.completed", "session.failed", "session.aborted"]);
     if (events.some((e) => terminalTypes.has(e.type))) return null;
 
-    // Agentic sessions cannot be resumed — multi-iteration state is too complex to reconstruct
-    if (events.some((e) => e.type === "plan.replaced")) return null;
+    const isAgentic = events.some((e) => e.type === "plan.replaced");
 
     // Rebuild session from session.created event
     const createdEvent = events.find((e) => e.type === "session.created");
     if (!createdEvent) return null;
+
+    if (isAgentic) {
+      return this.resumeAgenticSession(sessionId, events, createdEvent);
+    }
 
     // Rebuild plan from plan.accepted event
     const planEvent = events.find((e) => e.type === "plan.accepted");
@@ -1014,6 +1049,153 @@ export class Kernel {
     } finally {
       this.running = false;
     }
+  }
+
+  private async resumeAgenticSession(
+    sessionId: string,
+    events: import("@karnevil9/schemas").JournalEvent[],
+    createdEvent: import("@karnevil9/schemas").JournalEvent,
+  ): Promise<Session | null> {
+    const payload = createdEvent.payload;
+
+    // 1. Collect all plans in order
+    const allPlanEvents = events
+      .filter((e) => e.type === "plan.accepted")
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+    if (allPlanEvents.length === 0) return null;
+
+    const lastPlanEvent = allPlanEvents[allPlanEvents.length - 1]!;
+    const lastPlan = lastPlanEvent.payload.plan as Plan;
+
+    // 2. Rebuild session object
+    this.session = {
+      session_id: sessionId,
+      status: "planning",
+      mode: (payload.mode as ExecutionMode) ?? this.config.mode,
+      task: { task_id: (payload.task_id as string) ?? "", text: (payload.task_text as string) ?? "", created_at: createdEvent.timestamp },
+      active_plan_id: lastPlan.plan_id,
+      limits: this.config.limits,
+      policy: this.config.policy,
+      created_at: createdEvent.timestamp,
+      updated_at: new Date().toISOString(),
+    };
+
+    this.taskState = new TaskStateManager(sessionId);
+    this.usageAccumulator = new UsageAccumulator(this.config.modelPricing);
+
+    // 3. Rebuild ALL step results from journal
+    const allStepResults: StepResult[] = [];
+    for (const event of events) {
+      if (event.type === "step.succeeded" || event.type === "step.failed") {
+        const stepId = event.payload.step_id as string;
+        const stepResult: StepResult = {
+          step_id: stepId,
+          status: event.type === "step.succeeded" ? "succeeded" : "failed",
+          output: event.payload.output as unknown,
+          error: event.payload.error as { code: string; message: string; data?: unknown } | undefined,
+          started_at: event.timestamp,
+          finished_at: event.timestamp,
+          attempts: (event.payload.attempts as number) ?? 1,
+        };
+        this.taskState.setStepResult(stepId, stepResult);
+        allStepResults.push(stepResult);
+      }
+    }
+
+    // Set the last plan so TaskState has a plan reference
+    this.taskState.setPlan(lastPlan);
+
+    // 4. Compute totalStepsExecuted
+    const totalStepsExecuted = allStepResults.length;
+
+    // 5. Rebuild UsageAccumulator from last usage.recorded event
+    const lastUsage = [...events].reverse().find(e => e.type === "usage.recorded");
+    if (lastUsage?.payload.cumulative) {
+      const cumulative = lastUsage.payload.cumulative as import("./usage-accumulator.js").UsageSummary;
+      this.usageAccumulator.restoreFrom(cumulative);
+    }
+
+    // 6. Rebuild FutilityMonitor
+    if (this.config.agentic && this.config.futilityConfig) {
+      this.futilityMonitor = new FutilityMonitor(this.config.futilityConfig);
+      for (let i = 0; i < allPlanEvents.length; i++) {
+        const plan = allPlanEvents[i]!.payload.plan as Plan;
+        const planStepIds = new Set(plan.steps.map(s => s.step_id));
+        const stepResults = allStepResults.filter(r => planStepIds.has(r.step_id));
+
+        // Find usage for this iteration
+        const usageEvents = events.filter(e => e.type === "usage.recorded");
+        const iterUsage = usageEvents[i]?.payload as import("@karnevil9/schemas").UsageMetrics | undefined;
+        const cumUsage = usageEvents[i]?.payload.cumulative as import("./usage-accumulator.js").UsageSummary | undefined;
+
+        this.futilityMonitor.recordIteration({
+          iteration: i + 1,
+          planGoal: plan.goal,
+          stepResults,
+          iterationUsage: iterUsage,
+          cumulativeUsage: cumUsage,
+          maxCostUsd: this.session.limits.max_cost_usd,
+        });
+      }
+    }
+
+    // 7. Rebuild ContextBudgetMonitor
+    if (this.config.agentic && this.config.contextBudgetConfig) {
+      this.contextBudgetMonitor = new ContextBudgetMonitor(this.config.contextBudgetConfig);
+      const budgetEvents = events.filter(e => e.type === "context.budget_assessed");
+      for (const event of budgetEvents) {
+        this.contextBudgetMonitor.recordIteration({
+          iteration: (event.payload.iteration as number) ?? 0,
+          tokensUsedThisIteration: 0,
+          cumulativeTokens: (event.payload.cumulative_tokens as number) ?? 0,
+          maxTokens: (event.payload.max_tokens as number) ?? this.session.limits.max_tokens,
+          toolsUsed: [],
+          planGoal: "",
+          stepCount: 0,
+        });
+      }
+    }
+
+    // 8. Determine resume point
+    const lastPlanStepIds = new Set(lastPlan.steps.map(s => s.step_id));
+    const lastPlanResults = allStepResults.filter(r => lastPlanStepIds.has(r.step_id));
+    const lastPlanCompleted = lastPlanResults.length >= lastPlan.steps.length;
+
+    // Find the previous plan ID (the one before the last plan)
+    const previousPlanId = allPlanEvents.length >= 2
+      ? (allPlanEvents[allPlanEvents.length - 2]!.payload.plan as Plan).plan_id
+      : null;
+
+    // 9. Set sessionStartTime from original session.created timestamp
+    this.sessionStartTime = Date.parse(createdEvent.timestamp);
+
+    // 10. Emit recovery event
+    await this.config.journal.emit(sessionId, "session.started", {
+      recovered: true,
+      agentic: true,
+      resumed_at_iteration: allPlanEvents.length,
+    });
+
+    // 11. Call agenticPhase with resume params
+    await this.agenticPhase({
+      startIteration: lastPlanCompleted ? allPlanEvents.length : allPlanEvents.length - 1,
+      totalStepsExecuted,
+      previousPlanId: lastPlanCompleted ? lastPlan.plan_id : previousPlanId,
+      lastPlan: lastPlanCompleted ? null : lastPlan,
+      lastPlanCompleted,
+    });
+
+    if (this.session.status === "running") {
+      await this.transition("completed");
+      await this.config.journal.emit(sessionId, "session.completed", {
+        step_results: this.taskState.getSnapshot().step_results,
+        usage: this.usageAccumulator?.getSummary(),
+      });
+    }
+
+    this.config.permissions?.clearSession(sessionId);
+    return this.session;
   }
 
   private async emitCheckpoint(iteration: number): Promise<void> {

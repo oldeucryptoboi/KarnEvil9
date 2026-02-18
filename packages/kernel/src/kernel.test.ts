@@ -1386,12 +1386,18 @@ export async function register(api) {
     expect(session.status).toBe("completed");
   });
 
-  it("resumeSession returns null for agentic sessions (plan.replaced in journal)", async () => {
+  it("resumeSession recovers agentic sessions mid-execution", async () => {
     registry.register(testTool);
-    // Simulate an interrupted agentic session by writing journal events with plan.replaced
+    // Simulate an interrupted agentic session with plan.replaced:
+    // Iteration 1: completed (step1 succeeded), Iteration 2: partially done (step2 succeeded, step3 not started)
     const sessionId = uuid();
     const planId1 = uuid();
     const planId2 = uuid();
+    const stepId1 = uuid();
+    const stepId2 = uuid();
+    const stepId3 = uuid();
+    const createdAt = new Date(Date.now() - 10000).toISOString();
+
     await journal.emit(sessionId, "session.created", {
       task_id: uuid(), task_text: "Agentic resume test", mode: "mock",
     });
@@ -1400,12 +1406,223 @@ export async function register(api) {
       plan_id: planId1,
       plan: {
         plan_id: planId1, schema_version: "0.1", goal: "Iteration 1",
-        assumptions: [], created_at: new Date().toISOString(),
+        assumptions: [], created_at: createdAt,
         steps: [{
-          step_id: uuid(), title: "Step 1", tool_ref: { name: "test-tool" },
+          step_id: stepId1, title: "Step 1", tool_ref: { name: "test-tool" },
           input: { message: "test" }, success_criteria: ["done"],
           failure_policy: "abort", timeout_ms: 5000, max_retries: 0,
         }],
+      },
+    });
+    await journal.emit(sessionId, "step.succeeded", {
+      step_id: stepId1, status: "succeeded", attempts: 1, output: { echo: "mock echo" },
+    });
+    await journal.emit(sessionId, "plan.replaced", {
+      previous_plan_id: planId1, new_plan_id: planId2, iteration: 2,
+    });
+    await journal.emit(sessionId, "plan.accepted", {
+      plan_id: planId2,
+      plan: {
+        plan_id: planId2, schema_version: "0.1", goal: "Iteration 2",
+        assumptions: [], created_at: new Date().toISOString(),
+        steps: [
+          { step_id: stepId2, title: "Step 2", tool_ref: { name: "test-tool" },
+            input: { message: "test2" }, success_criteria: ["done"],
+            failure_policy: "abort", timeout_ms: 5000, max_retries: 0 },
+          { step_id: stepId3, title: "Step 3", tool_ref: { name: "test-tool" },
+            input: { message: "test3" }, success_criteria: ["done"],
+            failure_policy: "abort", timeout_ms: 5000, max_retries: 0 },
+        ],
+      },
+    });
+    // Step 2 completed, Step 3 not started (crash)
+    await journal.emit(sessionId, "step.succeeded", {
+      step_id: stepId2, status: "succeeded", attempts: 1, output: { echo: "mock echo" },
+    });
+
+    // Create a planner that returns empty steps (done) on its first call during recovery
+    const recoveryPlanner: Planner = {
+      async generatePlan() {
+        return { plan: {
+          plan_id: uuid(), schema_version: "0.1", goal: "Task complete",
+          assumptions: [], steps: [], created_at: new Date().toISOString(),
+        } };
+      },
+    };
+
+    const kernel = new Kernel(makeKernelConfig({
+      journal, runtime, registry, permissions, planner: recoveryPlanner,
+      limits: { max_steps: 20, max_duration_ms: 60000, max_cost_usd: 1, max_tokens: 10000, max_iterations: 10 },
+    }));
+    (kernel as any).config.agentic = true;
+
+    const result = await kernel.resumeSession(sessionId);
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("completed");
+
+    // Verify recovery event was emitted
+    const events = await journal.readSession(sessionId);
+    const recoveryStarted = events.find(
+      (e) => e.type === "session.started" && (e.payload as any).recovered === true
+    );
+    expect(recoveryStarted).toBeTruthy();
+    expect((recoveryStarted!.payload as any).agentic).toBe(true);
+    expect((recoveryStarted!.payload as any).resumed_at_iteration).toBe(2);
+
+    // Step 3 should have been executed during recovery
+    const step3Events = events.filter(
+      (e) => e.type === "step.succeeded" && (e.payload as any).step_id === stepId3
+    );
+    expect(step3Events.length).toBe(1);
+  });
+
+  it("resumeSession recovers agentic session between iterations", async () => {
+    registry.register(testTool);
+    // Simulate: Iteration 1 fully completed, crashed before iteration 2 planning
+    const sessionId = uuid();
+    const planId1 = uuid();
+    const stepId1 = uuid();
+
+    await journal.emit(sessionId, "session.created", {
+      task_id: uuid(), task_text: "Agentic inter-iteration test", mode: "mock",
+    });
+    await journal.emit(sessionId, "session.started", {});
+    await journal.emit(sessionId, "plan.accepted", {
+      plan_id: planId1,
+      plan: {
+        plan_id: planId1, schema_version: "0.1", goal: "Iteration 1",
+        assumptions: [], created_at: new Date().toISOString(),
+        steps: [{
+          step_id: stepId1, title: "Step 1", tool_ref: { name: "test-tool" },
+          input: { message: "test" }, success_criteria: ["done"],
+          failure_policy: "abort", timeout_ms: 5000, max_retries: 0,
+        }],
+      },
+    });
+    await journal.emit(sessionId, "step.succeeded", {
+      step_id: stepId1, status: "succeeded", attempts: 1, output: { echo: "mock echo" },
+    });
+    // Second plan accepted + replaced, but then step done in iteration 2
+    const planId2 = uuid();
+    const stepId2 = uuid();
+    await journal.emit(sessionId, "plan.replaced", {
+      previous_plan_id: planId1, new_plan_id: planId2, iteration: 2,
+    });
+    await journal.emit(sessionId, "plan.accepted", {
+      plan_id: planId2,
+      plan: {
+        plan_id: planId2, schema_version: "0.1", goal: "Iteration 2",
+        assumptions: [], created_at: new Date().toISOString(),
+        steps: [{
+          step_id: stepId2, title: "Step 2", tool_ref: { name: "test-tool" },
+          input: { message: "test2" }, success_criteria: ["done"],
+          failure_policy: "abort", timeout_ms: 5000, max_retries: 0,
+        }],
+      },
+    });
+    await journal.emit(sessionId, "step.succeeded", {
+      step_id: stepId2, status: "succeeded", attempts: 1, output: { echo: "mock echo" },
+    });
+    // All steps of last plan completed — crashed before next plan
+
+    // Planner returns empty steps = done
+    const donePlanner: Planner = {
+      async generatePlan() {
+        return { plan: {
+          plan_id: uuid(), schema_version: "0.1", goal: "Task complete",
+          assumptions: [], steps: [], created_at: new Date().toISOString(),
+        } };
+      },
+    };
+
+    const kernel = new Kernel(makeKernelConfig({
+      journal, runtime, registry, permissions, planner: donePlanner,
+      limits: { max_steps: 20, max_duration_ms: 60000, max_cost_usd: 1, max_tokens: 10000, max_iterations: 10 },
+    }));
+    (kernel as any).config.agentic = true;
+
+    const result = await kernel.resumeSession(sessionId);
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("completed");
+
+    const events = await journal.readSession(sessionId);
+    const recoveryStarted = events.find(
+      (e) => e.type === "session.started" && (e.payload as any).recovered === true
+    );
+    expect(recoveryStarted).toBeTruthy();
+    expect((recoveryStarted!.payload as any).agentic).toBe(true);
+  });
+
+  it("resumeSession returns null for terminal agentic sessions", async () => {
+    registry.register(testTool);
+    const sessionId = uuid();
+    const planId1 = uuid();
+    const planId2 = uuid();
+
+    await journal.emit(sessionId, "session.created", {
+      task_id: uuid(), task_text: "Terminal agentic", mode: "mock",
+    });
+    await journal.emit(sessionId, "session.started", {});
+    await journal.emit(sessionId, "plan.accepted", {
+      plan_id: planId1,
+      plan: {
+        plan_id: planId1, schema_version: "0.1", goal: "Iter 1",
+        assumptions: [], created_at: new Date().toISOString(),
+        steps: [{ step_id: uuid(), title: "S1", tool_ref: { name: "test-tool" },
+          input: { message: "t" }, success_criteria: ["d"], failure_policy: "abort",
+          timeout_ms: 5000, max_retries: 0 }],
+      },
+    });
+    await journal.emit(sessionId, "plan.replaced", {
+      previous_plan_id: planId1, new_plan_id: planId2, iteration: 2,
+    });
+    await journal.emit(sessionId, "plan.accepted", {
+      plan_id: planId2,
+      plan: {
+        plan_id: planId2, schema_version: "0.1", goal: "Iter 2",
+        assumptions: [], created_at: new Date().toISOString(),
+        steps: [{ step_id: uuid(), title: "S2", tool_ref: { name: "test-tool" },
+          input: { message: "t" }, success_criteria: ["d"], failure_policy: "abort",
+          timeout_ms: 5000, max_retries: 0 }],
+      },
+    });
+    // Session already completed
+    await journal.emit(sessionId, "session.completed", { step_results: [] });
+
+    const kernel = new Kernel(makeKernelConfig({ journal, runtime, registry, permissions }));
+    const result = await kernel.resumeSession(sessionId);
+    expect(result).toBeNull();
+  });
+
+  it("resumeSession restores UsageAccumulator from usage.recorded events", async () => {
+    registry.register(testTool);
+    const sessionId = uuid();
+    const planId1 = uuid();
+    const planId2 = uuid();
+    const stepId1 = uuid();
+
+    await journal.emit(sessionId, "session.created", {
+      task_id: uuid(), task_text: "Usage restore test", mode: "mock",
+    });
+    await journal.emit(sessionId, "session.started", {});
+    await journal.emit(sessionId, "plan.accepted", {
+      plan_id: planId1,
+      plan: {
+        plan_id: planId1, schema_version: "0.1", goal: "Iteration 1",
+        assumptions: [], created_at: new Date().toISOString(),
+        steps: [{ step_id: stepId1, title: "S1", tool_ref: { name: "test-tool" },
+          input: { message: "t" }, success_criteria: ["d"], failure_policy: "abort",
+          timeout_ms: 5000, max_retries: 0 }],
+      },
+    });
+    await journal.emit(sessionId, "step.succeeded", {
+      step_id: stepId1, status: "succeeded", attempts: 1, output: { echo: "ok" },
+    });
+    await journal.emit(sessionId, "usage.recorded", {
+      input_tokens: 500, output_tokens: 200, total_tokens: 700, cost_usd: 0.05,
+      cumulative: {
+        total_input_tokens: 500, total_output_tokens: 200,
+        total_tokens: 700, total_cost_usd: 0.05, call_count: 1,
       },
     });
     await journal.emit(sessionId, "plan.replaced", {
@@ -1416,17 +1633,151 @@ export async function register(api) {
       plan: {
         plan_id: planId2, schema_version: "0.1", goal: "Iteration 2",
         assumptions: [], created_at: new Date().toISOString(),
-        steps: [{
-          step_id: uuid(), title: "Step 2", tool_ref: { name: "test-tool" },
-          input: { message: "test" }, success_criteria: ["done"],
-          failure_policy: "abort", timeout_ms: 5000, max_retries: 0,
-        }],
+        steps: [{ step_id: uuid(), title: "S2", tool_ref: { name: "test-tool" },
+          input: { message: "t2" }, success_criteria: ["d"], failure_policy: "abort",
+          timeout_ms: 5000, max_retries: 0 }],
       },
+    });
+    // Crashed mid-iteration 2
+
+    const donePlanner: Planner = {
+      async generatePlan() {
+        return { plan: {
+          plan_id: uuid(), schema_version: "0.1", goal: "Task complete",
+          assumptions: [], steps: [], created_at: new Date().toISOString(),
+        } };
+      },
+    };
+
+    const kernel = new Kernel(makeKernelConfig({
+      journal, runtime, registry, permissions, planner: donePlanner,
+      limits: { max_steps: 20, max_duration_ms: 60000, max_cost_usd: 1, max_tokens: 10000, max_iterations: 10 },
+    }));
+    (kernel as any).config.agentic = true;
+
+    const result = await kernel.resumeSession(sessionId);
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("completed");
+
+    // Verify usage was restored
+    const acc = (kernel as any).usageAccumulator;
+    expect(acc.totalTokens).toBeGreaterThanOrEqual(700);
+    expect(acc.totalCostUsd).toBeGreaterThanOrEqual(0.05);
+  });
+
+  it("resumeSession uses original session start time for duration limits", async () => {
+    registry.register(testTool);
+    const sessionId = uuid();
+    const planId1 = uuid();
+    const planId2 = uuid();
+    const stepId1 = uuid();
+
+    await journal.emit(sessionId, "session.created", {
+      task_id: uuid(), task_text: "Duration restore test", mode: "mock",
+    });
+    await journal.emit(sessionId, "session.started", {});
+    await journal.emit(sessionId, "plan.accepted", {
+      plan_id: planId1,
+      plan: {
+        plan_id: planId1, schema_version: "0.1", goal: "Iteration 1",
+        assumptions: [], created_at: new Date().toISOString(),
+        steps: [{ step_id: stepId1, title: "S1", tool_ref: { name: "test-tool" },
+          input: { message: "t" }, success_criteria: ["d"], failure_policy: "abort",
+          timeout_ms: 5000, max_retries: 0 }],
+      },
+    });
+    await journal.emit(sessionId, "step.succeeded", {
+      step_id: stepId1, status: "succeeded", attempts: 1, output: { echo: "ok" },
+    });
+    await journal.emit(sessionId, "plan.replaced", {
+      previous_plan_id: planId1, new_plan_id: planId2, iteration: 2,
+    });
+    await journal.emit(sessionId, "plan.accepted", {
+      plan_id: planId2,
+      plan: {
+        plan_id: planId2, schema_version: "0.1", goal: "Iteration 2",
+        assumptions: [], created_at: new Date().toISOString(),
+        steps: [{ step_id: uuid(), title: "S2", tool_ref: { name: "test-tool" },
+          input: { message: "t2" }, success_criteria: ["d"], failure_policy: "abort",
+          timeout_ms: 5000, max_retries: 0 }],
+      },
+    });
+
+    const donePlanner: Planner = {
+      async generatePlan() {
+        return { plan: {
+          plan_id: uuid(), schema_version: "0.1", goal: "Task complete",
+          assumptions: [], steps: [], created_at: new Date().toISOString(),
+        } };
+      },
+    };
+
+    const kernel = new Kernel(makeKernelConfig({
+      journal, runtime, registry, permissions, planner: donePlanner,
+      limits: { max_steps: 20, max_duration_ms: 60000, max_cost_usd: 1, max_tokens: 10000, max_iterations: 10 },
+    }));
+    (kernel as any).config.agentic = true;
+
+    const result = await kernel.resumeSession(sessionId);
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("completed");
+
+    // Verify sessionStartTime was set from the original session.created timestamp,
+    // not from Date.now() at resume time
+    const sessionStartTime = (kernel as any).sessionStartTime as number;
+    const events = await journal.readSession(sessionId);
+    const createdEvent = events.find((e) => e.type === "session.created");
+    expect(sessionStartTime).toBe(Date.parse(createdEvent!.timestamp));
+  });
+
+  it("executePhase skips already-completed steps during recovery", async () => {
+    registry.register(testTool);
+    // Simulate: session with 2-step plan, step 1 completed, step 2 not started
+    const sessionId = uuid();
+    const planId = uuid();
+    const stepId1 = uuid();
+    const stepId2 = uuid();
+
+    await journal.emit(sessionId, "session.created", {
+      task_id: uuid(), task_text: "Pre-populate test", mode: "mock",
+    });
+    await journal.emit(sessionId, "session.started", {});
+    await journal.emit(sessionId, "plan.accepted", {
+      plan_id: planId,
+      plan: {
+        plan_id: planId, schema_version: "0.1", goal: "Test pre-populate",
+        assumptions: [], created_at: new Date().toISOString(),
+        steps: [
+          { step_id: stepId1, title: "Step 1", tool_ref: { name: "test-tool" },
+            input: { message: "s1" }, success_criteria: ["done"],
+            failure_policy: "abort", timeout_ms: 5000, max_retries: 0 },
+          { step_id: stepId2, title: "Step 2", tool_ref: { name: "test-tool" },
+            input: { message: "s2" }, success_criteria: ["done"],
+            failure_policy: "abort", timeout_ms: 5000, max_retries: 0 },
+        ],
+      },
+    });
+    await journal.emit(sessionId, "step.succeeded", {
+      step_id: stepId1, status: "succeeded", attempts: 1, output: { echo: "done1" },
     });
 
     const kernel = new Kernel(makeKernelConfig({ journal, runtime, registry, permissions }));
     const result = await kernel.resumeSession(sessionId);
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("completed");
+
+    // Verify step 1 was NOT re-executed (should only have 1 step.succeeded for step1, from before recovery)
+    const events = await journal.readSession(sessionId);
+    const step1Successes = events.filter(
+      (e) => e.type === "step.succeeded" && (e.payload as any).step_id === stepId1
+    );
+    expect(step1Successes.length).toBe(1); // Only the original, not re-executed
+
+    // Step 2 should have been executed
+    const step2Successes = events.filter(
+      (e) => e.type === "step.succeeded" && (e.payload as any).step_id === stepId2
+    );
+    expect(step2Successes.length).toBe(1);
   });
 
   // ─── Critics Integration Tests ─────────────────────────────────────

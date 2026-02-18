@@ -75,4 +75,28 @@ describe("UsageAccumulator", () => {
     expect(s1).toEqual(s2);
     expect(s1.total_cost_usd).toBeCloseTo(0.5 + 0.5); // 500/1000*1 + 250/1000*2
   });
+
+  it("restoreFrom sets all fields correctly", () => {
+    const acc = new UsageAccumulator();
+    // Start with some existing data
+    acc.record({ input_tokens: 10, output_tokens: 5, total_tokens: 15, cost_usd: 0.001 });
+
+    // Restore from a summary (overwrites existing data)
+    acc.restoreFrom({
+      total_input_tokens: 500,
+      total_output_tokens: 200,
+      total_tokens: 700,
+      total_cost_usd: 0.05,
+      call_count: 3,
+    });
+
+    const summary = acc.getSummary();
+    expect(summary.total_input_tokens).toBe(500);
+    expect(summary.total_output_tokens).toBe(200);
+    expect(summary.total_tokens).toBe(700);
+    expect(summary.total_cost_usd).toBeCloseTo(0.05);
+    expect(summary.call_count).toBe(3);
+    expect(acc.totalTokens).toBe(700);
+    expect(acc.totalCostUsd).toBeCloseTo(0.05);
+  });
 });

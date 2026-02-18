@@ -52,4 +52,12 @@ export class UsageAccumulator {
   get totalCostUsd(): number {
     return this.costUsd;
   }
+
+  restoreFrom(summary: UsageSummary): void {
+    this.inputTokens = summary.total_input_tokens;
+    this.outputTokens = summary.total_output_tokens;
+    this.tokens = summary.total_tokens;
+    this.costUsd = summary.total_cost_usd;
+    this.calls = summary.call_count;
+  }
 }

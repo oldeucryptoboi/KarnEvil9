@@ -52,6 +52,10 @@ export class MetricsCollector {
   private readonly limitsExceededTotal: Counter;
   private readonly policyViolationsTotal: Counter;
 
+  // ─── Journal Disk Metrics ─────────────────────────────────────────
+  private readonly journalDiskUsagePct: Gauge;
+  private readonly journalDiskWarningsTotal: Counter;
+
   // ─── Plugin Metrics ────────────────────────────────────────────────
   private readonly pluginsStatus: Gauge;
 
@@ -171,6 +175,19 @@ export class MetricsCollector {
       name: `${this.prefix}policy_violations_total`,
       help: "Total policy violations by tool name",
       labelNames: ["tool_name"] as const,
+      registers: [this.registry],
+    });
+
+    // Journal disk metrics
+    this.journalDiskUsagePct = new Gauge({
+      name: `${this.prefix}journal_disk_usage_pct`,
+      help: "Journal disk usage percentage from last warning event",
+      registers: [this.registry],
+    });
+
+    this.journalDiskWarningsTotal = new Counter({
+      name: `${this.prefix}journal_disk_warnings_total`,
+      help: "Total number of journal disk warning events",
       registers: [this.registry],
     });
 
@@ -361,6 +378,16 @@ export class MetricsCollector {
       case "policy.violated": {
         const toolName = (event.payload.tool_name as string | undefined) ?? "unknown";
         this.policyViolationsTotal.inc({ tool_name: toolName });
+        break;
+      }
+
+      // ─── Journal Disk Events ──────────────────────────────────────
+      case "journal.disk_warning": {
+        const usagePct = event.payload.usage_pct as number | undefined;
+        if (usagePct !== undefined) {
+          this.journalDiskUsagePct.set(usagePct);
+        }
+        this.journalDiskWarningsTotal.inc();
         break;
       }
 

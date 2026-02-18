@@ -350,6 +350,32 @@ describe("MetricsCollector", () => {
     });
   });
 
+  // ─── Journal Disk Metrics ─────────────────────────────────────────
+
+  describe("journal disk metrics", () => {
+    it("tracks journal.disk_warning with usage_pct", async () => {
+      collector.handleEvent(
+        makeEvent("journal.disk_warning", { usage_pct: 88, threshold: 85 })
+      );
+      const gaugeMetrics = await registry.getSingleMetricAsString("karnevil9_journal_disk_usage_pct");
+      expect(gaugeMetrics).toContain("88");
+
+      const counterMetrics = await registry.getSingleMetricAsString("karnevil9_journal_disk_warnings_total");
+      expect(counterMetrics).toContain(" 1");
+    });
+
+    it("increments warning counter on multiple warnings", async () => {
+      collector.handleEvent(makeEvent("journal.disk_warning", { usage_pct: 86 }));
+      collector.handleEvent(makeEvent("journal.disk_warning", { usage_pct: 90 }));
+
+      const counterMetrics = await registry.getSingleMetricAsString("karnevil9_journal_disk_warnings_total");
+      expect(counterMetrics).toContain(" 2");
+
+      const gaugeMetrics = await registry.getSingleMetricAsString("karnevil9_journal_disk_usage_pct");
+      expect(gaugeMetrics).toContain("90");
+    });
+  });
+
   // ─── Utility Methods ─────────────────────────────────────────────
 
   describe("utility methods", () => {

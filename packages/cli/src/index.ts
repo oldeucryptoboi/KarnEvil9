@@ -620,4 +620,43 @@ pluginsCmd.command("reload").description("Reload a plugin").argument("<id>", "Pl
     console.log(`Plugin "${pluginId}" reloaded: ${state.status}`);
   });
 
+// ─── Vault Commands ─────────────────────────────────────────────
+
+const vaultCmd = program.command("vault").description("Vault management");
+
+vaultCmd.command("sync")
+  .description("Run full vault pipeline: dropzone → classify → vectorize → discover → dashboard → context → insights")
+  .option("--skip-classify", "Skip LLM classification")
+  .option("--skip-vectorize", "Skip embedding generation")
+  .option("--skip-discover", "Skip relationship discovery")
+  .option("--skip-insights", "Skip LLM insights generation")
+  .option("--limit <n>", "Max items per phase", "500")
+  .option("--plugins-dir <dir>", "Plugins directory", "plugins")
+  .action(async (opts: { skipClassify?: boolean; skipVectorize?: boolean; skipDiscover?: boolean; skipInsights?: boolean; limit: string; pluginsDir: string }) => {
+    const { journal, registry, permissions, runtime } = await createRuntime();
+    const pluginsDir = resolve(opts.pluginsDir);
+    const pluginRegistry = new PluginRegistry({
+      journal, toolRegistry: registry, toolRuntime: runtime, permissions,
+      pluginsDir,
+      pluginConfigs: {
+        vault: {
+          journal,
+          vaultRoot: process.env.KARNEVIL9_VAULT_ROOT ?? resolve("vault"),
+          classifierModel: process.env.KARNEVIL9_VAULT_CLASSIFIER_MODEL,
+        },
+      },
+    });
+    await pluginRegistry.discoverAndLoadAll();
+
+    // Find and execute the vault-sync command
+    const commands = pluginRegistry.getCommands();
+    const syncCmd = commands.find((c: { name: string }) => c.name === "vault-sync");
+    if (!syncCmd) {
+      console.error("Vault plugin not loaded or vault-sync command not found");
+      process.exit(1);
+    }
+    await syncCmd.opts.action(opts);
+    await journal.close();
+  });
+
 program.parse();

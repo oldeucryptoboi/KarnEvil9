@@ -24,13 +24,23 @@ provides:
     - vault-search
     - vault-context
     - vault-classify
+    - vault-vectorize
+    - vault-semantic-search
+    - vault-discover
+    - vault-dashboard
+    - vault-insights
   hooks:
     - after_session_end
+    - before_plan
+  commands:
+    - vault-sync
   routes:
     - vault-status
     - vault-objects
     - vault-links
     - vault-search
     - vault-context
+    - vault-dashboard
+    - vault-insights
   services:
     - vault-engine

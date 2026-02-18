@@ -110,6 +110,127 @@ export const vaultClassifyManifest = {
   supports: { mock: true, dry_run: false },
 };
 
+/** @type {import("@karnevil9/schemas").ToolManifest} */
+export const vaultVectorizeManifest = {
+  name: "vault-vectorize",
+  version: "1.0.0",
+  description: "Generate vector embeddings for unembedded vault objects",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      limit: { type: "number", description: "Maximum objects to embed", default: 500 },
+    },
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      embeddings_created: { type: "number" },
+    },
+  },
+  permissions: ["vault:write:objects"],
+  timeout_ms: 600000,
+  supports: { mock: true, dry_run: false },
+};
+
+/** @type {import("@karnevil9/schemas").ToolManifest} */
+export const vaultSemanticSearchManifest = {
+  name: "vault-semantic-search",
+  version: "1.0.0",
+  description: "Search the vault using vector similarity (semantic search)",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Natural language search query" },
+      k: { type: "number", description: "Number of results to return", default: 10 },
+    },
+    required: ["query"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      results: { type: "array" },
+      total: { type: "number" },
+    },
+  },
+  permissions: ["vault:read:objects"],
+  timeout_ms: 30000,
+  supports: { mock: true, dry_run: true },
+};
+
+/** @type {import("@karnevil9/schemas").ToolManifest} */
+export const vaultDiscoverManifest = {
+  name: "vault-discover",
+  version: "1.0.0",
+  description: "Discover relationships between vault objects using embeddings and clustering",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      cosine_threshold: { type: "number", description: "Minimum cosine similarity for relationship", default: 0.85 },
+      max_candidates: { type: "number", description: "Maximum objects to consider", default: 2000 },
+      label_via_llm: { type: "boolean", description: "Use LLM to label relationship types", default: true },
+    },
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      embeddings_created: { type: "number" },
+      clusters_found: { type: "number" },
+      relationships_discovered: { type: "number" },
+      links_created: { type: "number" },
+    },
+  },
+  permissions: ["vault:write:objects"],
+  timeout_ms: 600000,
+  supports: { mock: true, dry_run: false },
+};
+
+/** @type {import("@karnevil9/schemas").ToolManifest} */
+export const vaultDashboardManifest = {
+  name: "vault-dashboard",
+  version: "1.0.0",
+  description: "Generate the vault dashboard with health metrics, entity stats, and topic clusters",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {},
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      file_path: { type: "string" },
+      total_objects: { type: "number" },
+      total_links: { type: "number" },
+    },
+  },
+  permissions: ["vault:read:objects"],
+  timeout_ms: 60000,
+  supports: { mock: true, dry_run: true },
+};
+
+/** @type {import("@karnevil9/schemas").ToolManifest} */
+export const vaultInsightsManifest = {
+  name: "vault-insights",
+  version: "1.0.0",
+  description: "Generate AI-powered insights from vault data",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {},
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      file_path: { type: "string" },
+    },
+  },
+  permissions: ["vault:read:objects"],
+  timeout_ms: 120000,
+  supports: { mock: true, dry_run: true },
+};
+
 /**
  * Create tool handlers that reference the vault manager.
  * @param {() => import("@karnevil9/vault").VaultManager | null} getManager
@@ -152,6 +273,47 @@ export function createVaultToolHandlers(getManager) {
       const manager = getManager();
       if (!manager) throw new Error("Vault engine not initialized");
       return manager.classify({ limit: input.limit, concurrency: input.concurrency });
+    },
+
+    "vault-vectorize": async (input, mode) => {
+      if (mode === "mock") return { embeddings_created: 0 };
+      const manager = getManager();
+      if (!manager) throw new Error("Vault engine not initialized");
+      return manager.vectorize({ limit: input.limit });
+    },
+
+    "vault-semantic-search": async (input) => {
+      const manager = getManager();
+      if (!manager) throw new Error("Vault engine not initialized");
+      const results = await manager.semanticSearch(input.query, input.k ?? 10);
+      return { results, total: results.length };
+    },
+
+    "vault-discover": async (input, mode) => {
+      if (mode === "mock") return { embeddings_created: 0, clusters_found: 0, relationships_discovered: 0, links_created: 0 };
+      const manager = getManager();
+      if (!manager) throw new Error("Vault engine not initialized");
+      const { result } = await manager.discoverRelationships({
+        cosine_threshold: input.cosine_threshold,
+        max_candidates: input.max_candidates,
+        label_via_llm: input.label_via_llm,
+      });
+      return result;
+    },
+
+    "vault-dashboard": async (input, mode) => {
+      const manager = getManager();
+      if (!manager) throw new Error("Vault engine not initialized");
+      const filePath = await manager.generateDashboard();
+      const stats = manager.getStats();
+      return { file_path: filePath, total_objects: stats.total_objects, total_links: stats.total_links };
+    },
+
+    "vault-insights": async (input, mode) => {
+      const manager = getManager();
+      if (!manager) throw new Error("Vault engine not initialized");
+      const filePath = await manager.generateInsights();
+      return { file_path: filePath };
     },
   };
 }

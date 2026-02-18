@@ -106,6 +106,13 @@ describe("MarkdownSerializer", () => {
       expect(() => deserializeVaultObject(md, "test.md")).toThrow("missing required fields");
     });
 
+    it("handles frontmatter with opening delimiter but no closing delimiter", () => {
+      const md = "---\nobject_id: test\nobject_type: Note\nsource: manual\nThis just keeps going without a closing delimiter";
+      // The parser should return empty frontmatter (no closing ---), body = trimmed
+      // Then deserializeVaultObject should throw because required fields are missing from empty frontmatter
+      expect(() => deserializeVaultObject(md, "test.md")).toThrow("missing required fields");
+    });
+
     it("defaults optional fields when missing", () => {
       const md = `---
 object_id: xyz

@@ -83,6 +83,41 @@ describe("OntologySchema", () => {
       expect(() => validateSchema(schema)).toThrow("Duplicate object type");
     });
 
+    it("throws when link_types is not an array", () => {
+      const schema = {
+        version: "1.0.0",
+        object_types: [{ name: "Note", plural: "Notes", description: "A note", properties: [], folder: "Notes" }],
+        link_types: "not-an-array" as any,
+        shared_properties: [],
+      };
+      expect(() => validateSchema(schema)).toThrow("link_types array");
+    });
+
+    it("throws when link type is missing required fields", () => {
+      const schema = {
+        version: "1.0.0",
+        object_types: [{ name: "Note", plural: "Notes", description: "A note", properties: [], folder: "Notes" }],
+        link_types: [
+          { name: "discusses", source_types: ["Note"], target_types: ["Note"], bidirectional: false },
+          { name: "", source_types: ["Note"], target_types: ["Note"], bidirectional: false },
+        ],
+        shared_properties: [],
+      };
+      expect(() => validateSchema(schema)).toThrow("missing required fields");
+    });
+
+    it("throws when link type has non-array source_types", () => {
+      const schema = {
+        version: "1.0.0",
+        object_types: [{ name: "Note", plural: "Notes", description: "A note", properties: [], folder: "Notes" }],
+        link_types: [
+          { name: "bad_link", source_types: "not-array", target_types: ["Note"], bidirectional: false },
+        ],
+        shared_properties: [],
+      };
+      expect(() => validateSchema(schema)).toThrow("missing required fields");
+    });
+
     it("throws on duplicate link type names", () => {
       const schema = {
         version: "1.0.0",

@@ -53,6 +53,38 @@ describe("JournalAdapter", () => {
     expect(items.length).toBe(0);
   });
 
+  it("handles async generator readEvents (not Promise)", async () => {
+    async function* eventGen(): AsyncGenerator<JournalEvent, void, undefined> {
+      yield makeEvent({ session_id: "gen-1", type: "session.created", payload: { task_text: "Generator task" } });
+      yield makeEvent({ session_id: "gen-1", type: "step.succeeded", payload: { step_title: "Step A", tool_name: "tool-a" } });
+    }
+
+    const adapter = new JournalAdapter({ readEvents: eventGen });
+    const items = [];
+    for await (const item of adapter.extract()) {
+      items.push(item);
+    }
+
+    expect(items.length).toBe(1);
+    expect(items[0]!.title).toBe("Generator task");
+    expect(items[0]!.content).toContain("[succeeded] Step A");
+  });
+
+  it("falls back to Session ID when no task_text or task.text", async () => {
+    const events: JournalEvent[] = [
+      makeEvent({ session_id: "orphan-sess", type: "step.succeeded", payload: { step_title: "Do thing", tool_name: "t" } }),
+    ];
+
+    const adapter = new JournalAdapter({ readEvents: async () => events });
+    const items = [];
+    for await (const item of adapter.extract()) {
+      items.push(item);
+    }
+
+    expect(items.length).toBe(1);
+    expect(items[0]!.title).toBe("Session orphan-sess");
+  });
+
   it("sets metadata object_type to Conversation", async () => {
     const events: JournalEvent[] = [
       makeEvent({ session_id: "s1", type: "session.created", payload: { task_text: "Test" } }),

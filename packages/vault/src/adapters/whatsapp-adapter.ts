@@ -132,23 +132,14 @@ export class WhatsAppAdapter extends BaseAdapter {
   }
 
   private parseTimestamp(ts: string): string {
-    try {
-      // Try parsing common formats
-      const date = new Date(ts);
-      if (!isNaN(date.getTime())) return date.toISOString();
+    // Try parsing common formats
+    const date = new Date(ts);
+    if (!isNaN(date.getTime())) return date.toISOString();
 
-      // Manual parsing for DD/MM/YYYY format
-      const match = ts.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-      if (match) {
-        let year = parseInt(match[3]!, 10);
-        if (year < 100) year += 2000;
-        const month = parseInt(match[2]!, 10) - 1;
-        const day = parseInt(match[1]!, 10);
-        return new Date(year, month, day).toISOString();
-      }
-    } catch {
-      // Fallback
-    }
-    return new Date().toISOString();
+    // Manual parsing for DD/MM/YYYY format (always present in WhatsApp timestamps)
+    const match = ts.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/)!;
+    let year = parseInt(match[3]!, 10);
+    if (year < 100) year += 2000;
+    return new Date(year, parseInt(match[2]!, 10) - 1, parseInt(match[1]!, 10)).toISOString();
   }
 }

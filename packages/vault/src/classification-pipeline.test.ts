@@ -90,6 +90,126 @@ describe("ClassificationPipeline", () => {
     expect(successes).toEqual(["obj-1", "obj-2"]);
   });
 
+  it("classifyUnclassified filters and classifies only unclassified objects", async () => {
+    const pipeline = new ClassificationPipeline({
+      classifier: mockClassifier(),
+      schema,
+    });
+
+    const objects = [
+      {
+        frontmatter: {
+          object_id: "obj-1",
+          object_type: "Note",
+          source: "test",
+          source_id: "s1",
+          created_at: new Date().toISOString(),
+          ingested_at: new Date().toISOString(),
+          tags: [],
+          entities: [],
+          para_category: "inbox" as const,
+          confidence: 0,
+          classified_by: "unclassified",
+        },
+        title: "Unclassified Item",
+        content: "Needs classification",
+        file_path: "_Inbox/Unclassified Item.md",
+        links: [],
+      },
+      {
+        frontmatter: {
+          object_id: "obj-2",
+          object_type: "Conversation",
+          source: "test",
+          source_id: "s2",
+          created_at: new Date().toISOString(),
+          ingested_at: new Date().toISOString(),
+          tags: ["classified"],
+          entities: [],
+          para_category: "resources" as const,
+          confidence: 0.9,
+          classified_by: "claude-classifier",
+        },
+        title: "Already Classified",
+        content: "Already done",
+        file_path: "03-Resources/Already Classified.md",
+        links: [],
+      },
+      {
+        frontmatter: {
+          object_id: "obj-3",
+          object_type: "Note",
+          source: "test",
+          source_id: "s3",
+          created_at: new Date().toISOString(),
+          ingested_at: new Date().toISOString(),
+          tags: [],
+          entities: [],
+          para_category: "inbox" as const,
+          confidence: 0,
+          classified_by: "some-other",
+        },
+        title: "Zero Confidence",
+        content: "Needs reclassification",
+        file_path: "_Inbox/Zero Confidence.md",
+        links: [],
+      },
+    ];
+
+    const successes: string[] = [];
+    const results = await pipeline.classifyUnclassified(
+      objects,
+      (id) => { successes.push(id); },
+    );
+
+    // obj-1 (classified_by=unclassified) and obj-3 (confidence=0) should be classified
+    // obj-2 (confidence=0.9, classified_by=claude-classifier) should be skipped
+    expect(results.size).toBe(2);
+    expect(results.has("obj-1")).toBe(true);
+    expect(results.has("obj-3")).toBe(true);
+    expect(results.has("obj-2")).toBe(false);
+    expect(successes).toEqual(["obj-1", "obj-3"]);
+  });
+
+  it("classifyUnclassified with error callback", async () => {
+    const pipeline = new ClassificationPipeline({
+      classifier: failingClassifier(),
+      schema,
+    });
+
+    const objects = [
+      {
+        frontmatter: {
+          object_id: "obj-err",
+          object_type: "Note",
+          source: "test",
+          source_id: "e1",
+          created_at: new Date().toISOString(),
+          ingested_at: new Date().toISOString(),
+          tags: [],
+          entities: [],
+          para_category: "inbox" as const,
+          confidence: 0,
+          classified_by: "unclassified",
+        },
+        title: "Will Fail",
+        content: "Error content",
+        file_path: "_Inbox/Will Fail.md",
+        links: [],
+      },
+    ];
+
+    const errors: string[] = [];
+    const results = await pipeline.classifyUnclassified(
+      objects,
+      undefined,
+      (id) => { errors.push(id); },
+    );
+
+    expect(results.size).toBe(0);
+    expect(errors).toEqual(["obj-err"]);
+  });
+
   it("respects concurrency setting", async () => {
     let concurrentCount = 0;
     let maxConcurrent = 0;

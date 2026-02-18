@@ -137,6 +137,45 @@ describe("ChatGPTAdapter", () => {
     }).rejects.toThrow("not found");
   });
 
+  it("handles directory without conversations.json (scans all JSON files)", async () => {
+    const data = [{
+      id: "c-scan",
+      title: "Scanned",
+      create_time: 1705312200,
+      update_time: 1705312200,
+      mapping: {
+        "n1": {
+          id: "n1",
+          message: { author: { role: "user" }, content: { parts: ["Found it"] }, create_time: 1 },
+          children: [],
+        },
+      },
+    }];
+
+    // Write a JSON file that is NOT named conversations.json
+    await writeFile(join(tmpDir, "other-export.json"), JSON.stringify(data), "utf-8");
+
+    const adapter = new ChatGPTAdapter(tmpDir);
+    const items = [];
+    for await (const item of adapter.extract()) {
+      items.push(item);
+    }
+
+    expect(items.length).toBe(1);
+    expect(items[0]!.title).toBe("Scanned");
+  });
+
+  it("skips non-JSON files when scanning directory", async () => {
+    await writeFile(join(tmpDir, "readme.txt"), "not json", "utf-8");
+
+    const adapter = new ChatGPTAdapter(tmpDir);
+    const items = [];
+    for await (const item of adapter.extract()) {
+      items.push(item);
+    }
+    expect(items.length).toBe(0);
+  });
+
   it("handles conversations with no messages", async () => {
     const data = [{
       id: "empty",

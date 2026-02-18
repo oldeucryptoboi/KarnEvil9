@@ -127,6 +127,41 @@ describe("EntityExtractor", () => {
     expect(canonical).toBe("react.js");
   });
 
+  it("registers alias when entity name differs from canonical after deduplication", async () => {
+    // Pre-register alias: "javascript" is canonical, "js" is an alias
+    deduplicator.addAlias("javascript", "js");
+
+    // Also create the entity object so the extractor finds it
+    await objectStore.create("javascript", "A programming language", {
+      source: "entity",
+      source_id: "javascript",
+      object_type: "Tool",
+    }, schema);
+
+    const source = await objectStore.create("Chat about JS", "Content about JS", {
+      source: "test",
+      source_id: "conv-alias",
+    }, schema);
+
+    const classification: ClassificationResult = {
+      object_type: "Conversation",
+      para_category: "inbox",
+      tags: [],
+      entities: [
+        // "JS" resolves to "javascript" via alias, but "js".toLowerCase() = "js" !== "javascript"
+        // So the branch at line 86-88 triggers, registering "JS" as an alias of "javascript"
+        { name: "JS", type: "Tool", link_type: "discusses" },
+      ],
+      confidence: 0.7,
+    };
+
+    const result = await extractor.extractAndLink(source.frontmatter.object_id, classification);
+
+    // The entity should be deduplicated to "javascript"
+    expect(result.entities[0]!.canonical_name).toBe("javascript");
+    expect(result.entities[0]!.is_new).toBe(false);
+  });
+
   it("handles empty entity list", async () => {
     const source = await objectStore.create("Empty", "No entities", {
       source: "test",

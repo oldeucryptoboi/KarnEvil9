@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rm, mkdir } from "node:fs/promises";
+import { rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { v4 as uuid } from "uuid";
@@ -84,6 +84,44 @@ describe("LinkStore", () => {
     expect(found!.confidence).toBe(0.8);
 
     expect(store.findLink("x", "y", "unknown")).toBeUndefined();
+  });
+
+  it("skips malformed JSONL lines during init", async () => {
+    const filePath = join(tmpDir, "malformed-links.jsonl");
+    const validLink = JSON.stringify({
+      link_id: "link-1",
+      source_id: "a",
+      target_id: "b",
+      link_type: "uses",
+      confidence: 0.9,
+      created_at: new Date().toISOString(),
+    });
+    const content = `${validLink}\n{broken json\nnot even json\n`;
+    await writeFile(filePath, content, "utf-8");
+
+    const s = new LinkStore(filePath);
+    await s.init();
+    expect(s.size()).toBe(1);
+    expect(s.findLink("a", "b", "uses")).toBeDefined();
+  });
+
+  it("retrieves a link by ID via getLink", async () => {
+    const link = await store.addLink({
+      source_id: "x",
+      target_id: "y",
+      link_type: "discusses",
+      confidence: 0.8,
+    });
+
+    const retrieved = store.getLink(link.link_id);
+    expect(retrieved).toBeDefined();
+    expect(retrieved!.source_id).toBe("x");
+    expect(retrieved!.target_id).toBe("y");
+    expect(retrieved!.link_type).toBe("discusses");
+    expect(retrieved!.confidence).toBe(0.8);
+
+    // Non-existent link
+    expect(store.getLink("nonexistent")).toBeUndefined();
   });
 
   describe("traverse", () => {

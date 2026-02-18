@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rm, mkdir } from "node:fs/promises";
+import { rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { v4 as uuid } from "uuid";
@@ -67,6 +67,26 @@ describe("IngestionTracker", () => {
     await t2.init();
     expect(t2.size()).toBe(2);
     expect(t2.hasBeenIngested("source", "id-1")).toBe(true);
+  });
+
+  it("skips malformed JSONL lines during init", async () => {
+    const filePath = join(tmpDir, "malformed.jsonl");
+    const validRecord = JSON.stringify({
+      source: "test",
+      source_id: "ok-1",
+      content_hash: "abc123",
+      object_id: "obj-1",
+      ingested_at: new Date().toISOString(),
+    });
+    const content = `${validRecord}\n{not valid json\n{"also": "broken\n${validRecord.replace("ok-1", "ok-2").replace("obj-1", "obj-2")}\n`;
+    await writeFile(filePath, content, "utf-8");
+
+    const t = new IngestionTracker(filePath);
+    await t.init();
+    // Should have loaded the 2 valid records, skipped the 2 malformed ones
+    expect(t.size()).toBe(2);
+    expect(t.hasBeenIngested("test", "ok-1")).toBe(true);
+    expect(t.hasBeenIngested("test", "ok-2")).toBe(true);
   });
 
   it("compacts deduplicating records", async () => {

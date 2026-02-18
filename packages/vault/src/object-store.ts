@@ -248,6 +248,60 @@ export class ObjectStore {
     return this.index.size;
   }
 
+  async moveObject(
+    objectId: string,
+    newParaCategory: ParaCategory,
+    schema: OntologySchema,
+  ): Promise<VaultObject | null> {
+    const existing = await this.get(objectId);
+    if (!existing) return null;
+
+    const newFilePath = this.computeFilePath(
+      existing.frontmatter.object_type,
+      newParaCategory,
+      existing.title,
+      schema,
+    );
+
+    // No-op if already at correct path
+    if (newFilePath === existing.file_path) return existing;
+
+    // Handle name collisions at destination
+    let finalPath = newFilePath;
+    const absNew = join(this.vaultRoot, finalPath);
+    if (existsSync(absNew)) {
+      const base = finalPath.replace(/\.md$/, "");
+      finalPath = `${base}-${objectId.slice(0, 8)}.md`;
+    }
+
+    const absOld = join(this.vaultRoot, existing.file_path);
+    const absFinal = join(this.vaultRoot, finalPath);
+
+    // Ensure destination directory exists
+    await mkdir(join(absFinal, ".."), { recursive: true });
+
+    // Update frontmatter and file_path
+    const updated: VaultObject = {
+      ...existing,
+      file_path: finalPath,
+      frontmatter: { ...existing.frontmatter, para_category: newParaCategory },
+    };
+
+    // Atomic: write to new location, then remove old file
+    const tmpPath = absFinal + ".tmp";
+    await writeFile(tmpPath, serializeVaultObject(updated), "utf-8");
+    await rename(tmpPath, absFinal);
+
+    try {
+      await unlink(absOld);
+    } catch {
+      // Old file already gone
+    }
+
+    this.addToIndex(updated);
+    return updated;
+  }
+
   private computeFilePath(
     objectType: string,
     paraCategory: ParaCategory,

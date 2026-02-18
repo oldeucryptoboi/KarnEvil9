@@ -118,12 +118,8 @@ export class AppleNotesAdapter extends BaseAdapter {
   }
 
   private parseAppleDate(dateStr: string): string {
-    try {
-      const date = new Date(dateStr);
-      if (!isNaN(date.getTime())) return date.toISOString();
-    } catch {
-      // Fallback
-    }
+    const date = new Date(dateStr);
+    if (!isNaN(date.getTime())) return date.toISOString();
     return new Date().toISOString();
   }
 }

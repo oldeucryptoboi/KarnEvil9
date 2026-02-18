@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rm, mkdir } from "node:fs/promises";
+import { rm, mkdir, readdir, unlink, writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { v4 as uuid } from "uuid";
+import { existsSync } from "node:fs";
 import { ObjectStore } from "./object-store.js";
 import { getDefaultSchema } from "./ontology-schema.js";
+import { PARA_FOLDERS } from "./types.js";
 
 describe("ObjectStore", () => {
   let tmpDir: string;
@@ -199,6 +201,71 @@ describe("ObjectStore", () => {
     });
   });
 
+  describe("get with deleted file", () => {
+    it("returns null and removes from index when file is deleted from disk", async () => {
+      const obj = await store.create("Ghost Note", "Will vanish", {
+        source: "test",
+        source_id: "ghost-1",
+        object_type: "Note",
+        para_category: "inbox",
+      }, schema);
+
+      expect(store.size()).toBe(1);
+
+      // Delete the file from disk directly
+      const absPath = join(tmpDir, obj.file_path);
+      await unlink(absPath);
+
+      // Now get() should detect the missing file, remove from index, return null
+      const result = await store.get(obj.frontmatter.object_id);
+      expect(result).toBeNull();
+      expect(store.size()).toBe(0);
+    });
+  });
+
+  describe("delete with missing file", () => {
+    it("succeeds even when the file was already deleted from disk", async () => {
+      const obj = await store.create("Already Gone", "Content", {
+        source: "test",
+        source_id: "del-gone-1",
+        object_type: "Note",
+        para_category: "inbox",
+      }, schema);
+
+      // Delete the file manually
+      const absPath = join(tmpDir, obj.file_path);
+      await unlink(absPath);
+
+      // delete() should not throw — the catch block handles file-already-gone
+      const deleted = await store.delete(obj.frontmatter.object_id);
+      expect(deleted).toBe(true);
+      expect(store.size()).toBe(0);
+    });
+  });
+
+  describe("moveObject with missing old file", () => {
+    it("succeeds even when old file was already removed", async () => {
+      const obj = await store.create("Move Missing", "Content", {
+        source: "test",
+        source_id: "move-miss-1",
+        object_type: "Note",
+        para_category: "inbox",
+      }, schema);
+
+      // Delete old file from disk
+      const absPath = join(tmpDir, obj.file_path);
+      await unlink(absPath);
+
+      // moveObject writes the new file, then tries to unlink the old file
+      // The catch block on line 299 should handle the missing file
+      const moved = await store.moveObject(obj.frontmatter.object_id, "resources", schema);
+      // get() on an already-moved object might return null if file was deleted,
+      // but if the index still has it, moveObject reads from get() first
+      // Since file is gone, get() returns null, moveObject returns null
+      expect(moved).toBeNull();
+    });
+  });
+
   describe("rebuildIndex", () => {
     it("rebuilds from disk after clearing", async () => {
       await store.create("Persistent", "Data", { source: "test", source_id: "r1" }, schema);
@@ -208,6 +275,168 @@ describe("ObjectStore", () => {
       const store2 = new ObjectStore(tmpDir);
       await store2.init();
       expect(store2.size()).toBe(1);
+    });
+  });
+
+  describe("moveObject", () => {
+    it("moves file from _Inbox to 03-Resources", async () => {
+      const obj = await store.create("My Note", "Content", {
+        source: "test",
+        source_id: "m1",
+        object_type: "Note",
+        para_category: "inbox",
+      }, schema);
+
+      expect(obj.file_path).toContain("_Inbox");
+
+      const moved = await store.moveObject(obj.frontmatter.object_id, "resources", schema);
+      expect(moved).not.toBeNull();
+      expect(moved!.file_path).toContain("03-Resources");
+      expect(moved!.frontmatter.para_category).toBe("resources");
+      expect(existsSync(join(tmpDir, moved!.file_path))).toBe(true);
+      expect(existsSync(join(tmpDir, obj.file_path))).toBe(false);
+    });
+
+    it("moves file to 01-Projects", async () => {
+      const obj = await store.create("Project Note", "Content", {
+        source: "test",
+        source_id: "m2",
+        object_type: "Note",
+        para_category: "inbox",
+      }, schema);
+
+      const moved = await store.moveObject(obj.frontmatter.object_id, "projects", schema);
+      expect(moved).not.toBeNull();
+      expect(moved!.file_path).toContain("01-Projects");
+    });
+
+    it("returns null for non-existent object", async () => {
+      const result = await store.moveObject("nonexistent", "resources", schema);
+      expect(result).toBeNull();
+    });
+
+    it("no-ops when already in correct folder", async () => {
+      const obj = await store.create("Resources Note", "Content", {
+        source: "test",
+        source_id: "m3",
+        object_type: "Note",
+        para_category: "resources",
+      }, schema);
+
+      const moved = await store.moveObject(obj.frontmatter.object_id, "resources", schema);
+      expect(moved).not.toBeNull();
+      expect(moved!.file_path).toBe(obj.file_path);
+    });
+
+    it("handles name collision by appending short ID", async () => {
+      const obj1 = await store.create("Collision Test", "Content 1", {
+        source: "test",
+        source_id: "c1",
+        object_type: "Note",
+        para_category: "resources",
+      }, schema);
+
+      const obj2 = await store.create("Collision Test", "Content 2", {
+        source: "test",
+        source_id: "c2",
+        object_type: "Note",
+        para_category: "inbox",
+      }, schema);
+
+      // obj1 already at 03-Resources/Collision Test.md
+      const moved = await store.moveObject(obj2.frontmatter.object_id, "resources", schema);
+      expect(moved).not.toBeNull();
+      expect(moved!.file_path).toContain("03-Resources");
+      expect(moved!.file_path).toContain(obj2.frontmatter.object_id.slice(0, 8));
+    });
+
+    it("keeps entity types in _Ontology regardless of para_category", async () => {
+      const obj = await store.create("TypeScript", "A language", {
+        source: "entity",
+        source_id: "ts1",
+        object_type: "Tool",
+        para_category: "inbox",
+      }, schema);
+
+      expect(obj.file_path).toContain("_Ontology/Objects/Tools");
+
+      const moved = await store.moveObject(obj.frontmatter.object_id, "resources", schema);
+      expect(moved).not.toBeNull();
+      // Entity stays in _Ontology regardless
+      expect(moved!.file_path).toContain("_Ontology/Objects/Tools");
+    });
+
+    it("updates index after move (searchable at new category)", async () => {
+      const obj = await store.create("Searchable Note", "Content", {
+        source: "test",
+        source_id: "s1",
+        object_type: "Note",
+        para_category: "inbox",
+      }, schema);
+
+      expect(store.search({ para_category: "inbox" })).toHaveLength(1);
+      expect(store.search({ para_category: "resources" })).toHaveLength(0);
+
+      await store.moveObject(obj.frontmatter.object_id, "resources", schema);
+
+      expect(store.search({ para_category: "inbox" })).toHaveLength(0);
+      expect(store.search({ para_category: "resources" })).toHaveLength(1);
+    });
+  });
+
+  describe("scanDirectory error handling", () => {
+    it("skips malformed .md files during scan", async () => {
+      // Write a malformed markdown file directly to an existing PARA folder
+      const inboxDir = join(tmpDir, "_Inbox");
+      await mkdir(inboxDir, { recursive: true });
+      await writeFile(join(inboxDir, "bad-file.md"), "no frontmatter here at all", "utf-8");
+
+      const store2 = new ObjectStore(tmpDir);
+      await store2.init(); // should not throw
+      expect(store2.size()).toBe(0);
+    });
+
+    it("skips unreadable directories during scan", async () => {
+      const inboxDir = join(tmpDir, "_Inbox");
+      await mkdir(inboxDir, { recursive: true });
+      const lockedDir = join(inboxDir, "locked-subdir");
+      await mkdir(lockedDir, { recursive: true });
+      await chmod(lockedDir, 0o000);
+
+      try {
+        const store2 = new ObjectStore(tmpDir);
+        await store2.init(); // should not throw
+        expect(store2.size()).toBe(0);
+      } finally {
+        await chmod(lockedDir, 0o755);
+      }
+    });
+  });
+
+  describe("moveObject unlink catch", () => {
+    it("succeeds even when old directory is read-only (unlink fails)", async () => {
+      const obj = await store.create("Move Test", "Content", {
+        source: "test",
+        source_id: "unlink-catch-1",
+        object_type: "Note",
+        para_category: "inbox",
+      }, schema);
+
+      expect(obj.file_path).toContain("_Inbox");
+
+      // Make _Inbox read-only so unlink will fail
+      const inboxDir = join(tmpDir, "_Inbox");
+      await chmod(inboxDir, 0o555);
+
+      try {
+        const moved = await store.moveObject(obj.frontmatter.object_id, "resources", schema);
+        expect(moved).not.toBeNull();
+        expect(moved!.file_path).toContain("03-Resources");
+        // File should exist at new location
+        expect(existsSync(join(tmpDir, moved!.file_path))).toBe(true);
+      } finally {
+        await chmod(inboxDir, 0o755);
+      }
     });
   });
 });

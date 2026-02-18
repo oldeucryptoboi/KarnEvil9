@@ -16,6 +16,12 @@ export interface JournalOptions {
   maxSessionsIndexed?: number;
   /** How to handle corruption on init. "truncate" (default) auto-repairs; "strict" throws. */
   recovery?: "truncate" | "strict";
+  /** Disk usage percentage to emit a warning event. Default: 85 */
+  diskWarningPct?: number;
+  /** Disk usage percentage to refuse writes. Default: 95 */
+  diskCriticalPct?: number;
+  /** Minimum interval between disk checks in milliseconds. Default: 60000 */
+  diskCheckIntervalMs?: number;
 }
 
 export type JournalListener = (event: JournalEvent) => void;
@@ -35,6 +41,13 @@ export class Journal {
   private lockPath: string;
   private locked = false;
   private recovery: "truncate" | "strict";
+  private diskWarningPct: number;
+  private diskCriticalPct: number;
+  private diskCheckIntervalMs: number;
+  private lastDiskCheckMs = 0;
+  private lastDiskUsagePct = 0;
+  private diskWarningEmitted = false;
+  private pendingDiskWarning = false;
 
   constructor(filePath: string, options?: JournalOptions) {
     this.filePath = filePath;
@@ -44,6 +57,9 @@ export class Journal {
     this.lockPath = `${filePath}.lock`;
     this.maxSessionsIndexed = options?.maxSessionsIndexed ?? 10000;
     this.recovery = options?.recovery ?? "truncate";
+    this.diskWarningPct = options?.diskWarningPct ?? 85;
+    this.diskCriticalPct = options?.diskCriticalPct ?? 95;
+    this.diskCheckIntervalMs = options?.diskCheckIntervalMs ?? 60000;
   }
 
   async init(): Promise<void> {
@@ -54,6 +70,8 @@ export class Journal {
     if (this.lockEnabled) {
       await this.acquireLock();
     }
+    // Initialize disk check timer so the first check respects the interval
+    this.lastDiskCheckMs = Date.now();
     if (existsSync(this.filePath)) {
       const content = await readFile(this.filePath, "utf-8");
       const lines = content.trim().split("\n").filter(Boolean);
@@ -136,14 +154,20 @@ export class Journal {
     this.writeLock = acquired;
     await prev;
 
+    let event: JournalEvent;
+    let emitWarningAfter = false;
+    let warningUsagePct = 0;
+
     try {
+      await this.checkDiskIfDue();
+
       const redactedPayload = this.redact
         ? redactPayload(payload) as Record<string, unknown>
         : payload;
 
       const seq = this.nextSeq; // capture before write — only commit on success
 
-      const event: JournalEvent = {
+      event = {
         event_id: uuid(),
         timestamp: new Date().toISOString(),
         session_id: sessionId,
@@ -187,10 +211,25 @@ export class Journal {
         try { listener(event); } catch { /* listeners must not break the journal */ }
       }
 
-      return event;
+      // Check if a disk warning needs to be emitted after releasing the lock
+      if (this.pendingDiskWarning && type !== "journal.disk_warning") {
+        this.pendingDiskWarning = false;
+        emitWarningAfter = true;
+        warningUsagePct = this.lastDiskUsagePct;
+      }
     } finally {
       releaseLock!();
     }
+
+    // Emit disk warning outside the write lock to avoid deadlock
+    if (emitWarningAfter) {
+      await this.tryEmit("_system", "journal.disk_warning", {
+        usage_pct: warningUsagePct,
+        threshold: this.diskWarningPct,
+      });
+    }
+
+    return event;
   }
 
   async tryEmit(
@@ -381,6 +420,34 @@ export class Journal {
 
   getFilePath(): string {
     return this.filePath;
+  }
+
+  private async checkDiskIfDue(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastDiskCheckMs < this.diskCheckIntervalMs) return;
+    this.lastDiskCheckMs = now;
+
+    const usage = await this.getDiskUsage();
+    if (!usage) return;
+
+    this.lastDiskUsagePct = usage.usage_pct;
+
+    if (usage.usage_pct >= this.diskCriticalPct) {
+      throw new Error(
+        `Journal write refused: disk usage at ${usage.usage_pct}% exceeds critical threshold ${this.diskCriticalPct}%`
+      );
+    }
+
+    if (usage.usage_pct >= this.diskWarningPct && !this.diskWarningEmitted) {
+      this.diskWarningEmitted = true;
+      this.pendingDiskWarning = true;
+    } else if (usage.usage_pct < this.diskWarningPct && this.diskWarningEmitted) {
+      this.diskWarningEmitted = false;
+    }
+  }
+
+  getDiskUsageCached(): number {
+    return this.lastDiskUsagePct;
   }
 
   private hash(data: string): string {

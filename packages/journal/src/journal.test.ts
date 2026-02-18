@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { resolve } from "node:path";
 import { rm, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -960,5 +960,167 @@ describe("Journal", () => {
     // Both cleanups should work
     cleanup1();
     cleanup2();
+  });
+
+  // ─── Disk Monitoring Tests ──────────────────────────────────────────
+
+  it("emit() throws when disk usage exceeds critical threshold", async () => {
+    const journal = new Journal(TEST_FILE, {
+      fsync: false, lock: false,
+      diskCriticalPct: 95, diskCheckIntervalMs: 0,
+    });
+    await journal.init();
+
+    // Mock getDiskUsage to return 96%
+    vi.spyOn(journal, "getDiskUsage").mockResolvedValue({
+      available_bytes: 4_000_000, total_bytes: 100_000_000, usage_pct: 96,
+    });
+
+    await expect(journal.emit("sess-1", "session.created", {}))
+      .rejects.toThrow("Journal write refused: disk usage at 96% exceeds critical threshold 95%");
+  });
+
+  it("emit() succeeds when disk usage is below critical threshold", async () => {
+    const journal = new Journal(TEST_FILE, {
+      fsync: false, lock: false,
+      diskCriticalPct: 95, diskCheckIntervalMs: 0,
+    });
+    await journal.init();
+
+    vi.spyOn(journal, "getDiskUsage").mockResolvedValue({
+      available_bytes: 20_000_000, total_bytes: 100_000_000, usage_pct: 80,
+    });
+
+    const event = await journal.emit("sess-1", "session.created", {});
+    expect(event.type).toBe("session.created");
+  });
+
+  it("disk check is rate-limited (second emit within interval skips check)", async () => {
+    const journal = new Journal(TEST_FILE, {
+      fsync: false, lock: false,
+      diskCriticalPct: 95, diskCheckIntervalMs: 60000,
+    });
+    await journal.init();
+
+    const spy = vi.spyOn(journal, "getDiskUsage").mockResolvedValue({
+      available_bytes: 20_000_000, total_bytes: 100_000_000, usage_pct: 80,
+    });
+
+    // Force the first check by setting lastDiskCheckMs to the past
+    (journal as any).lastDiskCheckMs = 0;
+    await journal.emit("sess-1", "session.created", {});
+    await journal.emit("sess-1", "session.started", {});
+
+    // getDiskUsage should only be called once due to rate limiting
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("journal.disk_warning event emitted when crossing warning threshold", async () => {
+    const journal = new Journal(TEST_FILE, {
+      fsync: false, lock: false,
+      diskWarningPct: 85, diskCriticalPct: 95, diskCheckIntervalMs: 0,
+    });
+    await journal.init();
+
+    vi.spyOn(journal, "getDiskUsage").mockResolvedValue({
+      available_bytes: 12_000_000, total_bytes: 100_000_000, usage_pct: 88,
+    });
+
+    await journal.emit("sess-1", "session.created", {});
+
+    // Check that a disk_warning event was emitted to _system session
+    const systemEvents = await journal.readSession("_system");
+    expect(systemEvents.length).toBe(1);
+    expect(systemEvents[0]!.type).toBe("journal.disk_warning");
+    expect(systemEvents[0]!.payload.usage_pct).toBe(88);
+    expect(systemEvents[0]!.payload.threshold).toBe(85);
+  });
+
+  it("warning event NOT re-emitted on subsequent writes (deduplicated)", async () => {
+    const journal = new Journal(TEST_FILE, {
+      fsync: false, lock: false,
+      diskWarningPct: 85, diskCriticalPct: 95, diskCheckIntervalMs: 0,
+    });
+    await journal.init();
+
+    vi.spyOn(journal, "getDiskUsage").mockResolvedValue({
+      available_bytes: 12_000_000, total_bytes: 100_000_000, usage_pct: 88,
+    });
+
+    await journal.emit("sess-1", "session.created", {});
+    await journal.emit("sess-1", "session.started", {});
+
+    const systemEvents = await journal.readSession("_system");
+    // Only one warning event, not two
+    expect(systemEvents.length).toBe(1);
+  });
+
+  it("warning flag resets when usage drops below threshold", async () => {
+    const journal = new Journal(TEST_FILE, {
+      fsync: false, lock: false,
+      diskWarningPct: 85, diskCriticalPct: 95, diskCheckIntervalMs: 0,
+    });
+    await journal.init();
+
+    const spy = vi.spyOn(journal, "getDiskUsage");
+
+    // First: above warning — triggers warning
+    spy.mockResolvedValue({
+      available_bytes: 12_000_000, total_bytes: 100_000_000, usage_pct: 88,
+    });
+    await journal.emit("sess-1", "session.created", {});
+
+    // Verify first warning emitted
+    let systemEvents = await journal.readSession("_system");
+    expect(systemEvents.length).toBe(1);
+
+    // Second: below warning (resets flag)
+    spy.mockResolvedValue({
+      available_bytes: 30_000_000, total_bytes: 100_000_000, usage_pct: 70,
+    });
+    await journal.emit("sess-1", "session.started", {});
+
+    // Third: above warning again — should emit a new warning
+    spy.mockResolvedValue({
+      available_bytes: 10_000_000, total_bytes: 100_000_000, usage_pct: 90,
+    });
+    await journal.emit("sess-1", "session.completed", {});
+
+    systemEvents = await journal.readSession("_system");
+    // Two warning events: one from first crossing, one from third crossing
+    expect(systemEvents.length).toBe(2);
+  });
+
+  it("getDiskUsageCached returns last checked value", async () => {
+    const journal = new Journal(TEST_FILE, {
+      fsync: false, lock: false,
+      diskCheckIntervalMs: 0,
+    });
+    await journal.init();
+
+    expect(journal.getDiskUsageCached()).toBe(0); // no check yet
+
+    vi.spyOn(journal, "getDiskUsage").mockResolvedValue({
+      available_bytes: 25_000_000, total_bytes: 100_000_000, usage_pct: 75,
+    });
+
+    await journal.emit("sess-1", "session.created", {});
+    expect(journal.getDiskUsageCached()).toBe(75);
+  });
+
+  it("critical check does not block when diskCriticalPct is set to 100 (disabled)", async () => {
+    const journal = new Journal(TEST_FILE, {
+      fsync: false, lock: false,
+      diskCriticalPct: 100, diskCheckIntervalMs: 0,
+    });
+    await journal.init();
+
+    vi.spyOn(journal, "getDiskUsage").mockResolvedValue({
+      available_bytes: 1_000_000, total_bytes: 100_000_000, usage_pct: 99,
+    });
+
+    // Should not throw even at 99%
+    const event = await journal.emit("sess-1", "session.created", {});
+    expect(event.type).toBe("session.created");
   });
 });

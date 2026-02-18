@@ -182,6 +182,8 @@ export const ErrorCodes = {
   VAULT_SCHEMA_INVALID: "VAULT_SCHEMA_INVALID",
   VAULT_INGESTION_FAILED: "VAULT_INGESTION_FAILED",
   VAULT_CLASSIFICATION_FAILED: "VAULT_CLASSIFICATION_FAILED",
+  VAULT_EMBEDDING_FAILED: "VAULT_EMBEDDING_FAILED",
+  VAULT_NO_EMBEDDER: "VAULT_NO_EMBEDDER",
 } as const;
 
 export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
@@ -372,7 +374,14 @@ export type JournalEventType =
   | "vault.link_created"
   | "vault.context_generated"
   | "vault.janitor_completed"
-  | "vault.error";
+  | "vault.vectorize_completed"
+  | "vault.relationships_discovered"
+  | "vault.dashboard_generated"
+  | "vault.insights_generated"
+  | "vault.dropzone_processed"
+  | "vault.error"
+  | "journal.disk_warning"
+  | "journal.disk_critical";
 
 // ─── Context Budget / Checkpoint ────────────────────────────────────
 

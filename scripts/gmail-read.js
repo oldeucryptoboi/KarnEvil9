@@ -22,6 +22,63 @@ const gmail = google.gmail({ version: 'v1', auth });
 const messageId = process.argv[2];
 if (!messageId) { console.error('Usage: node scripts/gmail-read.js <messageId>'); process.exit(1); }
 
+function stripHtml(html) {
+  // Extract links before stripping tags
+  const links = [];
+  html.replace(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_, url, text) => {
+    const cleanText = text.replace(/<[^>]+>/g, '').trim();
+    if (url && !url.startsWith('mailto:')) links.push({ url, text: cleanText });
+    return '';
+  });
+
+  const text = html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return { text, links };
+}
+
+function getBody(payload) {
+  // Try text/plain first
+  if (payload.mimeType === 'text/plain' && payload.body?.data) {
+    return { text: Buffer.from(payload.body.data, 'base64url').toString('utf-8'), links: [] };
+  }
+  if (payload.parts) {
+    const plain = payload.parts.find(p => p.mimeType === 'text/plain');
+    if (plain?.body?.data) {
+      return { text: Buffer.from(plain.body.data, 'base64url').toString('utf-8'), links: [] };
+    }
+    // Fall back to text/html
+    const htmlPart = payload.parts.find(p => p.mimeType === 'text/html');
+    if (htmlPart?.body?.data) {
+      const html = Buffer.from(htmlPart.body.data, 'base64url').toString('utf-8');
+      return stripHtml(html);
+    }
+    // Recurse into nested multipart
+    for (const part of payload.parts) {
+      if (part.parts) { const r = getBody(part); if (r.text) return r; }
+    }
+  }
+  // Single-part HTML
+  if (payload.mimeType === 'text/html' && payload.body?.data) {
+    const html = Buffer.from(payload.body.data, 'base64url').toString('utf-8');
+    return stripHtml(html);
+  }
+  return { text: '', links: [] };
+}
+
 (async () => {
   const msg = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' });
   const headers = msg.data.payload.headers;
@@ -36,18 +93,13 @@ if (!messageId) { console.error('Usage: node scripts/gmail-read.js <messageId>')
   console.log('Thread:', msg.data.threadId);
   console.log('---');
 
-  function getBody(payload) {
-    if (payload.mimeType === 'text/plain' && payload.body?.data) {
-      return Buffer.from(payload.body.data, 'base64url').toString('utf-8');
+  const { text, links } = getBody(msg.data.payload);
+  if (text) console.log(text);
+
+  if (links.length > 0) {
+    console.log('\n--- Links ---');
+    for (const link of links) {
+      console.log(`[${link.text || 'link'}] ${link.url}`);
     }
-    if (payload.parts) {
-      const plain = payload.parts.find(p => p.mimeType === 'text/plain');
-      if (plain?.body?.data) return Buffer.from(plain.body.data, 'base64url').toString('utf-8');
-      for (const part of payload.parts) {
-        if (part.parts) { const r = getBody(part); if (r) return r; }
-      }
-    }
-    return '';
   }
-  console.log(getBody(msg.data.payload));
 })();

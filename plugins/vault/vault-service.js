@@ -46,6 +46,30 @@ export function createVaultService(deps) {
     try {
       const result = await manager.janitor();
       logger.debug("Janitor completed", result);
+
+      // Vectorize unembedded objects
+      try {
+        const vec = await manager.vectorize({ limit: 500 });
+        if (vec.embeddings_created > 0) {
+          logger.info("Vectorize completed", { embeddings_created: vec.embeddings_created });
+        }
+      } catch (vecErr) {
+        logger.error("Vectorize failed", { error: vecErr.message });
+      }
+
+      // Discover relationships using heuristic labeler (zero LLM cost)
+      try {
+        const disc = await manager.discoverRelationships({ label_via_llm: false });
+        if (disc.result.links_created > 0) {
+          logger.info("Relationship discovery completed", {
+            links_created: disc.result.links_created,
+            clusters_found: disc.result.clusters_found,
+          });
+        }
+      } catch (discErr) {
+        logger.error("Relationship discovery failed", { error: discErr.message });
+      }
+
       await manager.generateDashboard();
       logger.debug("Dashboard regenerated after janitor");
     } catch (err) {
@@ -67,12 +91,12 @@ export function createVaultService(deps) {
         links: stats.total_links,
       });
 
-      // Generate initial context so _Meta/current-context.md exists for before_plan hook
+      // Run initial fast pipeline (dropzone + classify + context)
       try {
-        await manager.generateContext();
-        logger.debug("Initial context briefing generated");
+        await runFastPipeline();
+        logger.debug("Initial fast pipeline completed");
       } catch (err) {
-        logger.warn("Initial context generation failed", { error: err.message });
+        logger.warn("Initial fast pipeline failed", { error: err.message });
       }
 
       // Fast loop (15 min): dropzone scan + classify new items + context regen

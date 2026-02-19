@@ -125,6 +125,15 @@ export async function register(api) {
         api.logger.debug("Session auto-ingested into vault", {
           session_id: context.session_id,
         });
+        // Regen context so the next session sees fresh vault state
+        try {
+          await vaultManager.generateContext();
+        } catch (ctxErr) {
+          api.logger.warn("Post-ingest context regeneration failed", {
+            session_id: context.session_id,
+            error: ctxErr.message,
+          });
+        }
       } catch (err) {
         api.logger.error("Failed to auto-ingest session", {
           session_id: context.session_id,

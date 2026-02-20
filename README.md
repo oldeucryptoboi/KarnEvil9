@@ -1,8 +1,10 @@
 # KarnEvil9
 
-Deterministic agent runtime with explicit plans, typed tools, permissions, and replay.
+Deterministic agent runtime with explicit plans, typed tools, permissions, replay, and a reference implementation of Google DeepMind's [Intelligent AI Delegation](docs/intelligent-delegation-whitepaper.md) framework.
 
-KarnEvil9 converts a natural-language task into a structured execution plan, runs each step under fine-grained permission control, and records every event in a tamper-evident journal. It supports single-shot execution and an agentic feedback loop with iterative re-planning, futility detection, and context budget management.
+KarnEvil9 converts a natural-language task into a structured execution plan, runs each step under fine-grained permission control, and records every event in a tamper-evident journal. It supports single-shot execution, an agentic feedback loop with iterative re-planning, and P2P task delegation across a swarm mesh with nine safety mechanisms derived from the [Tomasev, Franklin & Osindero (2026)](https://arxiv.org/abs/2503.02116) framework: cognitive friction, liability firebreaks, graduated authority, escrow bonds, outcome verification, consensus verification, reputation tracking, delegatee routing, and re-delegation.
+
+> **[Intelligent AI Delegation: From Theory to Working Code](docs/intelligent-delegation-whitepaper.md)** — KarnEvil9 serves as the foundation for a complete, working implementation of Google DeepMind's *Intelligent AI Delegation* framework. The whitepaper details how every pillar of the Tomasev et al. paper is translated into runnable code within the `@karnevil9/swarm` package, demonstrated through a controlled experiment comparing naive vs. intelligent delegation across a three-node P2P mesh.
 
 ## Quick Start
 
@@ -11,7 +13,7 @@ KarnEvil9 converts a natural-language task into a structured execution plan, run
 pnpm install
 pnpm build
 
-# Run a task (mock mode -- no API keys required)
+# Run a task (mock mode — no API keys required)
 karnevil9 run "read the contents of package.json"
 
 # Run with an LLM planner
@@ -90,7 +92,7 @@ Connect to `ws://localhost:3100/api/ws` for interactive sessions. The chat CLI u
 
 ## Architecture
 
-KarnEvil9 is a pnpm monorepo with 14 packages under `packages/`, all scoped as `@karnevil9/*`:
+KarnEvil9 is a pnpm monorepo with 15 packages under `packages/`, all scoped as `@karnevil9/*`:
 
 ```
 schemas                       <- Foundation: types, validators, error codes
@@ -103,7 +105,8 @@ planner, plugins              <- LLM adapters & extensibility
   |
 kernel                        <- Orchestrator: session lifecycle, execution phases
   |
-metrics, scheduler, swarm     <- Observability, scheduled jobs & P2P mesh
+metrics, scheduler,           <- Observability, scheduled jobs,
+swarm, vault                     P2P intelligent delegation & knowledge vault
   |
 api                           <- REST/WebSocket server
   |
@@ -134,12 +137,12 @@ Each step passes through: input validation -> permission check -> tool execution
 
 Permissions use a `domain:action:target` format (e.g., `filesystem:write:workspace`). The engine supports six decision types:
 
-- **allow_once** -- single step
-- **allow_session** -- lifetime of session
-- **allow_always** -- persists across sessions
-- **allow_constrained** -- with path/endpoint restrictions
-- **allow_observed** -- with telemetry logging
-- **deny** -- with optional alternative tool suggestion
+- **allow_once** — single step
+- **allow_session** — lifetime of session
+- **allow_always** — persists across sessions
+- **allow_constrained** — with path/endpoint restrictions
+- **allow_observed** — with telemetry logging
+- **deny** — with optional alternative tool suggestion
 
 ## Plugin System
 
@@ -168,9 +171,45 @@ The entry module exports a `register(api)` function that can call `registerTool(
 | `example-logger` | Reference plugin demonstrating hooks and event logging |
 | `scheduler-tool` | Exposes the scheduler as a tool for creating scheduled jobs |
 | `slack` | Bidirectional Slack integration: receive tasks, post progress, approval buttons |
-| `swarm` | P2P mesh for distributing tasks across KarnEvil9 instances |
+| `signal` | Bidirectional Signal messaging via native signal-cli |
+| `whatsapp` | Bidirectional WhatsApp messaging via Baileys/WhatsApp Web protocol |
+| `gmail` | Gmail integration with OAuth2 and Pub/Sub webhook support |
+| `grok-search` | Grok/X search integration |
+| `swarm` | P2P intelligent delegation mesh across KarnEvil9 instances |
+| `vault` | Ontology knowledge vault with vector search, clustering, and Obsidian-native storage |
 
 See the [Claude Code Hello World tutorial](https://oldeucryptoboi.github.io/KarnEvil9/claude-code-hello-world.html) for a full walkthrough.
+
+## Intelligent AI Delegation
+
+The `@karnevil9/swarm` package is a complete implementation of Google DeepMind's [Intelligent AI Delegation](https://arxiv.org/abs/2503.02116) framework (Tomasev, Franklin & Osindero, 2026). Nine safety mechanisms translate the paper's five pillars — dynamic assessment, adaptive execution, structural transparency, scalable market coordination, and systemic resilience — into runnable code:
+
+| Component | Paper Pillar | Purpose |
+|-----------|-------------|---------|
+| Cognitive Friction Engine | Dynamic Assessment | Risk-weighted human oversight; anti-alarm-fatigue throttling |
+| Delegatee Router | Dynamic Assessment | AI vs. human routing based on task attributes |
+| Liability Firebreaks | Systemic Resilience | Depth limits that tighten with task criticality |
+| Graduated Authority | Systemic Resilience | Trust-tier-scaled SLOs, monitoring, and permissions |
+| Escrow Bond Manager | Scalable Market | Stake-based accountability with slashing on SLO violation |
+| Outcome Verifier | Structural Transparency | Multi-dimensional SLO checks (quality, latency, cost, tokens) |
+| Consensus Verifier | Structural Transparency | Multi-peer agreement with configurable quorum |
+| Reputation Store | Scalable Market | Bayesian trust tracking with exponential decay |
+| Re-delegation Pipeline | Adaptive Execution | Automatic recovery with bond slashing and peer blacklisting |
+
+The framework forms a closed loop: delegation failure triggers bond slashing, reputation downgrade, re-delegation to a higher-trust peer, and consensus verification — all within a single execution cycle.
+
+See the full [whitepaper](docs/intelligent-delegation-whitepaper.md) for component deep dives, quantitative results, and a controlled naive-vs-intelligent demonstration.
+
+## Knowledge Vault
+
+The `@karnevil9/vault` package is a Palantir-inspired ontology knowledge store with Obsidian-native markdown storage:
+
+- **7 ingestion adapters**: Journal, ChatGPT, Claude, WhatsApp, Apple Notes, Gmail, Google Drive
+- **Entity extraction & deduplication**: fuzzy matching with alias YAML, LLM-powered classification
+- **Vector search**: in-memory embeddings with cosine similarity kNN, OPTICS clustering
+- **Relationship discovery**: embed, cluster, find pairs, dedup, label, create links — fully automated
+- **Dashboard generation**: health metrics, top entities, clusters, Dataview queries, LLM-generated insights
+- **PARA folder structure**: Projects, Areas, Resources, Archive with `_Ontology/` for schema
 
 ## Metrics & Monitoring
 
@@ -205,12 +244,16 @@ Missed schedule policies: `skip`, `catchup_one`, `catchup_all`.
 ## Security
 
 - **Permission gates** on every tool invocation with multi-level caching
-- **Policy enforcement** -- path allowlisting, SSRF protection (private IP blocking, port whitelist), command filtering
-- **Prompt injection prevention** -- untrusted data wrapped in structured delimiters
-- **Journal integrity** -- SHA-256 hash chain for tamper detection
-- **Credential sanitization** -- env vars filtered from shell, payloads redacted in journal
-- **Circuit breakers** -- per-tool failure tracking prevents cascading failures
-- **API authentication** -- token-based auth with rate limiting and CORS support
+- **Policy enforcement** — path allowlisting, SSRF protection (private IP blocking, port whitelist), command filtering
+- **Prompt injection prevention** — untrusted data wrapped in structured delimiters
+- **Journal integrity** — SHA-256 hash chain for tamper detection
+- **Credential sanitization** — env vars filtered from shell, payloads redacted in journal
+- **Circuit breakers** — per-tool failure tracking prevents cascading failures
+- **API authentication** — token-based auth with rate limiting and CORS support
+- **Deny-all access control** — messaging plugins (Slack, Signal, WhatsApp, Gmail) deny all users when allowlist is empty
+- **Swarm token validation** — all peer POST endpoints require shared secret authentication
+- **Dangerous command detection** — shell tool flags `rm -rf`, `find -delete`, `sed -i`, etc.
+- **Escrow bonds & reputation slashing** — financial and trust penalties for SLO violations in delegation
 
 ## Development
 
@@ -248,6 +291,13 @@ pnpm --filter @karnevil9/kernel test
 | `KARNEVIL9_SWARM_ENABLED` | No | Enable swarm mesh (`true`/`false`) |
 | `KARNEVIL9_SWARM_TOKEN` | For swarm auth | Shared secret for peer authentication |
 | `KARNEVIL9_SWARM_SEEDS` | No | Comma-separated seed URLs for peer discovery |
+| `KARNEVIL9_VAULT_ROOT` | For vault plugin | Obsidian vault root directory |
+| `KARNEVIL9_VAULT_CLASSIFIER_MODEL` | No | Anthropic model for entity classification |
+| `KARNEVIL9_VAULT_EMBEDDING_MODEL` | No | OpenAI model for vector embeddings |
+| `SLACK_ALLOWED_USER_IDS` | For Slack security | Comma-separated allowed Slack user IDs |
+| `SIGNAL_ALLOWED_NUMBERS` | For Signal security | Comma-separated allowed Signal phone numbers |
+| `WHATSAPP_ENABLED` | For WhatsApp plugin | Enable WhatsApp integration (`true`/`false`) |
+| `WHATSAPP_ALLOWED_NUMBERS` | For WhatsApp security | Comma-separated allowed WhatsApp numbers |
 
 Create a `.env` file in the project root (gitignored).
 

@@ -1,11 +1,12 @@
 id: swarm
 name: Swarm Mesh
-version: "1.0.0"
-description: P2P mesh for distributing tasks across KarnEvil9 instances
+version: "3.0.0"
+description: P2P mesh for distributing tasks across KarnEvil9 instances with intelligent delegation (Phase 5)
 entry: index.js
 permissions:
   - swarm:delegate:tasks
   - swarm:read:peers
+  - swarm:read:reputation
 config_schema:
   type: object
   properties:
@@ -21,6 +22,9 @@ provides:
   tools:
     - swarm-distribute
     - swarm-peers
+    - swarm-reputation
+    - swarm-decompose
+    - swarm-auction
   hooks:
     - after_session_end
     - before_plan
@@ -34,5 +38,21 @@ provides:
     - task
     - result
     - status
+    - reputation
+    - contracts
+    - events
+    - anomalies
+    - quarantine
+    - credentials
+    - tokens
+    - sybil-reports
+    - pow-verify
+    - rfq
+    - bid
+    - auctions
+    - escrow
+    - consensus
+    - renegotiations
+    - checkpoints
   services:
     - swarm-mesh

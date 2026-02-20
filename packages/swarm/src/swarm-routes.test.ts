@@ -75,8 +75,8 @@ describe("createSwarmRoutes", () => {
     return route;
   }
 
-  it("should register 9 routes", () => {
-    expect(routes).toHaveLength(9);
+  it("should register 38 routes", () => {
+    expect(routes).toHaveLength(38);
   });
 
   it("GET identity should return node identity", async () => {
@@ -244,5 +244,35 @@ describe("createSwarmRoutes", () => {
     expect(data.running).toBe(true);
     expect(data.peer_count).toBe(0);
     expect(data.active_delegations).toBe(0);
+  });
+
+  it("GET task status should return 501 without provider", async () => {
+    const route = findRoute("GET", "/task/:taskId/status");
+    const res = makeResponse();
+    await route.handler(makeRequest({ params: { taskId: "task-1" } }), res);
+    expect(res.getStatus()).toBe(501);
+  });
+
+  it("POST task cancel should invoke mesh cancel handler", async () => {
+    const route = findRoute("POST", "/task/:taskId/cancel");
+    const res = makeResponse();
+    await route.handler(makeRequest({ params: { taskId: "task-1" } }), res);
+    const data = res.getData() as Record<string, unknown>;
+    // meshManager.handleCancelTask exists but no onTaskCancel callback, so cancelled=false
+    expect(data.cancelled).toBe(false);
+  });
+
+  it("POST trigger should return 501 without handler", async () => {
+    const route = findRoute("POST", "/trigger");
+    const res = makeResponse();
+    await route.handler(makeRequest({ body: { type: "task_cancel", task_id: "t-1", timestamp: new Date().toISOString() } }), res);
+    expect(res.getStatus()).toBe(501);
+  });
+
+  it("POST trigger should validate body", async () => {
+    const route = findRoute("POST", "/trigger");
+    const res = makeResponse();
+    await route.handler(makeRequest({ body: {} }), res);
+    expect(res.getStatus()).toBe(400);
   });
 });

@@ -207,7 +207,7 @@ describe("WorkDistributor", () => {
     // Should only have tried peer-2 (which has shell-exec)
     expect(mesh.delegateTask).toHaveBeenCalledWith("peer-2", "Do something", "session-1", {
       tool_allowlist: ["shell-exec"],
-    });
+    }, undefined, undefined);
 
     distributor.resolveTask({
       task_id: "task-cap",

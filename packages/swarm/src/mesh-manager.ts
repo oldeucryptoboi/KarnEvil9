@@ -8,16 +8,22 @@ import type {
   HeartbeatMessage,
   GossipMessage,
   PeerEntry,
+  AttestationChain,
 } from "./types.js";
 import { PeerTable } from "./peer-table.js";
 import { PeerTransport } from "./transport.js";
 import { PeerDiscovery } from "./discovery.js";
+import { verifyAttestation, verifyChain } from "./attestation.js";
+import type { WorkDistributor } from "./work-distributor.js";
+import type { LiabilityFirebreak } from "./liability-firebreak.js";
+import type { CognitiveFrictionEngine } from "./cognitive-friction.js";
 
 export interface MeshManagerConfig {
   config: SwarmConfig;
   journal?: Journal;
   onTaskRequest?: (request: SwarmTaskRequest) => Promise<{ accepted: boolean; reason?: string }>;
   onTaskResult?: (result: SwarmTaskResult) => void;
+  onTaskCancel?: (taskId: string) => Promise<{ cancelled: boolean }>;
 }
 
 export class MeshManager {
@@ -29,18 +35,23 @@ export class MeshManager {
   private discovery: PeerDiscovery;
   private onTaskRequest?: (request: SwarmTaskRequest) => Promise<{ accepted: boolean; reason?: string }>;
   private onTaskResult?: (result: SwarmTaskResult) => void;
+  private onTaskCancel?: (taskId: string) => Promise<{ cancelled: boolean }>;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private sweepTimer?: ReturnType<typeof setInterval>;
   private running = false;
   private seenNonces = new Map<string, number>();
   private nonceCleanupTimer?: ReturnType<typeof setInterval>;
   private activeSessions = 0;
+  private workDistributor?: WorkDistributor;
+  private liabilityFirebreak?: LiabilityFirebreak;
+  private cognitiveFriction?: CognitiveFrictionEngine;
 
   constructor(managerConfig: MeshManagerConfig) {
     this.config = managerConfig.config;
     this.journal = managerConfig.journal;
     this.onTaskRequest = managerConfig.onTaskRequest;
     this.onTaskResult = managerConfig.onTaskResult;
+    this.onTaskCancel = managerConfig.onTaskCancel;
 
     this.identity = {
       node_id: uuid(),
@@ -180,6 +191,23 @@ export class MeshManager {
     }
     this.recordNonce(request.nonce);
 
+    // Depth check for transitive delegation
+    const maxDepth = this.config.max_delegation_depth ?? 3;
+    if (request.delegation_depth !== undefined && request.delegation_depth >= maxDepth) {
+      return { accepted: false, reason: `Delegation depth ${request.delegation_depth} exceeds max ${maxDepth}` };
+    }
+
+    // Liability firebreak check (Gap 3)
+    if (this.liabilityFirebreak && request.delegation_depth !== undefined) {
+      const fbDecision = this.liabilityFirebreak.evaluate(
+        request.delegation_depth,
+        request.task_attributes,
+      );
+      if (fbDecision.action === "halt") {
+        return { accepted: false, reason: `Firebreak halt: ${fbDecision.reason}` };
+      }
+    }
+
     if (!this.onTaskRequest) {
       return { accepted: false, reason: "Node does not accept tasks" };
     }
@@ -190,12 +218,39 @@ export class MeshManager {
         task_id: request.task_id,
         originator_node_id: request.originator_node_id,
         correlation_id: request.correlation_id,
+        delegation_depth: request.delegation_depth,
       });
     }
     return result;
   }
 
   handleTaskResult(result: SwarmTaskResult): void {
+    // Verify attestation if token is configured and attestation is present
+    if (this.config.token && result.attestation) {
+      const valid = verifyAttestation(result.attestation, this.config.token);
+      if (!valid) {
+        void this.emitEvent("swarm.task_result_received", {
+          task_id: result.task_id,
+          peer_node_id: result.peer_node_id,
+          status: result.status,
+          attestation_valid: false,
+          warning: "Attestation verification failed",
+        });
+      }
+    }
+
+    // Verify attestation chain if present
+    if (this.config.token && result.attestation_chain) {
+      const chainResult = verifyChain(result.attestation_chain, this.config.token);
+      if (!chainResult.valid) {
+        void this.emitEvent("swarm.attestation_chain_invalid", {
+          task_id: result.task_id,
+          peer_node_id: result.peer_node_id,
+          invalid_at_depth: chainResult.invalid_at_depth,
+        });
+      }
+    }
+
     void this.emitEvent("swarm.task_result_received", {
       task_id: result.task_id,
       peer_node_id: result.peer_node_id,
@@ -211,6 +266,15 @@ export class MeshManager {
     }
   }
 
+  handleCancelTask(taskId: string): { cancelled: boolean } {
+    if (!this.onTaskCancel) {
+      return { cancelled: false };
+    }
+    // Fire and forget — the cancel is async but the route handler needs a sync response
+    void this.onTaskCancel(taskId);
+    return { cancelled: true };
+  }
+
   // ─── Task Delegation ──────────────────────────────────────────────
 
   async delegateTask(
@@ -218,13 +282,29 @@ export class MeshManager {
     taskText: string,
     sessionId: string,
     constraints?: SwarmTaskRequest["constraints"],
+    parentChain?: AttestationChain,
+    priority?: number,
+    taskAttributes?: import("./types.js").TaskAttribute,
+    peerTrustScore?: number,
   ): Promise<{ accepted: boolean; taskId: string; reason?: string }> {
     const peer = this.peerTable.get(peerNodeId);
     if (!peer || peer.status !== "active") {
       return { accepted: false, taskId: "", reason: "Peer not active" };
     }
 
+    // Cognitive friction check (Gap 7)
+    if (this.cognitiveFriction && taskAttributes) {
+      const currentDepth = parentChain ? parentChain.depth : 0;
+      const maxDepth = this.config.max_delegation_depth ?? 3;
+      const trust = peerTrustScore ?? 0.5;
+      const assessment = this.cognitiveFriction.assess(taskAttributes, currentDepth, trust, maxDepth);
+      if (assessment.level === "mandatory_human") {
+        return { accepted: false, taskId: "", reason: `Cognitive friction: mandatory human review required — ${assessment.reason}` };
+      }
+    }
+
     const taskId = uuid();
+    const currentDepth = parentChain ? parentChain.depth : 0;
     const request: SwarmTaskRequest = {
       task_id: taskId,
       originator_node_id: this.identity.node_id,
@@ -233,6 +313,9 @@ export class MeshManager {
       constraints,
       correlation_id: uuid(),
       nonce: uuid(),
+      parent_attestation_chain: parentChain,
+      delegation_depth: currentDepth,
+      priority,
     };
 
     void this.emitEvent("swarm.task_delegated", {
@@ -282,12 +365,28 @@ export class MeshManager {
     return this.peerTable.size;
   }
 
+  getSwarmToken(): string | undefined {
+    return this.config.token;
+  }
+
   get isRunning(): boolean {
     return this.running;
   }
 
   setActiveSessions(count: number): void {
     this.activeSessions = count;
+  }
+
+  setWorkDistributor(wd: WorkDistributor): void {
+    this.workDistributor = wd;
+  }
+
+  setLiabilityFirebreak(fb: LiabilityFirebreak): void {
+    this.liabilityFirebreak = fb;
+  }
+
+  setCognitiveFriction(cf: CognitiveFrictionEngine): void {
+    this.cognitiveFriction = cf;
   }
 
   getTransport(): PeerTransport {
@@ -346,6 +445,12 @@ export class MeshManager {
     for (const nodeId of result.unreachable) {
       void this.emitEvent("swarm.peer_unreachable", { peer_node_id: nodeId });
       this.discovery.forget(nodeId);
+    }
+
+    // Trigger redelegation for suspected + unreachable peers
+    const degradedPeerIds = [...result.suspected, ...result.unreachable];
+    if (degradedPeerIds.length > 0 && this.workDistributor) {
+      void this.workDistributor.handlePeerDegradation(degradedPeerIds);
     }
   }
 

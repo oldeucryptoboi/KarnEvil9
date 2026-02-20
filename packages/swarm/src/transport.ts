@@ -6,6 +6,9 @@ import type {
   GossipMessage,
   JoinMessage,
   LeaveMessage,
+  TaskCheckpointStatus,
+  TaskRFQ,
+  BidObject,
 } from "./types.js";
 
 export interface TransportResponse<T = unknown> {
@@ -56,6 +59,22 @@ export class PeerTransport {
 
   async sendTaskResult(apiUrl: string, result: SwarmTaskResult): Promise<TransportResponse> {
     return this.send(apiUrl, "/api/plugins/swarm/result", "POST", result);
+  }
+
+  async sendCheckpointRequest(apiUrl: string, taskId: string): Promise<TransportResponse<TaskCheckpointStatus>> {
+    return this.send<TaskCheckpointStatus>(apiUrl, `/api/plugins/swarm/task/${taskId}/status`, "GET");
+  }
+
+  async sendCancelTask(apiUrl: string, taskId: string): Promise<TransportResponse> {
+    return this.send(apiUrl, `/api/plugins/swarm/task/${taskId}/cancel`, "POST");
+  }
+
+  async sendRFQ(apiUrl: string, rfq: TaskRFQ): Promise<TransportResponse> {
+    return this.send(apiUrl, "/api/plugins/swarm/rfq", "POST", rfq);
+  }
+
+  async sendBid(apiUrl: string, bid: BidObject): Promise<TransportResponse> {
+    return this.send(apiUrl, "/api/plugins/swarm/bid", "POST", bid);
   }
 
   private async send<T = unknown>(

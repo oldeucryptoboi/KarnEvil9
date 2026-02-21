@@ -1,8 +1,8 @@
 # Intelligent AI Delegation: From Theory to Working Code
 
-## A Reference Implementation of the Tomasev et al. (2026) Framework for Autonomous Agent Swarms
+## A Reference Implementation of Google DeepMind's *Intelligent AI Delegation* (2026) Framework for Autonomous Agent Swarms
 
-**KarnEvil9 Project** | February 2026
+**[KarnEvil9 Project](https://github.com/oldeucryptoboi/KarnEvil9)** | February 2026
 
 ---
 
@@ -15,11 +15,11 @@
 
 In February 2026, Tomasev, Franklin, and Osindero of Google DeepMind published "Intelligent AI Delegation" [1], a foundational paper that formalized the distinction between ad hoc delegation — fire-and-forget task handoff — and *intelligent delegation*: "a sequence of decisions involving task allocation, that also incorporates transfer of authority, responsibility, accountability, clear specifications regarding roles and boundaries, clarity of intent, and mechanisms for establishing trust." The paper proposed a comprehensive framework organized around five pillars — dynamic assessment, adaptive execution, structural transparency, scalable market coordination, and systemic resilience — but left the implementation as an open challenge.
 
-This paper answers that challenge. We present KarnEvil9's swarm package: a complete, working implementation of the Tomasev et al. framework, translating every pillar into concrete, runnable code. Each of the nine safety mechanisms we implement — cognitive friction, liability firebreaks, graduated authority, escrow bonds, outcome verification, consensus verification, reputation tracking, delegatee routing, and re-delegation — traces directly to specific sections and prescriptions in [1]. Nothing in our architecture is invented independently; the entire design is derived from the paper's theoretical framework.
+This paper answers that challenge. We present [KarnEvil9's swarm package](https://github.com/oldeucryptoboi/KarnEvil9/tree/master/packages/swarm): a complete, working implementation of the Tomasev et al. framework, translating every pillar into concrete, runnable code. Each of the nine safety mechanisms we implement — cognitive friction, liability firebreaks, graduated authority, escrow bonds, outcome verification, consensus verification, reputation tracking, delegatee routing, and re-delegation — traces directly to specific sections and prescriptions in [1]. Nothing in our architecture is invented independently; the entire design is derived from the *Intelligent AI Delegation* paper's theoretical framework.
 
 We demonstrate the framework through a controlled experiment: the same security audit task is delegated twice across a three-node peer-to-peer mesh — once with no safety infrastructure, once with the full framework. The results are unambiguous: naive delegation accepts garbage in 2.8 seconds with no recourse; intelligent delegation detects the degradation, slashes the offending peer's bond, downgrades its reputation, re-delegates to a reliable peer, achieves consensus verification, and delivers a verified high-quality result — all in under 3.1 seconds with zero human intervention.
 
-The entire framework is implemented in TypeScript, runs in a single process with no external dependencies, and is available as the `@karnevil9/swarm` package.
+The entire framework is implemented in TypeScript, runs in a single process with no external dependencies, and is available as the [`@karnevil9/swarm`](https://github.com/oldeucryptoboi/KarnEvil9/tree/master/packages/swarm) package.
 
 ---
 
@@ -55,7 +55,7 @@ Modern AI agent architectures are converging on a common pattern: a *principal* 
 
 The problem is equally obvious, yet widely ignored: **what happens when a delegatee fails silently?**
 
-Tomasev et al. [1] frame this as the *principal-agent problem* (§2.3): "a situation that arises when a principal delegates a task to an agent that has motivations that are not in alignment with that of the principal." In AI delegation, this misalignment need not be intentional — it can manifest as reward misspecification, capability mismatch, or simple resource exhaustion. The result is the same: the principal receives degraded output and has no mechanism to detect it.
+The *Intelligent AI Delegation* paper [1] frames this as the *principal-agent problem* (§2.3): "a situation that arises when a principal delegates a task to an agent that has motivations that are not in alignment with that of the principal." In AI delegation, this misalignment need not be intentional — it can manifest as reward misspecification, capability mismatch, or simple resource exhaustion. The result is the same: the principal receives degraded output and has no mechanism to detect it.
 
 Consider a security audit task delegated to a peer agent. The peer returns after 2.8 seconds with a single finding: *"Code looks okay. No major issues found. Recommend further review."* This result consumed 800 tokens, cost $0.05, and tells the principal nothing of value. Yet in a naive delegation system, the principal accepts this result without question. The task is marked "completed." The user sees a green checkmark. The security vulnerabilities remain.
 
@@ -67,13 +67,13 @@ This is not a hypothetical. It is the default behavior of every multi-agent syst
 - **No recovery path**: When a delegation fails, the task simply fails. Without re-delegation, there is no second chance. *Adaptive coordination* [1, §4.4] demands the capability to "switch delegatees mid-execution" when "performance degrades beyond acceptable parameters."
 - **Invisible chain risk**: When a delegatee further sub-delegates, the principal loses visibility. Without depth-based governance, delegation chains grow unbounded. The paper warns that in chains (A → B → C), "a broad zone of indifference allows subtle intent mismatches or context-dependent harms to propagate rapidly downstream" [1, §2.3].
 
-Tomasev et al. [1] identified all of these failure modes and proposed a comprehensive framework centered on five requirements: *dynamic assessment*, *adaptive execution*, *structural transparency*, *scalable market coordination*, and *systemic resilience* [1, §4]. Their paper provided the theoretical architecture; it did not provide an implementation. The KarnEvil9 swarm package exists because that paper exists. Every component described in the following sections — from cognitive friction to consensus verification — was designed to implement a specific prescription from [1]. The contribution of this work is turning that theory into running code that can be executed in under 5 seconds on a laptop.
+Tomasev et al. [1] identified all of these failure modes and proposed a comprehensive framework centered on five requirements: *dynamic assessment*, *adaptive execution*, *structural transparency*, *scalable market coordination*, and *systemic resilience* [1, §4]. Their paper provided the theoretical architecture; it did not provide an implementation. The [KarnEvil9](https://github.com/oldeucryptoboi/KarnEvil9) swarm package exists because that paper exists. Every component described in the following sections — from cognitive friction to consensus verification — was designed to implement a specific prescription from [1]. The contribution of this work is turning that theory into running code that can be executed in under 5 seconds on a laptop.
 
 ---
 
 ## 2. Threat Model
 
-Tomasev et al. [1, §4.9] provide a comprehensive security threat taxonomy for intelligent delegation, categorizing threats by the locus of the attack vector: malicious delegatees, malicious delegators, and ecosystem-level threats. Our framework addresses four primary categories drawn from this taxonomy:
+Google DeepMind's *Intelligent AI Delegation* paper [1, §4.9] provides a comprehensive security threat taxonomy for intelligent delegation, categorizing threats by the locus of the attack vector: malicious delegatees, malicious delegators, and ecosystem-level threats. Our framework addresses four primary categories drawn from this taxonomy:
 
 ### 2.1 Degraded Peers
 
@@ -97,7 +97,7 @@ The framework does *not* address ecosystem-level threats such as *Sybil attacks*
 
 ## 3. Framework Architecture
 
-Our architecture is a direct translation of the framework defined by Tomasev et al. [1, §4]. The paper organizes intelligent delegation around five pillars (reproduced from Table 1 of [1]), and every component in our implementation traces to one or more of these pillars:
+Our architecture is a direct translation of the framework defined in the *Intelligent AI Delegation* paper [1, §4]. The paper organizes intelligent delegation around five pillars (reproduced from Table 1 of [1]), and every component in our implementation traces to one or more of these pillars:
 
 | Framework Pillar [1] | Core Requirement | Our Implementation |
 |----------------------|------------------|--------------------|
@@ -117,7 +117,7 @@ The critical insight is that these components form a *closed loop*. Failure at s
 
 ## 4. Component Deep Dives
 
-### 4.1 Cognitive Friction Engine
+### 4.1 [Cognitive Friction Engine](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/cognitive-friction.ts)
 
 **Paper basis**: §2.3 (Zone of Indifference, Dynamic Cognitive Friction) and §5.1 (Meaningful Human Control).
 
@@ -146,7 +146,7 @@ The composite score maps to four friction levels:
 
 **In the demo**: The task has high criticality, low reversibility, and a low-trust target peer (trust=0.29). The composite score of 0.716 triggers the `confirm` level, flagging the delegation as requiring user approval before proceeding.
 
-### 4.2 Liability Firebreaks
+### 4.2 [Liability Firebreaks](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/liability-firebreak.ts)
 
 **Paper basis**: §5.2 (Accountability in Long Delegation Chains) and §4.5 (Monitoring — transitive monitoring).
 
@@ -167,9 +167,9 @@ The firebreak operates in two modes:
 - **Strict** (default): Returns `halt` — the delegation is blocked outright.
 - **Permissive**: Returns `request_authority` — the delegation proceeds only if a higher authority explicitly approves.
 
-**In the demo**: The firebreak is wired into the mesh manager. Any attempt by Node C to sub-delegate the task would be blocked because the depth limit for this task profile is 1.
+**In the demo**: The firebreak is wired into the [mesh manager](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/mesh-manager.ts). Any attempt by Node C to sub-delegate the task would be blocked because the depth limit for this task profile is 1.
 
-### 4.3 Delegatee Router
+### 4.3 [Delegatee Router](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/delegatee-router.ts)
 
 **Paper basis**: §4.1 (Task Decomposition — human vs. AI routing) and §4.2 (Task Assignment).
 
@@ -195,7 +195,7 @@ Routing rules are evaluated in priority order:
 
 **In the demo**: The security audit task has high criticality and low reversibility, triggering rule 1. The router recommends human oversight with 0.90 confidence. In a production system, this would gate the delegation behind a human approval step.
 
-### 4.4 Graduated Authority
+### 4.4 [Graduated Authority](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/graduated-authority.ts)
 
 **Paper basis**: §2.3 (Authority Gradient, Trust Calibration), §4.6 (Trust and Reputation), and §4.7 (Permission Handling).
 
@@ -223,7 +223,7 @@ scaled_SLO = {
 
 **In the demo**: Node C (trust=0.29, low tier) receives an SLO of 2,500ms / 250 tokens / $0.005 — half the base budget. Node B (trust=1.00, high tier) receives 7,500ms / 750 tokens / $0.015 — 1.5x the base budget. When Node C returns after 2,800ms with 800 tokens at $0.05, it violates all three SLO dimensions simultaneously.
 
-### 4.5 Escrow Bond Manager
+### 4.5 [Escrow Bond Manager](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/escrow-manager.ts)
 
 **Paper basis**: §4.2 (Task Assignment — smart contracts, escrow) and §4.8 (Verifiable Task Completion — dispute resolution).
 
@@ -243,7 +243,7 @@ The bond lifecycle:
 
 **In the demo**: A $0.10 bond is held for Node C before delegation. When the SLO violation is detected, 50% ($0.05) is slashed. Node C's remaining balance drops to $0.95. This slashed revenue partially offsets the cost of re-delegating to Node B.
 
-### 4.6 Outcome Verifier
+### 4.6 [Outcome Verifier](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/outcome-verifier.ts)
 
 **Paper basis**: §4.8 (Verifiable Task Completion) and §4.1 (contract-first decomposition).
 
@@ -273,7 +273,7 @@ An outcome score (0.0–1.0) is computed as the ratio of successful findings to 
 
 **In the demo**: Node C's result fails on three SLO dimensions — cost ($0.05 > $0.005), tokens (800 > 250), and duration (2,801ms > 2,500ms). The verifier returns `verified: false` with three explicit issue descriptions.
 
-### 4.7 Consensus Verifier
+### 4.7 [Consensus Verifier](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/consensus-verifier.ts)
 
 **Paper basis**: §4.8 (Verifiable Task Completion — game-theoretic consensus).
 
@@ -301,11 +301,11 @@ Nodes whose votes differ from the majority are recorded as dissenters.
 
 **In the demo**: A consensus round requires 2 voters with 0.67 agreement. Both the orchestrator (Node A) and the reliable peer (Node B) submit matching result hashes with outcome scores of 0.95 and 0.90 respectively. The round evaluates to `agreed: true` with an agreement ratio of 1.0 and zero dissenters.
 
-### 4.8 Reputation Store
+### 4.8 [Reputation Store](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/reputation-store.ts)
 
 **Paper basis**: §4.6 (Trust and Reputation) and Table 3 (Approaches to Reputation Implementation).
 
-**Purpose**: Track peer performance history and compute trust scores that feed into all other components. The paper defines trust as "the delegator's degree of belief in a delegatee's capability to execute a task in alignment with explicit constraints and implicit intent. This belief is dynamically formed and updated based on verifiable data streams collected via the monitoring protocols" [1, §4.6]. The paper distinguishes *reputation* (public, verifiable history) from *trust* (private, context-dependent threshold), and proposes three implementation approaches (Table 3 [1]): immutable ledger, web of trust, and behavioral metrics. Our implementation combines elements of all three: JSONL-persisted performance history (immutable ledger), composite trust scoring (behavioral metrics), and optional `BehavioralScorer` integration that evaluates *how* a task is performed, not just the result.
+**Purpose**: Track peer performance history and compute trust scores that feed into all other components. The paper defines trust as "the delegator's degree of belief in a delegatee's capability to execute a task in alignment with explicit constraints and implicit intent. This belief is dynamically formed and updated based on verifiable data streams collected via the monitoring protocols" [1, §4.6]. The paper distinguishes *reputation* (public, verifiable history) from *trust* (private, context-dependent threshold), and proposes three implementation approaches (Table 3 [1]): immutable ledger, web of trust, and behavioral metrics. Our implementation combines elements of all three: JSONL-persisted performance history (immutable ledger), composite trust scoring (behavioral metrics), and optional [`BehavioralScorer`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/behavioral-scorer.ts) integration that evaluates *how* a task is performed, not just the result.
 
 The trust score formula:
 
@@ -336,7 +336,7 @@ The formula encodes several design choices:
 
 **In the demo**: Node C begins with a seeded trust score of 0.29 (low tier) based on a history of 1 success and 3 failures. After the SLO-violating result is recorded as a failure, trust drops further to 0.21 — deepening the low tier and further tightening future SLOs for this peer.
 
-### 4.9 Re-delegation and Recovery
+### 4.9 Re-delegation and Recovery ([mesh-manager](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/mesh-manager.ts))
 
 **Paper basis**: §4.4 (Adaptive Coordination) and Figure 2 (Adaptive Coordination Cycle).
 
@@ -359,7 +359,7 @@ This creates a self-healing system: degradation is detected, the degraded peer i
 
 ## 5. The Demonstration: Naive vs. Intelligent
 
-The demonstration runs as a single TypeScript file (`scripts/naive-vs-intelligent-demo.ts`) that boots three in-process nodes, forms a mesh, and executes the same task twice.
+The demonstration runs as a single TypeScript file ([`scripts/naive-vs-intelligent-demo.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/scripts/naive-vs-intelligent-demo.ts)) that boots three in-process nodes, forms a mesh, and executes the same task twice.
 
 ### Environment
 
@@ -385,7 +385,7 @@ This profile — high criticality combined with low reversibility — is deliber
 
 The orchestrator delegates directly to Node C with no safety checks.
 
-1. Task is sent to Node C via `mesh.delegateTask()`
+1. Task is sent to Node C via [`mesh.delegateTask()`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/mesh-manager.ts)
 2. Node C responds after ~2,800ms
 3. Result: 1 finding — *"Code looks okay. No major issues found. Recommend further review."*
 4. Cost: $0.05, Tokens: 800
@@ -449,11 +449,11 @@ The nine components are not standalone safety checks — they form an integrated
 
 ### 7.1 Reputation Feeds Everything
 
-The reputation store is the backbone. Trust scores computed from historical outcomes flow into:
+The [reputation store](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/reputation-store.ts) is the backbone. Trust scores computed from historical outcomes flow into:
 
 - **Graduated Authority**: Trust score → tier → budget factor → SLO scaling
 - **Cognitive Friction**: Trust score → trust deficit factor → composite risk score
-- **Work Distributor**: Trust score → peer selection ranking (reputation strategy)
+- **[Work Distributor](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/work-distributor.ts)**: Trust score → peer selection ranking (reputation strategy)
 - **Delegatee Router**: Low-trust peers increase the likelihood of human routing
 
 This creates a **virtuous cycle for good peers** and a **death spiral for bad ones**. A peer that consistently delivers quality results earns higher trust → relaxed SLOs → more tolerance for variance → continued trust. A peer that delivers poor results loses trust → tightened SLOs → faster violation detection → stronger penalties → further trust loss. The paper describes this as *dynamic calibration*: "This dynamic calibration leverages computable trust to optimize the trade-off between operational efficiency and safety. Reputation itself becomes a valuable, intangible asset, creating powerful economic incentives for agents to act reliably and truthfully" [1, §4.6].
@@ -476,9 +476,9 @@ Before any task is delegated, it passes through three sequential gates:
 
 These gates are *conservative by design*. A task must pass all three to reach actual delegation. Any single gate can block the delegation, triggering escalation to a human operator.
 
-### 7.4 Journal as the Observability Backbone
+### 7.4 [Journal](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/journal/src/journal.ts) as the Observability Backbone
 
-The paper's *structural transparency* pillar demands "auditability of process and outcome" [1, Table 1], implemented via monitoring (§4.5) and verifiable task completion (§4.8). Our journal provides this transparency layer. Every component emits structured events to the journal:
+The paper's *structural transparency* pillar demands "auditability of process and outcome" [1, Table 1], implemented via monitoring (§4.5) and verifiable task completion (§4.8). Our [journal](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/journal/src/journal.ts) provides this transparency layer. Every component emits structured events to the journal:
 
 - `swarm.friction_assessed` — risk assessment results
 - `swarm.delegatee_routed` — routing decisions
@@ -519,15 +519,15 @@ The demonstration runs all three nodes in a single process to eliminate external
 
 ## 9. Related Work
 
-This work has a single genesis: Tomasev et al. [1]. The entire `@karnevil9/swarm` package — its architecture, components, and the safety properties they compose — was designed as a faithful implementation of the framework proposed in that paper. We did not arrive at these ideas independently and then discover the paper; the paper came first, and the code was built to realize its vision. Every design decision references a specific section of [1], and the nine components collectively cover all five framework pillars.
+This work has a single genesis: Google DeepMind's *Intelligent AI Delegation* paper [1]. The entire [`@karnevil9/swarm`](https://github.com/oldeucryptoboi/KarnEvil9/tree/master/packages/swarm) package — its architecture, components, and the safety properties they compose — was designed as a faithful implementation of the framework proposed in that paper. We did not arrive at these ideas independently and then discover the paper; the paper came first, and the code was built to realize its vision. Every design decision references a specific section of [1], and the nine components collectively cover all five framework pillars.
 
 The paper itself draws on and synthesizes several research traditions, which we briefly contextualize to show how [1] integrates them into a coherent whole:
 
 **Intelligent AI Delegation [1]**: Tomasev, Franklin, and Osindero introduce ten key conceptual contributions — *zone of indifference*, *authority gradient*, *dynamic cognitive friction*, *trust calibration*, *transaction cost economies*, *contract-first decomposition*, *liability firebreaks*, *transitive accountability via attestation*, *moral crumple zone* avoidance, and the *trust-efficiency frontier* — each of which corresponds to a specific algorithmic implementation in our package (see §3 and §4 above).
 
-**Multi-agent systems**: The FIPA Contract Net Protocol (Smith, 1980; Sandholm, 1993) established the request-for-proposal / bid / award pattern that informs the framework's auction-based distribution strategy. The paper surveys this tradition extensively [1, §3], noting that "coordination in multi-agent systems occurs via explicit protocols or emergent specialisation through RL." KarnEvil9 extends this with reputation-weighted peer selection, graduated SLOs, and post-completion verification.
+**Multi-agent systems**: The FIPA Contract Net Protocol (Smith, 1980; Sandholm, 1993) established the request-for-proposal / bid / award pattern that informs the framework's auction-based distribution strategy. The paper surveys this tradition extensively [1, §3], noting that "coordination in multi-agent systems occurs via explicit protocols or emergent specialisation through RL." [KarnEvil9](https://github.com/oldeucryptoboi/KarnEvil9) extends this with reputation-weighted peer selection, graduated SLOs, and post-completion verification.
 
-**Byzantine fault tolerance**: The consensus verifier implements a simplified voting protocol inspired by PBFT (Castro & Liskov, 1999) and the TrueBit verification game referenced in the paper [1, §4.8]. The key simplification is that KarnEvil9 nodes vote on *result hashes* rather than on state transitions, reducing the protocol to a single round of voting.
+**Byzantine fault tolerance**: The consensus verifier implements a simplified voting protocol inspired by PBFT (Castro & Liskov, 1999) and the TrueBit verification game referenced in the paper [1, §4.8]. The key simplification is that [KarnEvil9](https://github.com/oldeucryptoboi/KarnEvil9) nodes vote on *result hashes* rather than on state transitions, reducing the protocol to a single round of voting.
 
 **Mechanism design**: The escrow bond system applies insights from deposit-and-slash mechanisms used in proof-of-stake blockchains, directly implementing the paper's prescription for "cryptoeconomic security" through "a financial stake into the escrow bond prior to execution" [1, §4.8]. Peers post collateral before receiving work, and the collateral is slashed on violation — creating direct economic incentives for quality independent of any trust score.
 
@@ -565,11 +565,11 @@ The paper identifies the *trust-efficiency frontier* [1, §4.3]: "The delegator 
 
 The gap between naive and intelligent delegation is not theoretical. It is a $0.048 cost difference, a 2-finding quality gap, and the difference between blindly accepting garbage and automatically detecting, penalizing, recovering from, and verifying around a degraded peer.
 
-Tomasev et al. [1] called for systems that "dynamically adapt to environmental changes and robustly handle unexpected failures." This implementation answers that call. The KarnEvil9 swarm framework demonstrates that the theoretical framework of [1] is not merely aspirational — it is implementable, composable, and fast. Nine components, each derived from specific sections of the paper, together form a closed-loop system with self-healing properties. The 6% latency overhead is negligible. The economic self-correction (slashed bonds offsetting retry costs) is immediate. The quality improvement is qualitative — from *"Code looks okay"* to specific, actionable security findings.
+The *Intelligent AI Delegation* paper [1] called for systems that "dynamically adapt to environmental changes and robustly handle unexpected failures." This implementation answers that call. The [KarnEvil9 swarm framework](https://github.com/oldeucryptoboi/KarnEvil9/tree/master/packages/swarm) demonstrates that the theoretical framework of [1] is not merely aspirational — it is implementable, composable, and fast. Nine components, each derived from specific sections of the paper, together form a closed-loop system with self-healing properties. The 6% latency overhead is negligible. The economic self-correction (slashed bonds offsetting retry costs) is immediate. The quality improvement is qualitative — from *"Code looks okay"* to specific, actionable security findings.
 
 The framework's most important property is not any single component, but their *composition* — which is itself the central insight of [1]. The five pillars are not independent checklists; they are interdependent requirements that must be satisfied simultaneously. Cognitive friction gates delegation (§2.3 of [1]). Graduated authority scales constraints (§4.6, §4.7). Bonds enforce accountability (§4.2, §4.8). Verification catches violations (§4.8). Reputation learns from outcomes (§4.6). Re-delegation recovers from failures (§4.4). Each component is necessary. Together, they are sufficient.
 
-Naive delegation is not a starting point to be improved later. It is a liability. Intelligent delegation is not an aspiration. It is the Tomasev et al. framework rendered as 550 lines of TypeScript that runs in 3 seconds.
+Naive delegation is not a starting point to be improved later. It is a liability. Intelligent delegation is not an aspiration. It is Google DeepMind's *Intelligent AI Delegation* framework rendered as [550 lines of TypeScript](https://github.com/oldeucryptoboi/KarnEvil9/tree/master/packages/swarm/src) that runs in 3 seconds.
 
 ---
 
@@ -579,7 +579,7 @@ Naive delegation is not a starting point to be improved later. It is a liability
 # Prerequisites: Node.js 20+, pnpm 9.15+
 
 # Clone and install
-git clone <repository-url>
+git clone https://github.com/oldeucryptoboi/KarnEvil9.git
 pnpm install
 
 # Build the swarm package
@@ -597,15 +597,15 @@ npx tsx scripts/naive-vs-intelligent-demo.ts
 
 | Component | Constructor | Key Method |
 |-----------|-------------|------------|
-| `CognitiveFrictionEngine` | `(config?, emitEvent?)` | `assess(taskAttrs, depth, trust, maxDepth) → FrictionAssessment` |
-| `LiabilityFirebreak` | `(policy?, emitEvent?)` | `evaluate(depth, taskAttrs?, slo?) → FirebreakDecision` |
-| `DelegateeRouter` | `(emitEvent?)` | `route(subTask) → RoutingDecision` |
-| `getTrustTier` | — | `(trustScore, config?) → "low" \| "medium" \| "high"` |
-| `authorityFromTrust` | — | `(trust, baseSLO, baseMon, basePerm?, config?) → { slo, monitoring, permission_boundary, trust_tier }` |
-| `EscrowManager` | `(filePath, bondReq?, emit?)` | `deposit()`, `holdBond()`, `slashBond()`, `releaseBond()` |
-| `OutcomeVerifier` | `(config?)` | `verify({ result, contract, attestation, chain }) → VerificationResult` |
-| `ConsensusVerifier` | `(config?, emit?)` | `createRound()`, `submitVerification()`, `evaluateRound()` |
-| `ReputationStore` | `(filePath)` | `recordOutcome()`, `getTrustScore()`, `getReputation()` |
+| [`CognitiveFrictionEngine`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/cognitive-friction.ts) | `(config?, emitEvent?)` | `assess(taskAttrs, depth, trust, maxDepth) → FrictionAssessment` |
+| [`LiabilityFirebreak`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/liability-firebreak.ts) | `(policy?, emitEvent?)` | `evaluate(depth, taskAttrs?, slo?) → FirebreakDecision` |
+| [`DelegateeRouter`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/delegatee-router.ts) | `(emitEvent?)` | `route(subTask) → RoutingDecision` |
+| [`getTrustTier`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/graduated-authority.ts) | — | `(trustScore, config?) → "low" \| "medium" \| "high"` |
+| [`authorityFromTrust`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/graduated-authority.ts) | — | `(trust, baseSLO, baseMon, basePerm?, config?) → { slo, monitoring, permission_boundary, trust_tier }` |
+| [`EscrowManager`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/escrow-manager.ts) | `(filePath, bondReq?, emit?)` | `deposit()`, `holdBond()`, `slashBond()`, `releaseBond()` |
+| [`OutcomeVerifier`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/outcome-verifier.ts) | `(config?)` | `verify({ result, contract, attestation, chain }) → VerificationResult` |
+| [`ConsensusVerifier`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/consensus-verifier.ts) | `(config?, emit?)` | `createRound()`, `submitVerification()`, `evaluateRound()` |
+| [`ReputationStore`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/reputation-store.ts) | `(filePath)` | `recordOutcome()`, `getTrustScore()`, `getReputation()` |
 
 ## Appendix C: Trust Score Worked Example
 

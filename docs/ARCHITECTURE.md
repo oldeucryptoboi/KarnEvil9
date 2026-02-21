@@ -13,23 +13,23 @@ KarnEvil9 converts a natural-language task into a structured plan of tool invoca
 
 ```
 +---------------------------------------------------------------------+
-|                         Entry Points                                 |
-|   CLI (commander)    REST API (express 5)    Browser Relay (ws)      |
-+----------+------------------+-----------------------+----------------+
+|                         Entry Points                                |
+|   CLI (commander)    REST API (express 5)    Browser Relay (ws)     |
++----------+------------------+-----------------------+---------------+
            |                  |                       |
            v                  v                       |
 +---------------------------------------------+       |
-|                  Kernel                      |       |
-|  Session lifecycle / Plan+Execute phases     |       |
-|  Futility detection / Context budget mgmt    |       |
-|  Subagent delegation / Critic system         |       |
+|                  Kernel                     |       |
+|  Session lifecycle / Plan+Execute phases    |       |
+|  Futility detection / Context budget mgmt   |       |
+|  Subagent delegation / Critic system        |       |
 +--+------+------+------+------+------+-------+       |
    |      |      |      |      |      |               |
    v      v      v      v      v      v               |
 Planner  Tools  Perms  Journal Memory Plugins         |
-                  |                                    |
-                  v                                    |
-            PolicyEnforcer <---------------------------+
+                  |                                   |
+                  v                                   |
+            PolicyEnforcer <--------------------------+
                   |
                   v
          Built-in Handlers

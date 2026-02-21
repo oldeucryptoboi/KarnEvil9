@@ -19,6 +19,16 @@ const SECRET_VALUE_PATTERNS = [
   /github_pat_[A-Za-z0-9_]{22,}/g,       // GitHub fine-grained PATs
   /AKIA[0-9A-Z]{16}/g,                   // AWS access key IDs
   /Bearer\s+[A-Za-z0-9_.\-\/+=]{20,}/g,  // Bearer tokens
+  /eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g,  // JWT tokens (header.payload)
+  /glpat-[A-Za-z0-9_-]{20,}/g,           // GitLab personal access tokens
+  /npm_[A-Za-z0-9]{36,}/g,               // npm tokens
+  /pypi-[A-Za-z0-9]{36,}/g,              // PyPI tokens
+  /PRIVATE KEY-----/g,                    // PEM private key markers
+];
+
+// Patterns for secrets embedded in JSON (e.g. {"api_key": "value"})
+const JSON_SECRET_PATTERNS = [
+  /"(api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|private[_-]?key|password|credential|client[_-]?secret|api[_-]?secret|secret)"\s*:\s*"([^"]{8,})"/gi,
 ];
 
 const SENSITIVE_KEY_PATTERN = new RegExp(
@@ -49,6 +59,11 @@ export function redactSecrets(text: string): string {
   // Redact known secret value patterns anywhere in the output
   for (const pattern of SECRET_VALUE_PATTERNS) {
     result = result.replace(pattern, "[REDACTED]");
+  }
+
+  // Redact JSON-embedded secrets (preserving the key, replacing the value)
+  for (const pattern of JSON_SECRET_PATTERNS) {
+    result = result.replace(pattern, '"$1": "[REDACTED]"');
   }
 
   return result;

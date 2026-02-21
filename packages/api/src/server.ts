@@ -50,10 +50,17 @@ export class RateLimiter {
   }
 }
 
-function getClientIP(req: IncomingMessage): string {
-  // Do not trust X-Forwarded-For — it is trivially spoofable without a trusted reverse proxy.
-  // Use the direct socket address for rate limiting.
-  return req.socket.remoteAddress ?? "unknown";
+function getClientIP(req: IncomingMessage, trustedProxies?: string[]): string {
+  const directIp = req.socket.remoteAddress ?? "unknown";
+  // Only trust X-Forwarded-For when the direct connection comes from a known reverse proxy.
+  if (trustedProxies && trustedProxies.length > 0 && trustedProxies.includes(directIp)) {
+    const forwarded = req.headers["x-forwarded-for"];
+    if (typeof forwarded === "string") {
+      const clientIp = forwarded.split(",")[0]?.trim();
+      if (clientIp) return clientIp;
+    }
+  }
+  return directIp;
 }
 
 // ─── Input Validation ──────────────────────────────────────────────
@@ -137,6 +144,7 @@ interface PendingApproval {
   resolve: (decision: ApprovalDecision) => void;
   request: unknown;
   timer: ReturnType<typeof setTimeout>;
+  created_at: number;
 }
 
 interface SSEClient {
@@ -171,6 +179,8 @@ export interface ApiServerConfig {
   approvalTimeoutMs?: number;
   corsOrigins?: string | string[];
   swarm?: MeshManager;
+  /** IP addresses of trusted reverse proxies; enables X-Forwarded-For parsing. */
+  trustedProxies?: string[];
 }
 
 export class ApiServer {
@@ -197,6 +207,7 @@ export class ApiServer {
   private swarm?: MeshManager;
   private approvalTimeoutMs: number;
   private corsOrigins?: string | string[];
+  private trustedProxies?: string[];
   private httpServer?: Server;
   private rateLimiter: RateLimiter;
   private rateLimiterPruneInterval?: ReturnType<typeof setInterval>;
@@ -225,7 +236,7 @@ export class ApiServer {
       this.journal = journal;
       // toolRuntime, permissions, planner remain undefined (optional)
       this.defaultMode = "mock";
-      this.defaultLimits = { max_steps: 50, max_duration_ms: 600000, max_cost_usd: 10, max_tokens: 500000, max_iterations: 35 };
+      this.defaultLimits = { max_steps: 30, max_duration_ms: 300000, max_cost_usd: 5, max_tokens: 200000, max_iterations: 15 };
       this.defaultPolicy = { allowed_paths: [], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
       this.maxConcurrentSessions = 50;
       this.maxSseClientsPerSession = 10;
@@ -242,7 +253,7 @@ export class ApiServer {
       this.planner = config.planner;
       this.pluginRegistry = config.pluginRegistry;
       this.defaultMode = config.defaultMode ?? "mock";
-      this.defaultLimits = config.defaultLimits ?? { max_steps: 50, max_duration_ms: 600000, max_cost_usd: 10, max_tokens: 500000, max_iterations: 35 };
+      this.defaultLimits = config.defaultLimits ?? { max_steps: 30, max_duration_ms: 300000, max_cost_usd: 5, max_tokens: 200000, max_iterations: 15 };
       this.defaultPolicy = config.defaultPolicy ?? { allowed_paths: [], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
       this.maxConcurrentSessions = config.maxConcurrentSessions ?? 50;
       this.maxSseClientsPerSession = config.maxSseClientsPerSession ?? 10;
@@ -253,6 +264,7 @@ export class ApiServer {
       this.swarm = config.swarm;
       this.approvalTimeoutMs = config.approvalTimeoutMs ?? 300000; // 5 minutes
       this.corsOrigins = config.corsOrigins;
+      this.trustedProxies = config.trustedProxies;
       this.rateLimiter = new RateLimiter();
     }
     if (this.metricsCollector) {
@@ -301,7 +313,7 @@ export class ApiServer {
         resolve("deny"); // Auto-deny on timeout
       }
     }, this.approvalTimeoutMs);
-    this.pendingApprovals.set(requestId, { resolve, request, timer });
+    this.pendingApprovals.set(requestId, { resolve, request, timer, created_at: Date.now() });
 
     // Broadcast approve.needed to WS clients tracking this session
     const req = request as Record<string, unknown> | undefined;
@@ -671,13 +683,15 @@ export class ApiServer {
           res.status(401).json({ error: "Unauthorized" });
           return;
         }
+        // Strip the raw token so it cannot leak in error handler logs
+        delete req.headers.authorization;
         next();
       });
     }
 
     // Rate limiting — applied after auth, before business routes
     router.use((req, res, next) => {
-      const ip = getClientIP(req);
+      const ip = getClientIP(req, this.trustedProxies);
       const result = this.rateLimiter.check(ip);
       res.setHeader("X-RateLimit-Remaining", String(result.remaining));
       res.setHeader("X-RateLimit-Reset", String(Math.ceil(result.resetAt / 1000)));
@@ -881,13 +895,21 @@ export class ApiServer {
       if (approvalError) { res.status(400).json({ error: approvalError }); return; }
       const approval = this.pendingApprovals.get(req.params.id!);
       if (!approval) { res.status(404).json({ error: "Approval not found" }); return; }
+      // Reject approvals that have been pending longer than twice the timeout
+      const age = Date.now() - approval.created_at;
+      if (age > this.approvalTimeoutMs * 2) {
+        clearTimeout(approval.timer);
+        this.pendingApprovals.delete(req.params.id!);
+        res.status(410).json({ error: "Approval request has expired" });
+        return;
+      }
       const { decision } = req.body as { decision: ApprovalDecision };
       clearTimeout(approval.timer);
       approval.resolve(decision);
       this.pendingApprovals.delete(req.params.id!);
       // Audit trail: log who approved what
       const requestId = req.params.id!;
-      const sourceIp = getClientIP(req);
+      const sourceIp = getClientIP(req, this.trustedProxies);
       const decisionStr = typeof decision === "string" ? decision : (decision as unknown as Record<string,unknown>).type;
       console.log(`[api] Approval resolved: request_id=${requestId} decision=${decisionStr} source_ip=${sourceIp}`);
       res.json({ status: "resolved", decision });

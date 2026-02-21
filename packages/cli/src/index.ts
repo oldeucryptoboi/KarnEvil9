@@ -456,6 +456,12 @@ program.command("server").description("Start the API server")
           apiBaseUrl: `http://localhost:${port}`,
           apiToken,
         },
+        "twitter": {
+          sessionFactory: sharedSessionFactory,
+          journal,
+          apiBaseUrl: `http://localhost:${port}`,
+          apiToken,
+        },
         "swarm": {
           meshManager,
           workDistributor,

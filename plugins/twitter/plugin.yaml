@@ -1,0 +1,31 @@
+id: twitter
+name: X/Twitter Integration
+version: "1.0.0"
+description: Bidirectional X/Twitter integration — receive tasks via DMs, post tweets, handle approvals
+entry: index.js
+permissions:
+  - twitter:send:tweets
+  - twitter:send:dms
+  - twitter:receive:events
+config_schema:
+  type: object
+  properties:
+    sessionFactory:
+      description: Session factory function (injected at runtime)
+    journal:
+      description: Journal instance for event subscription (injected at runtime)
+    apiBaseUrl:
+      description: Base URL of the KarnEvil9 API server (injected at runtime)
+    apiToken:
+      description: KarnEvil9 API token for authenticated calls (injected at runtime)
+provides:
+  tools:
+    - post-tweet
+    - send-twitter-dm
+  hooks:
+    - after_session_end
+  routes:
+    - status
+    - conversations
+  services:
+    - twitter-connection

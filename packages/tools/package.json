@@ -20,5 +20,18 @@
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9"
-  }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oldeucryptoboi/KarnEvil9.git",
+    "directory": "packages/tools"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "sideEffects": false
 }

@@ -15,5 +15,18 @@
     "@karnevil9/schemas": "workspace:*",
     "@karnevil9/journal": "workspace:*",
     "prom-client": "^15.1.0"
-  }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oldeucryptoboi/KarnEvil9.git",
+    "directory": "packages/metrics"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "sideEffects": false
 }

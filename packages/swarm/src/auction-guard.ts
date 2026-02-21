@@ -1,4 +1,4 @@
-import { randomUUID, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { JournalEventType } from "@karnevil9/schemas";
 import type { AuctionGuardConfig, SealedBid, BidCommitment, BidObject } from "./types.js";
 import { DEFAULT_AUCTION_GUARD_CONFIG } from "./types.js";

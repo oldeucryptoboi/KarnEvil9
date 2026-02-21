@@ -11,8 +11,10 @@ function isTransientError(err: unknown): boolean {
   // Network errors
   if (msg.includes("econnreset") || msg.includes("econnrefused") || msg.includes("etimedout") || msg.includes("fetch failed") || msg.includes("socket hang up")) return true;
   // HTTP 5xx or 429 from SDK errors
-  const status = (err as unknown as Record<string, unknown>).status as number | undefined;
-  if (status !== undefined && (status === 429 || status >= 500)) return true;
+  if ("status" in err && typeof (err as Record<string, unknown>).status === "number") {
+    const status = (err as Record<string, unknown>).status as number;
+    if (status === 429 || status >= 500) return true;
+  }
   return false;
 }
 

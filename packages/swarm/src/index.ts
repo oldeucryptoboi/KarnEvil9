@@ -106,7 +106,7 @@ export { DataAccessGuard } from "./data-access-guard.js";
 
 // Gap 5: Push-Based Monitoring
 export { MonitoringStream, MONITORING_LEVEL_ORDINAL, classifyEventLevel, filterEventForLevel } from "./monitoring-stream.js";
-export type { MonitoringStreamConfig } from "./monitoring-stream.js";
+export type { MonitoringStreamConfig, SSEResponse } from "./monitoring-stream.js";
 
 // ─── Phase 4: Intelligent Delegation Paper Gaps ─────────────────────
 

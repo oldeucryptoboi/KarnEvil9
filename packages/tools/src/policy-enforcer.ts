@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { realpath } from "node:fs/promises";
 import { lookup } from "node:dns/promises";
-import { KarnEvil9Error } from "@karnevil9/schemas";
+import { KarnEvil9Error, withTimeout } from "@karnevil9/schemas";
 
 export class PolicyViolationError extends KarnEvil9Error {
   constructor(message: string) {
@@ -81,23 +81,28 @@ export function assertPathAllowed(
  * For non-existent paths (e.g., write targets), resolves the closest existing
  * ancestor to detect symlinks in the parent chain.
  */
+const PATH_RESOLVE_TIMEOUT_MS = 5_000;
+
 export async function assertPathAllowedReal(
   targetPath: string,
   allowedPaths: string[]
 ): Promise<void> {
   if (allowedPaths.length === 0) return;
-  const resolved = await resolveReal(targetPath);
-  const allowed = await Promise.all(
-    allowedPaths.map(async (p) => {
-      const resolvedAllowed = await resolveReal(p);
-      return resolved === resolvedAllowed || resolved.startsWith(resolvedAllowed + "/");
-    })
-  );
-  if (!allowed.some(Boolean)) {
-    throw new PolicyViolationError(
-      `Path "${resolved}" is outside allowed paths (symlink-resolved): ${allowedPaths.join(", ")}`
+  const inner = async () => {
+    const resolved = await resolveReal(targetPath);
+    const allowed = await Promise.all(
+      allowedPaths.map(async (p) => {
+        const resolvedAllowed = await resolveReal(p);
+        return resolved === resolvedAllowed || resolved.startsWith(resolvedAllowed + "/");
+      })
     );
-  }
+    if (!allowed.some(Boolean)) {
+      throw new PolicyViolationError(
+        `Path "${resolved}" is outside allowed paths (symlink-resolved): ${allowedPaths.join(", ")}`
+      );
+    }
+  };
+  await withTimeout(inner(), PATH_RESOLVE_TIMEOUT_MS, "Path resolution");
 }
 
 /**

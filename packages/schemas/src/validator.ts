@@ -6,7 +6,10 @@ import { JournalEventSchema } from "./journal-event.schema.js";
 import { PluginManifestSchema } from "./plugin-manifest.schema.js";
 
 const ajv = new (Ajv.default ?? Ajv)({ allErrors: true, strict: false });
-((addFormats as any).default ?? addFormats)(ajv);
+// ajv-formats has a nested .default in ESM due to CJS interop — resolve it safely.
+type FormatsFn = (instance: unknown) => void;
+const applyFormats: FormatsFn = (addFormats as unknown as { default?: FormatsFn }).default ?? (addFormats as unknown as FormatsFn);
+applyFormats(ajv);
 
 const schemaCache = new Map<string, ValidateFunction>();
 

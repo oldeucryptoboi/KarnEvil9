@@ -308,7 +308,7 @@ export class ExtensionDriver implements BrowserDriver {
     }
 
     // Create CDPClient in bridge mode using this WebSocket
-    this.cdp = new CDPClient({ ws: ws as any });
+    this.cdp = new CDPClient({ ws: ws as unknown as import("ws").default });
     await this.cdp.connect();
 
     // Enable required domains

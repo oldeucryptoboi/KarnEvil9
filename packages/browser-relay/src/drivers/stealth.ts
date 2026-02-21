@@ -42,10 +42,10 @@ export class StealthDriver extends ManagedDriver {
       const StealthPlugin = stealthMod.default ?? stealthMod;
       chromium.use(StealthPlugin());
 
-      browser = await (chromium as any).launch({
+      browser = await (chromium as unknown as { launch(opts: Record<string, unknown>): Promise<PwBrowser> }).launch({
         headless: this.headless,
         args: STEALTH_ARGS,
-      }) as PwBrowser;
+      });
     } catch {
       // playwright-extra not installed — fall back to base ManagedDriver stealth
       return super.getPage();

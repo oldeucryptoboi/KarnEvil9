@@ -540,7 +540,7 @@ export class VaultManager {
     if (!this.vectorStore.size()) return [];
 
     // Need embedder to embed the query
-    const embedder = (this.vectorStore as any).embedder as EmbedderFn | null;
+    const embedder = this.vectorStore.getEmbedder();
     if (!embedder) throw new Error("No embedder configured for semantic search");
 
     const [queryVec] = await embedder([query]);

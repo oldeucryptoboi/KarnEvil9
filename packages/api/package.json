@@ -30,5 +30,18 @@
     "@karnevil9/planner": "workspace:*",
     "@types/express": "^5.0.0",
     "@types/ws": "^8.0.0"
-  }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oldeucryptoboi/KarnEvil9.git",
+    "directory": "packages/api"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "sideEffects": false
 }

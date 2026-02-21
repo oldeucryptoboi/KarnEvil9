@@ -14,5 +14,18 @@
   "dependencies": {
     "@karnevil9/schemas": "workspace:*",
     "uuid": "^11.0.0"
-  }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oldeucryptoboi/KarnEvil9.git",
+    "directory": "packages/planner"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "sideEffects": false
 }

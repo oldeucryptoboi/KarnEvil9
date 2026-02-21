@@ -335,12 +335,15 @@ export class ManagedDriver implements BrowserDriver {
         ...(needsStealthPatches ? STEALTH_CONTEXT_OPTS : { viewport: { width: 1920, height: 1080 }, locale: "en-US" }),
       };
       const persistentCtx = await pw.chromium.launchPersistentContext(this.userDataDir, contextOpts);
+      // PersistentContext is both a BrowserContext (pages, cookies) and owns the browser.
+      // Playwright types don't express the dual nature, so cast once here.
+      const ctx = persistentCtx as unknown as PwContext;
       this.browser = persistentCtx as unknown as PwBrowser;
-      this.context = persistentCtx as unknown as PwContext;
+      this.context = ctx;
       if (needsStealthPatches) {
-        await (persistentCtx as unknown as PwContext).addInitScript(STEALTH_INIT_SCRIPT);
+        await ctx.addInitScript(STEALTH_INIT_SCRIPT);
       }
-      this.page = await (persistentCtx as unknown as PwContext).newPage();
+      this.page = await ctx.newPage();
     } else {
       this.browser = await pw.chromium.launch(launchOpts);
 

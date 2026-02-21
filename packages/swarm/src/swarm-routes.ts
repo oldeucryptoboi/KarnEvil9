@@ -4,7 +4,7 @@ import type { WorkDistributor } from "./work-distributor.js";
 import type { ReputationStore } from "./reputation-store.js";
 import type { ContractStore } from "./delegation-contract.js";
 import type { ExternalTriggerHandler } from "./external-trigger-handler.js";
-import type { MonitoringStream } from "./monitoring-stream.js";
+import type { MonitoringStream, SSEResponse } from "./monitoring-stream.js";
 import type { AnomalyDetector } from "./anomaly-detector.js";
 import type { DisputeStore } from "./dispute-store.js";
 import type { CredentialVerifier } from "./credential-verifier.js";
@@ -29,6 +29,7 @@ import type {
   TaskRFQ,
   BidObject,
   ProofOfWork,
+  ContractSLO,
 } from "./types.js";
 
 export interface SwarmRoute {
@@ -322,7 +323,7 @@ export function createSwarmRoutes(
     if (req.query.level) {
       filter.level = req.query.level as MonitoringLevel;
     }
-    monitoringStream.subscribe(res as unknown as { write: (data: string) => void; on: (event: string, cb: () => void) => void }, filter);
+    monitoringStream.subscribe(res as unknown as SSEResponse, filter);
   };
 
   // ─── Anomaly Routes ──────────────────────────────────────────────
@@ -593,7 +594,7 @@ export function createSwarmRoutes(
       res.status(400).json({ error: "requester_node_id and reason are required" });
       return;
     }
-    const request = contractStore.requestRenegotiation(contractId, body.requester_node_id, body.proposed_slo as any ?? {}, body.reason);
+    const request = contractStore.requestRenegotiation(contractId, body.requester_node_id, (body.proposed_slo ?? {}) as Partial<ContractSLO>, body.reason);
     if (!request) {
       res.status(400).json({ error: "Cannot renegotiate: contract not active or renegotiation already pending" });
       return;

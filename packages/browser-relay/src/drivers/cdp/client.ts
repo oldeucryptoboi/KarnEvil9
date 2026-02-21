@@ -28,7 +28,7 @@ export class CDPClient {
   private ws: WebSocket | null = null;
   private nextId = 1;
   private pending = new Map<number, {
-    resolve: (result: Record<string, unknown>) => void;
+    resolve: (result: unknown) => void;
     reject: (error: Error) => void;
   }>();
   private eventListeners = new Map<string, Set<EventCallback>>();
@@ -159,7 +159,7 @@ export class CDPClient {
 
     return new Promise<CDPMethodMap[M]["result"]>((resolve, reject) => {
       this.pending.set(id, {
-        resolve: resolve as unknown as (result: Record<string, unknown>) => void,
+        resolve: resolve as (result: unknown) => void,
         reject,
       });
       this.ws!.send(JSON.stringify(request));

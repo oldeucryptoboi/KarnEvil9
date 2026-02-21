@@ -536,7 +536,7 @@ program.command("chat").description("Interactive chat session via WebSocket")
     const client = new ChatClient({
       wsUrl,
       mode: opts.mode,
-      wsFactory: (url) => new WS(url) as unknown as ChatWebSocket,
+      wsFactory: (url) => new WS(url) as ChatWebSocket,
       terminal: new RealTerminalIO(),
       statusBar,
     });

@@ -12,6 +12,6 @@ sessions/
 .DS_Store
 coverage/
 *.tsbuildinfo
-.test-journal.jsonl
+**/.test-*.jsonl
 .test-data/
 package-lock.json

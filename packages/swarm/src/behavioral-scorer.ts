@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { JournalEventType } from "@karnevil9/schemas";
 import type { BehavioralObservation, BehavioralObservationType, BehavioralMetrics } from "./types.js";
 

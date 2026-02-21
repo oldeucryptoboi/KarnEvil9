@@ -5,6 +5,12 @@ export interface MonitoringStreamConfig {
   heartbeat_interval_ms?: number; // SSE keepalive (default 15000)
 }
 
+/** Minimal interface for an SSE-capable response (subset of Node's http.ServerResponse). */
+export interface SSEResponse {
+  write: (data: string) => void;
+  on: (event: string, cb: () => void) => void;
+}
+
 interface Subscriber {
   id: string;
   write: (data: string) => void;
@@ -39,7 +45,7 @@ export class MonitoringStream {
   }
 
   subscribe(
-    res: { write: (data: string) => void; on: (event: string, cb: () => void) => void },
+    res: SSEResponse,
     filter?: { task_id?: string; peer_node_id?: string; event_types?: MonitoringEventType[]; level?: MonitoringLevel },
   ): () => void {
     if (this.subscribers.size >= this.config.max_connections) {

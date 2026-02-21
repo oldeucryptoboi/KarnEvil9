@@ -12,6 +12,8 @@ export type ApprovalPromptFn = (
   request: PermissionRequest
 ) => Promise<ApprovalDecision>;
 
+const MAX_SESSION_CACHES = 10_000;
+
 export class PermissionEngine {
   private sessionCaches = new Map<string, Map<string, PermissionGrant>>();
   private constraintCache = new Map<string, PermissionConstraints>();
@@ -58,6 +60,11 @@ export class PermissionEngine {
   private getSessionCache(sessionId: string): Map<string, PermissionGrant> {
     let cache = this.sessionCaches.get(sessionId);
     if (!cache) {
+      // Evict oldest entry if at capacity
+      if (this.sessionCaches.size >= MAX_SESSION_CACHES) {
+        const oldest = this.sessionCaches.keys().next().value;
+        if (oldest !== undefined) this.sessionCaches.delete(oldest);
+      }
       cache = new Map();
       this.sessionCaches.set(sessionId, cache);
     }

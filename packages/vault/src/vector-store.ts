@@ -127,6 +127,10 @@ export class VectorStore {
     return this.vectors.size;
   }
 
+  getEmbedder(): EmbedderFn | null {
+    return this.embedder;
+  }
+
   hasEmbedding(objectId: string): boolean {
     return this.vectors.has(objectId);
   }

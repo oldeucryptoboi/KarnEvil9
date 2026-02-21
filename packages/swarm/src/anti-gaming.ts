@@ -1,4 +1,4 @@
-import type { GamingFlag, GamingFlagType, PeerTaskProfile, TaskComplexityRecord } from "./types.js";
+import type { GamingFlag, PeerTaskProfile, TaskComplexityRecord } from "./types.js";
 
 export interface AntiGamingConfig {
   cherry_pick_threshold: number;

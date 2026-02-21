@@ -17,6 +17,28 @@ import { timingSafeEqual } from "node:crypto";
 import { parse as parseUrl } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 
+// ─── Constants ────────────────────────────────────────────────────
+const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
+const SSE_MAX_LIFETIME_MS = 30 * 60 * 1000;       // 30 minutes
+const SSE_MAX_EVENT_BYTES = 100_000;               // 100 KB per broadcast event
+const KERNEL_EVICTION_DELAY_MS = 60_000;           // Keep session queryable 60s after completion
+const PLANNER_TIMEOUT_MS = 120_000;
+const SESSION_TIMEOUT_BUFFER_MS = 30_000;          // Extra buffer beyond max_duration_ms
+const RATE_LIMITER_PRUNE_INTERVAL_MS = 60_000;
+const MAX_JOURNAL_PAGE = 500;
+const MAX_REPLAY_EVENTS = 1000;
+const MAX_PLUGIN_BODY_BYTES = 1024 * 1024;         // 1 MB for plugin route bodies
+
+/** Structured error logging — omits stack traces in production. */
+function logError(label: string, err: unknown): void {
+  if (process.env.NODE_ENV === "production") {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[api] ${label}: ${msg}`);
+  } else {
+    console.error(`[api] ${label}:`, err);
+  }
+}
+
 // ─── Rate Limiter ──────────────────────────────────────────────────
 
 export class RateLimiter {
@@ -56,8 +78,14 @@ function getClientIP(req: IncomingMessage, trustedProxies?: string[]): string {
   if (trustedProxies && trustedProxies.length > 0 && trustedProxies.includes(directIp)) {
     const forwarded = req.headers["x-forwarded-for"];
     if (typeof forwarded === "string") {
-      const clientIp = forwarded.split(",")[0]?.trim();
-      if (clientIp) return clientIp;
+      // Walk the chain right-to-left: the rightmost untrusted IP is the real client.
+      const ips = forwarded.split(",").map((ip) => ip.trim());
+      for (let i = ips.length - 1; i >= 0; i--) {
+        const ip = ips[i]!;
+        if (!trustedProxies.includes(ip)) return ip;
+      }
+      // All IPs are trusted proxies — fall back to the leftmost
+      return ips[0] ?? directIp;
     }
   }
   return directIp;
@@ -183,6 +211,46 @@ export interface ApiServerConfig {
   trustedProxies?: string[];
 }
 
+/** Validate numeric config values at startup to fail fast on misconfigurations. */
+function validateApiConfig(config: ApiServerConfig): void {
+  const errors: string[] = [];
+  if (config.maxConcurrentSessions !== undefined) {
+    if (!Number.isInteger(config.maxConcurrentSessions) || config.maxConcurrentSessions < 1) {
+      errors.push("maxConcurrentSessions must be a positive integer");
+    }
+  }
+  if (config.maxSseClientsPerSession !== undefined) {
+    if (!Number.isInteger(config.maxSseClientsPerSession) || config.maxSseClientsPerSession < 1) {
+      errors.push("maxSseClientsPerSession must be a positive integer");
+    }
+  }
+  if (config.approvalTimeoutMs !== undefined) {
+    if (typeof config.approvalTimeoutMs !== "number" || config.approvalTimeoutMs < 0) {
+      errors.push("approvalTimeoutMs must be a non-negative number");
+    }
+  }
+  if (config.defaultLimits) {
+    const l = config.defaultLimits;
+    if (l.max_steps !== undefined && (!Number.isInteger(l.max_steps) || l.max_steps < 1)) {
+      errors.push("defaultLimits.max_steps must be a positive integer");
+    }
+    if (l.max_duration_ms !== undefined && (typeof l.max_duration_ms !== "number" || l.max_duration_ms < 1000)) {
+      errors.push("defaultLimits.max_duration_ms must be >= 1000");
+    }
+  }
+  if (config.trustedProxies) {
+    for (const p of config.trustedProxies) {
+      if (typeof p !== "string" || p.trim().length === 0) {
+        errors.push("trustedProxies entries must be non-empty strings");
+        break;
+      }
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(`Invalid API server configuration:\n  - ${errors.join("\n  - ")}`);
+  }
+}
+
 export class ApiServer {
   private app: express.Application;
   private kernels = new Map<string, Kernel>();
@@ -225,7 +293,7 @@ export class ApiServer {
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("X-Frame-Options", "DENY");
       res.setHeader("X-XSS-Protection", "0");
-      res.setHeader("Content-Security-Policy", "default-src 'none'");
+      res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
       res.setHeader("Cache-Control", "no-store");
       next();
     });
@@ -246,6 +314,7 @@ export class ApiServer {
       // No token in legacy constructor — unauthenticated
     } else {
       const config = configOrRegistry as ApiServerConfig;
+      validateApiConfig(config);
       this.toolRegistry = config.toolRegistry;
       this.toolRuntime = config.toolRuntime;
       this.journal = config.journal;
@@ -280,6 +349,9 @@ export class ApiServer {
       console.warn("[api] WARNING: Running in insecure mode — all endpoints are unauthenticated.");
     }
     // CORS middleware
+    if (this.corsOrigins === "*") {
+      console.warn("[api] WARNING: CORS wildcard origin '*' allows any website to make requests. Use explicit origins in production.");
+    }
     if (this.corsOrigins) {
       const origins = this.corsOrigins;
       this.app.use((req, res, next) => {
@@ -337,7 +409,9 @@ export class ApiServer {
     if (!clients) return;
     const event = data as JournalEvent;
     const seqId = event.seq !== undefined ? `id: ${event.seq}\n` : "";
-    const msg = `${seqId}data: ${JSON.stringify(data)}\n\n`;
+    const payload = JSON.stringify(data);
+    if (payload.length > SSE_MAX_EVENT_BYTES) return; // Drop oversized events to prevent memory pressure
+    const msg = `${seqId}data: ${payload}\n\n`;
     const toRemove: SSEClient[] = [];
     for (const client of clients) {
       if (client.paused) {
@@ -363,8 +437,7 @@ export class ApiServer {
 
   listen(port: number): Server {
     this.httpServer = this.app.listen(port, () => { console.log(`KarnEvil9 API listening on http://localhost:${port}`); });
-    // Prune rate limiter entries every 60 seconds
-    this.rateLimiterPruneInterval = setInterval(() => this.rateLimiter.prune(), 60000);
+    this.rateLimiterPruneInterval = setInterval(() => this.rateLimiter.prune(), RATE_LIMITER_PRUNE_INTERVAL_MS);
     this.rateLimiterPruneInterval.unref();
     this.setupWebSocket(this.httpServer);
     return this.httpServer;
@@ -537,7 +610,7 @@ export class ApiServer {
       limits: this.defaultLimits,
       policy: this.defaultPolicy,
       agentic: this.agentic,
-      plannerTimeoutMs: 120_000,
+      plannerTimeoutMs: PLANNER_TIMEOUT_MS,
     });
 
     const session = await kernel.createSession(task);
@@ -560,28 +633,7 @@ export class ApiServer {
       },
     });
 
-    // Run in background
-    const sessionTimeoutMs = this.defaultLimits.max_duration_ms + 30000;
-    const kernelPromise = kernel.run();
-    let sessionTimer: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      sessionTimer = setTimeout(() => reject(new Error(`Session timed out after ${sessionTimeoutMs}ms`)), sessionTimeoutMs);
-      sessionTimer.unref();
-    });
-    Promise.race([kernelPromise, timeoutPromise])
-      .catch((err) => {
-        this.broadcastEvent(session.session_id, {
-          type: "session.failed",
-          session_id: session.session_id,
-          payload: { error: err instanceof Error ? err.message : String(err) },
-          timestamp: new Date().toISOString(),
-        });
-      })
-      .finally(() => {
-        clearTimeout(sessionTimer!);
-        this.activeSessions.delete(session.session_id);
-        setTimeout(() => this.kernels.delete(session.session_id), 60000).unref();
-      });
+    this.runSessionLifecycle(kernel, session.session_id, this.defaultLimits.max_duration_ms);
   }
 
   private async handleWsAbort(msg: Record<string, unknown>): Promise<void> {
@@ -603,10 +655,34 @@ export class ApiServer {
     this.pendingApprovals.delete(requestId);
   }
 
+  /** Shared session lifecycle: timeout, error broadcast, cleanup. */
+  private runSessionLifecycle(kernel: Kernel, sessionId: string, maxDurationMs: number): void {
+    const sessionTimeoutMs = maxDurationMs + SESSION_TIMEOUT_BUFFER_MS;
+    const kernelPromise = kernel.run();
+    let sessionTimer: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      sessionTimer = setTimeout(() => reject(new Error(`Session timed out after ${sessionTimeoutMs}ms`)), sessionTimeoutMs);
+      sessionTimer.unref();
+    });
+    Promise.race([kernelPromise, timeoutPromise])
+      .catch((err) => {
+        this.broadcastEvent(sessionId, {
+          type: "session.failed",
+          session_id: sessionId,
+          payload: { error: err instanceof Error ? err.message : String(err) },
+          timestamp: new Date().toISOString(),
+        });
+      })
+      .finally(() => {
+        clearTimeout(sessionTimer!);
+        this.activeSessions.delete(sessionId);
+        setTimeout(() => this.kernels.delete(sessionId), KERNEL_EVICTION_DELAY_MS).unref();
+      });
+  }
+
   async discoverRecoverableSessions(): Promise<string[]> {
-    const allEvents = await this.journal.readAll();
     const sessions = new Map<string, Set<string>>();
-    for (const event of allEvents) {
+    for await (const event of this.journal.readAllStream()) {
       const types = sessions.get(event.session_id) ?? new Set();
       types.add(event.type);
       sessions.set(event.session_id, types);
@@ -674,12 +750,14 @@ export class ApiServer {
       router.use((req, res, next) => {
         const auth = req.headers.authorization;
         if (!auth || !auth.startsWith("Bearer ")) {
+          console.warn(`[api] AUTH_FAIL: missing/malformed Authorization header from ${getClientIP(req, this.trustedProxies)} ${req.method} ${req.path}`);
           res.status(401).json({ error: "Unauthorized" });
           return;
         }
         const provided = Buffer.from(auth.slice(7));
         const expected = Buffer.from(token);
         if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+          console.warn(`[api] AUTH_FAIL: invalid token from ${getClientIP(req, this.trustedProxies)} ${req.method} ${req.path}`);
           res.status(401).json({ error: "Unauthorized" });
           return;
         }
@@ -761,42 +839,20 @@ export class ApiServer {
             limits: effectiveLimits,
             policy: this.defaultPolicy,
             agentic: this.agentic,
-            plannerTimeoutMs: 120_000,
+            plannerTimeoutMs: PLANNER_TIMEOUT_MS,
           };
           const kernel = new KernelClass(kernelConfig);
           const session = await kernel.createSession(task);
           this.kernels.set(session.session_id, kernel);
           this.activeSessions.add(session.session_id);
 
-          // Run in background — enforce outer timeout, clean up on completion
-          const sessionTimeoutMs = effectiveLimits.max_duration_ms + 30000;
-          const kernelPromise = kernel.run();
-          let sessionTimer: ReturnType<typeof setTimeout>;
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            sessionTimer = setTimeout(() => reject(new Error(`Session timed out after ${sessionTimeoutMs}ms`)), sessionTimeoutMs);
-            sessionTimer.unref();
-          });
-          Promise.race([kernelPromise, timeoutPromise])
-            .catch((err) => {
-              this.broadcastEvent(session.session_id, {
-                type: "session.failed",
-                session_id: session.session_id,
-                payload: { error: err instanceof Error ? err.message : String(err) },
-                timestamp: new Date().toISOString(),
-              });
-            })
-            .finally(() => {
-              clearTimeout(sessionTimer!);
-              this.activeSessions.delete(session.session_id);
-              // Keep session queryable for 60s after completion, then evict
-              setTimeout(() => this.kernels.delete(session.session_id), 60000).unref();
-            });
+          this.runSessionLifecycle(kernel, session.session_id, effectiveLimits.max_duration_ms);
 
           res.json({ session_id: session.session_id, status: session.status, task });
         } else {
           res.json({ task, message: "Task created. Use a kernel to start a session." });
         }
-      } catch (err) { console.error("[api] POST /sessions error:", err); res.status(500).json({ error: "Internal server error" }); }
+      } catch (err) { logError("POST /sessions", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
     router.get("/sessions/:id", (req, res) => {
@@ -814,13 +870,12 @@ export class ApiServer {
 
     router.get("/sessions/:id/journal", async (req, res) => {
       try {
-        const MAX_JOURNAL_PAGE = 500;
         const offset = Math.max(0, parseInt(req.query.offset as string, 10) || 0);
         const limit = Math.min(Math.max(1, parseInt(req.query.limit as string, 10) || MAX_JOURNAL_PAGE), MAX_JOURNAL_PAGE);
-        const allEvents = await this.journal.readSession(req.params.id!);
-        const events = allEvents.slice(offset, offset + limit);
-        res.json({ events, total: allEvents.length, offset, limit });
-      } catch (err) { console.error("[api] GET /sessions/:id/journal error:", err); res.status(500).json({ error: "Internal server error" }); }
+        const total = this.journal.getSessionEventCount(req.params.id!);
+        const events = await this.journal.readSession(req.params.id!, { offset, limit });
+        res.json({ events, total, offset, limit });
+      } catch (err) { logError("GET /sessions/:id/journal", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
     router.get("/sessions/:id/stream", async (req, res) => {
@@ -854,24 +909,25 @@ export class ApiServer {
         }
       }
 
-      const client: SSEClient = { res: res as unknown as ServerResponse, paused: false, missedEvents: 0 };
+      // Express Response extends Node ServerResponse — cast once for SSE plumbing
+      const serverRes = res as unknown as ServerResponse;
+      const client: SSEClient = { res: serverRes, paused: false, missedEvents: 0 };
       const clients = this.sseClients.get(sessionId) ?? [];
       clients.push(client);
       this.sseClients.set(sessionId, clients);
 
       const keepalive = setInterval(() => {
         if (!client.paused) res.write(":keepalive\n\n");
-      }, 15000);
+      }, SSE_KEEPALIVE_INTERVAL_MS);
 
-      (res as unknown as ServerResponse).on("drain", () => {
+      serverRes.on("drain", () => {
         client.paused = false;
         client.missedEvents = 0;
       });
 
-      // Force-close after 30 minutes to prevent zombie connections
       const maxLifetime = setTimeout(() => {
         res.end();
-      }, 30 * 60 * 1000);
+      }, SSE_MAX_LIFETIME_MS);
       maxLifetime.unref();
 
       const cleanupSse = () => {
@@ -910,7 +966,7 @@ export class ApiServer {
       // Audit trail: log who approved what
       const requestId = req.params.id!;
       const sourceIp = getClientIP(req, this.trustedProxies);
-      const decisionStr = typeof decision === "string" ? decision : (decision as unknown as Record<string,unknown>).type;
+      const decisionStr = typeof decision === "string" ? decision : typeof decision === "object" && decision !== null && "type" in decision ? (decision as { type: string }).type : "unknown";
       console.log(`[api] Approval resolved: request_id=${requestId} decision=${decisionStr} source_ip=${sourceIp}`);
       res.json({ status: "resolved", decision });
     });
@@ -931,13 +987,12 @@ export class ApiServer {
 
     router.post("/sessions/:id/replay", async (req, res) => {
       try {
-        const MAX_REPLAY_EVENTS = 1000;
-        const allEvents = await this.journal.readSession(req.params.id!);
-        if (allEvents.length === 0) { res.status(404).json({ error: "No events found for session" }); return; }
-        const events = allEvents.slice(0, MAX_REPLAY_EVENTS);
-        const truncated = allEvents.length > MAX_REPLAY_EVENTS;
-        res.json({ session_id: req.params.id, event_count: events.length, total_events: allEvents.length, truncated, events });
-      } catch (err) { console.error("[api] POST /sessions/:id/replay error:", err); res.status(500).json({ error: "Internal server error" }); }
+        const totalEvents = this.journal.getSessionEventCount(req.params.id!);
+        if (totalEvents === 0) { res.status(404).json({ error: "No events found for session" }); return; }
+        const events = await this.journal.readSession(req.params.id!, { limit: MAX_REPLAY_EVENTS });
+        const truncated = totalEvents > MAX_REPLAY_EVENTS;
+        res.json({ session_id: req.params.id, event_count: events.length, total_events: totalEvents, truncated, events });
+      } catch (err) { logError("POST /sessions/:id/replay", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
     router.post("/sessions/:id/recover", async (req, res) => {
@@ -964,7 +1019,7 @@ export class ApiServer {
           mode: this.defaultMode,
           limits: this.defaultLimits,
           policy: this.defaultPolicy,
-          plannerTimeoutMs: 120_000,
+          plannerTimeoutMs: PLANNER_TIMEOUT_MS,
         });
         const session = await kernel.resumeSession(sessionId);
         if (!session) {
@@ -974,31 +1029,10 @@ export class ApiServer {
         this.kernels.set(sessionId, kernel);
         this.activeSessions.add(sessionId);
 
-        // Apply same lifecycle management as POST /sessions
-        const sessionTimeoutMs = this.defaultLimits.max_duration_ms + 30000;
-        const kernelPromise = kernel.run();
-        let sessionTimer: ReturnType<typeof setTimeout>;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          sessionTimer = setTimeout(() => reject(new Error(`Recovered session timed out after ${sessionTimeoutMs}ms`)), sessionTimeoutMs);
-          sessionTimer.unref();
-        });
-        Promise.race([kernelPromise, timeoutPromise])
-          .catch((err) => {
-            this.broadcastEvent(sessionId, {
-              type: "session.failed",
-              session_id: sessionId,
-              payload: { error: err instanceof Error ? err.message : String(err) },
-              timestamp: new Date().toISOString(),
-            });
-          })
-          .finally(() => {
-            clearTimeout(sessionTimer!);
-            this.activeSessions.delete(sessionId);
-            setTimeout(() => this.kernels.delete(sessionId), 60000).unref();
-          });
+        this.runSessionLifecycle(kernel, sessionId, this.defaultLimits.max_duration_ms);
 
         res.json({ session_id: sessionId, status: session.status });
-      } catch (err) { console.error("[api] POST /sessions/:id/recover error:", err); res.status(500).json({ error: "Internal server error" }); }
+      } catch (err) { logError("POST /sessions/:id/recover", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
     // ─── Plugin Management Routes ─────────────────────────────────────
@@ -1018,17 +1052,19 @@ export class ApiServer {
     router.post("/plugins/:id/reload", async (req, res) => {
       if (!this.pluginRegistry) { res.status(404).json({ error: "Plugin system not configured" }); return; }
       try {
+        console.log(`[api] PLUGIN_RELOAD: plugin_id=${req.params.id!} source_ip=${getClientIP(req, this.trustedProxies)}`);
         const state = await this.pluginRegistry.reloadPlugin(req.params.id!);
         res.json(state);
-      } catch (err) { console.error("[api] POST /plugins/:id/reload error:", err); res.status(500).json({ error: "Internal server error" }); }
+      } catch (err) { logError("POST /plugins/:id/reload", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
     router.post("/plugins/:id/unload", async (req, res) => {
       if (!this.pluginRegistry) { res.status(404).json({ error: "Plugin system not configured" }); return; }
       try {
+        console.log(`[api] PLUGIN_UNLOAD: plugin_id=${req.params.id!} source_ip=${getClientIP(req, this.trustedProxies)}`);
         await this.pluginRegistry.unloadPlugin(req.params.id!);
         res.json({ status: "unloaded" });
-      } catch (err) { console.error("[api] POST /plugins/:id/unload error:", err); res.status(500).json({ error: "Internal server error" }); }
+      } catch (err) { logError("POST /plugins/:id/unload", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
     // ─── Plugin-Provided Routes ─────────────────────────────────────
@@ -1047,6 +1083,11 @@ export class ApiServer {
       for (const route of this.pluginRegistry.getRoutes()) {
         const method = route.method.toLowerCase();
         registerRoute(method, route.path.replace("/api/", "/"), async (req: express.Request, res: express.Response) => {
+            // Validate plugin request body size
+            if (req.body && JSON.stringify(req.body).length > MAX_PLUGIN_BODY_BYTES) {
+              res.status(413).json({ error: "Plugin request body too large" });
+              return;
+            }
             try {
               await route.handler(
                 {
@@ -1072,7 +1113,7 @@ export class ApiServer {
                 }
               );
             } catch (err) {
-              console.error("[api] plugin route error:", err); res.status(500).json({ error: "Internal server error" });
+              logError("plugin route error", err); res.status(500).json({ error: "Internal server error" });
             }
           });
       }
@@ -1109,7 +1150,7 @@ export class ApiServer {
                 }
               );
             } catch (err) {
-              console.error("[api] scheduler route error:", err);
+              logError("scheduler route error", err);
               res.status(500).json({ error: "Internal server error" });
             }
           });
@@ -1123,7 +1164,7 @@ export class ApiServer {
         const { retain_sessions } = req.body as { retain_sessions?: string[] };
         const result = await this.journal.compact(retain_sessions);
         res.json(result);
-      } catch (err) { console.error("[api] POST /journal/compact error:", err); res.status(500).json({ error: "Internal server error" }); }
+      } catch (err) { logError("POST /journal/compact", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
     this.app.use("/api", router);

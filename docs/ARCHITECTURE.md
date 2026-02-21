@@ -12,28 +12,28 @@ KarnEvil9 converts a natural-language task into a structured plan of tool invoca
 - **Agentic** — iterative loop of plan-execute-observe-replan until the planner signals completion or a halt condition is reached.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         Entry Points                                │
-│   CLI (commander)    REST API (express 5)    Browser Relay (ws)     │
-└──────────┬──────────────────┬───────────────────────┬───────────────┘
-           │                  │                       │
-           ▼                  ▼                       │
-┌─────────────────────────────────────────────┐       │
-│                  Kernel                      │       │
-│  Session lifecycle · Plan/Execute phases     │       │
-│  Futility detection · Context budget mgmt    │       │
-│  Subagent delegation · Critic system         │       │
-└──┬──────┬──────┬──────┬──────┬──────┬───────┘       │
-   │      │      │      │      │      │               │
-   ▼      ▼      ▼      ▼      ▼      ▼               │
-Planner  Tools  Perms  Journal Memory Plugins         │
-                  │                                   │
-                  ▼                                   │
-            PolicyEnforcer ◄──────────────────────────┘
-                  │
-                  ▼
++---------------------------------------------------------------------+
+|                         Entry Points                                 |
+|   CLI (commander)    REST API (express 5)    Browser Relay (ws)      |
++----------+------------------+-----------------------+----------------+
+           |                  |                       |
+           v                  v                       |
++---------------------------------------------+       |
+|                  Kernel                      |       |
+|  Session lifecycle / Plan+Execute phases     |       |
+|  Futility detection / Context budget mgmt    |       |
+|  Subagent delegation / Critic system         |       |
++--+------+------+------+------+------+-------+       |
+   |      |      |      |      |      |               |
+   v      v      v      v      v      v               |
+Planner  Tools  Perms  Journal Memory Plugins         |
+                  |                                    |
+                  v                                    |
+            PolicyEnforcer <---------------------------+
+                  |
+                  v
          Built-in Handlers
-   (fs · shell · http · browser)
+   (fs / shell / http / browser)
 ```
 
 All packages share types from `@karnevil9/schemas` — the sole source of truth for interfaces, validators, and error codes.

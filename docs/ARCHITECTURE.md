@@ -18,18 +18,18 @@ KarnEvil9 converts a natural-language task into a structured plan of tool invoca
 └──────────┬──────────────────┬───────────────────────┬───────────────┘
            │                  │                       │
            ▼                  ▼                       │
-┌─────────────────────────────────────────────┐      │
-│                  Kernel                      │      │
-│  Session lifecycle · Plan/Execute phases     │      │
-│  Futility detection · Context budget mgmt    │      │
-│  Subagent delegation · Critic system         │      │
-└──┬──────┬──────┬──────┬──────┬──────┬───────┘      │
+┌─────────────────────────────────────────────┐       │
+│                  Kernel                      │       │
+│  Session lifecycle · Plan/Execute phases     │       │
+│  Futility detection · Context budget mgmt    │       │
+│  Subagent delegation · Critic system         │       │
+└──┬──────┬──────┬──────┬──────┬──────┬───────┘       │
    │      │      │      │      │      │               │
    ▼      ▼      ▼      ▼      ▼      ▼               │
-Planner  Tools  Perms  Journal Memory Plugins          │
-                  │                                    │
-                  ▼                                    │
-            PolicyEnforcer ◄───────────────────────────┘
+Planner  Tools  Perms  Journal Memory Plugins         │
+                  │                                   │
+                  ▼                                   │
+            PolicyEnforcer ◄──────────────────────────┘
                   │
                   ▼
          Built-in Handlers

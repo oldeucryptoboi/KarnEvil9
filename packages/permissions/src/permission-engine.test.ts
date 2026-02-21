@@ -595,8 +595,11 @@ describe("PermissionEngine edge cases", () => {
 
   it("concurrent checks for same scope prompt only once with allow_session", async () => {
     let resolvePrompt!: (d: ApprovalDecision) => void;
+    let resolvePromptCalled!: () => void;
+    const promptCalled = new Promise<void>((r) => { resolvePromptCalled = r; });
     const slowPrompt = async (_req: PermissionRequest): Promise<ApprovalDecision> => {
       promptCalls.push(_req);
+      resolvePromptCalled();
       return new Promise<ApprovalDecision>((r) => { resolvePrompt = r; });
     };
     const engine = new PermissionEngine(journal, slowPrompt);
@@ -610,8 +613,8 @@ describe("PermissionEngine edge cases", () => {
     const p1 = engine.check(req1);
     const p2 = engine.check(req2);
 
-    // Let microtasks settle — req1 should be prompting, req2 should be waiting
-    await new Promise((r) => setTimeout(r, 10));
+    // Wait for the prompt to actually be called (req2 is blocked on the prompt lock)
+    await promptCalled;
     expect(promptCalls.length).toBe(1);
 
     // Resolve the prompt with session grant

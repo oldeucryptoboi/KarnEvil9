@@ -326,14 +326,13 @@ export class ApiServer {
     const event = data as JournalEvent;
     const seqId = event.seq !== undefined ? `id: ${event.seq}\n` : "";
     const msg = `${seqId}data: ${JSON.stringify(data)}\n\n`;
+    const toRemove: SSEClient[] = [];
     for (const client of clients) {
       if (client.paused) {
         client.missedEvents++;
         if (client.missedEvents > 1000) {
           client.res.end();
-          const remaining = clients.filter((c) => c !== client);
-          if (remaining.length === 0) this.sseClients.delete(sessionId);
-          else this.sseClients.set(sessionId, remaining);
+          toRemove.push(client);
         }
         continue;
       }
@@ -342,6 +341,11 @@ export class ApiServer {
         client.paused = true;
         client.missedEvents++;
       }
+    }
+    if (toRemove.length > 0) {
+      const remaining = clients.filter((c) => !toRemove.includes(c));
+      if (remaining.length === 0) this.sseClients.delete(sessionId);
+      else this.sseClients.set(sessionId, remaining);
     }
   }
 
@@ -701,7 +705,7 @@ export class ApiServer {
             }
           );
         } catch {
-          res.status(500).set("Content-Type", "text/plain").end("# Error collecting metrics\n");
+          res.status(500).json({ error: "Error collecting metrics" });
         }
       });
     }

@@ -17,7 +17,7 @@ import type {
   HookName,
   HookResult,
 } from "@karnevil9/schemas";
-import { validatePlanData } from "@karnevil9/schemas";
+import { validatePlanData, withTimeout } from "@karnevil9/schemas";
 import type { Journal } from "@karnevil9/journal";
 import type { ToolRuntime } from "@karnevil9/tools";
 import type { ToolRegistry } from "@karnevil9/tools";
@@ -138,7 +138,10 @@ export class Kernel {
       throw new Error(`Session blocked by plugin: ${(hookResult as { reason: string }).reason}`);
     }
     if (hookResult.action === "modify" && hookResult.data) {
-      Object.assign(session, hookResult.data);
+      const data = hookResult.data;
+      if ("mode" in data) session.mode = data.mode as ExecutionMode;
+      if ("limits" in data) session.limits = data.limits as SessionLimits;
+      if ("policy" in data) session.policy = data.policy as PolicyProfile;
     }
 
     await this.config.journal.emit(session.session_id, "session.created", {
@@ -255,10 +258,15 @@ export class Kernel {
       this.subagentFindings = null; // Consume once
     }
 
-    // Merge before_plan hook data into planner snapshot
+    // Merge before_plan hook data into planner snapshot (only safe keys)
     const hookData = (beforePlanResult as { data?: Record<string, unknown> }).data;
     if (hookData && typeof hookData === "object") {
-      Object.assign(enrichedSnapshot, hookData);
+      const allowed = new Set(["hints", "constraints", "context", "relevant_memories", "subagent_findings"]);
+      for (const key of Object.keys(hookData)) {
+        if (allowed.has(key)) {
+          (enrichedSnapshot as Record<string, unknown>)[key] = hookData[key];
+        }
+      }
     }
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -272,20 +280,7 @@ export class Kernel {
           enrichedSnapshot,
           { policy: this.session.policy, limits: this.session.limits }
         );
-        let plannerTimer: ReturnType<typeof setTimeout> | undefined;
-        let planResult: PlanResult;
-        try {
-          planResult = timeoutMs > 0
-            ? await Promise.race([
-                planResultPromise,
-                new Promise<never>((_, reject) => {
-                  plannerTimer = setTimeout(() => reject(new Error(`Planner timed out after ${timeoutMs}ms`)), Math.max(1, timeoutMs));
-                }),
-              ])
-            : await planResultPromise;
-        } finally {
-          if (plannerTimer) clearTimeout(plannerTimer);
-        }
+        const planResult = await withTimeout(planResultPromise, timeoutMs, "Planner");
 
         const { plan, usage } = planResult;
 

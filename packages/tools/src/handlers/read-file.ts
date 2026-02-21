@@ -13,15 +13,16 @@ export const readFileHandler: ToolHandler = async (
   }
   const path = input.path;
   const fullPath = resolve(process.cwd(), path);
-  // Quick check first (sync), then symlink-safe check before actual read
+  // Quick check first (sync) — catches obvious violations cheaply
   assertPathAllowed(fullPath, policy.allowed_paths);
   assertNotSensitiveFile(fullPath);
   if (mode === "dry_run") {
     return { content: `[dry_run] Would read file: ${fullPath}`, exists: existsSync(fullPath), size_bytes: 0 };
   }
   if (!existsSync(fullPath)) return { content: "", exists: false, size_bytes: 0 };
-  // Resolve symlinks before reading to prevent traversal attacks
+  // Resolve symlinks BEFORE any I/O to close TOCTOU window
   await assertPathAllowedReal(fullPath, policy.allowed_paths);
+  assertNotSensitiveFile(await import("node:fs/promises").then(fs => fs.realpath(fullPath)));
   // Size cap: reject files larger than 10 MB to prevent memory exhaustion
   const MAX_FILE_SIZE = 10 * 1024 * 1024;
   const stats = await stat(fullPath);

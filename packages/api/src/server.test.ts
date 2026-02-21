@@ -3,6 +3,7 @@ import { resolve, join } from "node:path";
 import { rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { v4 as uuid } from "uuid";
+import http from "node:http";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocket } from "ws";
@@ -36,7 +37,7 @@ async function fetch(url: string, opts?: { method?: string; body?: unknown; head
   const parsed = new URL(url);
   const headers: Record<string, string> = { ...(body ? { "Content-Type": "application/json" } : {}), ...extraHeaders };
   return new Promise<{ status: number; json: () => Promise<any> }>((resolve, reject) => {
-    const req = (parsed.protocol === "https:" ? require("node:https") : require("node:http")).request(
+    const req = http.request(
       url,
       { method, headers },
       (res: any) => {
@@ -1114,7 +1115,7 @@ describe("ApiServer security hardening", () => {
     // Use raw http to check headers
     const res = await new Promise<{ headers: Record<string, string>; status: number }>((resolve, reject) => {
       const parsed = new URL(`${baseUrl}/api/health`);
-      require("node:http").request(parsed, (res: any) => {
+      http.request(parsed, (res: any) => {
         let _data = "";
         res.on("data", (chunk: string) => { _data += chunk; });
         res.on("end", () => {
@@ -1338,7 +1339,7 @@ describe("ApiServer CORS", () => {
   it("sets CORS headers for allowed origin", async () => {
     const res = await new Promise<{ headers: Record<string, string>; status: number }>((resolve, reject) => {
       const parsed = new URL(`${baseUrl}/api/health`);
-      require("node:http").request(parsed, { headers: { Origin: "http://localhost:3000" } }, (res: any) => {
+      http.request(parsed, { headers: { Origin: "http://localhost:3000" } }, (res: any) => {
         let _data = "";
         res.on("data", (chunk: string) => { _data += chunk; });
         res.on("end", () => { resolve({ headers: res.headers, status: res.statusCode }); });
@@ -1351,7 +1352,7 @@ describe("ApiServer CORS", () => {
   it("does not set CORS headers for disallowed origin", async () => {
     const res = await new Promise<{ headers: Record<string, string>; status: number }>((resolve, reject) => {
       const parsed = new URL(`${baseUrl}/api/health`);
-      require("node:http").request(parsed, { headers: { Origin: "http://evil.com" } }, (res: any) => {
+      http.request(parsed, { headers: { Origin: "http://evil.com" } }, (res: any) => {
         let _data = "";
         res.on("data", (chunk: string) => { _data += chunk; });
         res.on("end", () => { resolve({ headers: res.headers, status: res.statusCode }); });
@@ -1364,7 +1365,7 @@ describe("ApiServer CORS", () => {
   it("handles OPTIONS preflight for allowed origin", async () => {
     const res = await new Promise<{ headers: Record<string, string>; status: number }>((resolve, reject) => {
       const parsed = new URL(`${baseUrl}/api/tools`);
-      require("node:http").request(parsed, {
+      http.request(parsed, {
         method: "OPTIONS",
         headers: { Origin: "http://example.com" },
       }, (res: any) => {
@@ -2142,7 +2143,7 @@ describe("ApiServer SSE streaming", () => {
       let contentType = "";
       const gotEvent = new Promise<void>((resolve) => {
         const parsed = new URL(`${baseUrl}/api/sessions/sse-sess/stream`);
-        const req = require("node:http").request(parsed, (res: any) => {
+        const req = http.request(parsed, (res: any) => {
           contentType = res.headers["content-type"] ?? "";
           res.on("data", (chunk: Buffer) => {
             const text = chunk.toString();
@@ -2190,8 +2191,6 @@ describe("ApiServer SSE streaming", () => {
       s.listen(0, () => resolve(s));
     });
     const baseUrl = `http://127.0.0.1:${(httpServer.address() as AddressInfo).port}`;
-    const http = require("node:http");
-
     try {
       // First SSE connection — fire-and-forget (headers won't flush until data is written,
       // but the server registers the SSE client synchronously)

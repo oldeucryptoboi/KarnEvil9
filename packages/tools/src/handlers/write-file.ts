@@ -49,7 +49,9 @@ export const writeFileHandler: ToolHandler = async (
     return { written: false, bytes_written: Buffer.byteLength(content, "utf-8") };
   }
   await mkdir(dirname(fullPath), { recursive: true });
-  // Resolve symlinks before writing to prevent traversal attacks
+  // Resolve symlinks AFTER mkdir but BEFORE write to close TOCTOU window.
+  // assertPathAllowedReal resolves both the target AND allowed_paths through
+  // symlinks, so it handles macOS /var → /private/var correctly.
   await assertPathAllowedReal(fullPath, policy.allowed_paths);
   await writeFile(fullPath, content, "utf-8");
   return { written: true, bytes_written: Buffer.byteLength(content, "utf-8") };

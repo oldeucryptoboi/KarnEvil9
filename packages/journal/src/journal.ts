@@ -260,7 +260,11 @@ export class Journal {
     const content = await readFile(this.filePath, "utf-8");
     const lines = content.trim().split("\n").filter(Boolean);
     for (const line of lines) {
-      yield JSON.parse(line) as JournalEvent;
+      try {
+        yield JSON.parse(line) as JournalEvent;
+      } catch {
+        // Skip corrupted lines rather than crashing stream consumers
+      }
     }
   }
 

@@ -1,4 +1,4 @@
-import { generateKeyPairSync, sign, verify, createHash } from "node:crypto";
+import { generateKeyPairSync, sign, verify, createHash, createPrivateKey, createPublicKey } from "node:crypto";
 import type { Ed25519KeyPair, SwarmTaskResult, TaskAttestation } from "./types.js";
 
 export function generateEd25519KeyPair(): Ed25519KeyPair {
@@ -46,12 +46,10 @@ function importPublicKey(hexKey: string) {
 }
 
 function importPrivateKeySync(hexKey: string) {
-  const { createPrivateKey } = require("node:crypto") as typeof import("node:crypto");
   return createPrivateKey({ key: Buffer.from(hexKey, "hex"), format: "der", type: "pkcs8" });
 }
 
 function importPublicKeySync(hexKey: string) {
-  const { createPublicKey } = require("node:crypto") as typeof import("node:crypto");
   return createPublicKey({ key: Buffer.from(hexKey, "hex"), format: "der", type: "spki" });
 }
 

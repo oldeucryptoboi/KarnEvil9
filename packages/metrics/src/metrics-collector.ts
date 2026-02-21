@@ -19,7 +19,8 @@ export class MetricsCollector {
   private readonly prefix: string;
   private unsubscribe?: () => void;
 
-  // Internal tracking maps
+  // Internal tracking maps (bounded to prevent memory leaks in long-running processes)
+  private static readonly MAX_TRACKING_ENTRIES = 10000;
   private readonly plannerStartTimes = new Map<string, number>();
   private readonly stepToolNames = new Map<string, string>();
 
@@ -573,6 +574,10 @@ export class MetricsCollector {
         const toolName = this.extractToolName(event.payload);
         const stepId = event.payload.step_id as string | undefined;
         if (stepId && toolName) {
+          if (this.stepToolNames.size >= MetricsCollector.MAX_TRACKING_ENTRIES) {
+            const oldest = this.stepToolNames.keys().next().value;
+            if (oldest !== undefined) this.stepToolNames.delete(oldest);
+          }
           this.stepToolNames.set(stepId, toolName);
         }
         this.stepsTotal.inc({ status: "started", tool_name: toolName ?? "unknown" });
@@ -637,6 +642,11 @@ export class MetricsCollector {
 
       // ─── Planner Events ───────────────────────────────────────────
       case "planner.requested":
+        if (this.plannerStartTimes.size >= MetricsCollector.MAX_TRACKING_ENTRIES) {
+          // Evict oldest entry to prevent unbounded growth
+          const oldest = this.plannerStartTimes.keys().next().value;
+          if (oldest !== undefined) this.plannerStartTimes.delete(oldest);
+        }
         this.plannerStartTimes.set(event.session_id, Date.parse(event.timestamp));
         break;
 

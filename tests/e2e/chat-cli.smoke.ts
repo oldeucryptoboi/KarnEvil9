@@ -178,8 +178,8 @@ describe("Chat CLI REPL Smoke Tests", () => {
     const text = stripAnsi(c.output());
     // Should show session created
     expect(text).toMatch(/Session .+ created/);
-    // Should show journal events
-    expect(text).toContain("session.started");
+    // Should show journal events (session.started is suppressed by formatter, check session.created instead)
+    expect(text).toMatch(/session\.created/);
     // Prompt should be back (karnevil9> without [running])
     // We just verify the session reached terminal — the prompt state is a readline detail
   });

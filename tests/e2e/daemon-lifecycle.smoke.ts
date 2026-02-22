@@ -46,6 +46,7 @@ describe("Daemon Lifecycle Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner,
+      insecure: true,
     });
 
     const port = 30000 + Math.floor(Math.random() * 10000);
@@ -110,6 +111,7 @@ describe("Daemon Lifecycle Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner,
+      insecure: true,
     });
 
     const port = 30000 + Math.floor(Math.random() * 10000);
@@ -151,6 +153,7 @@ describe("Daemon Lifecycle Smoke", () => {
       permissions,
       planner,
       maxConcurrentSessions: 2,
+      insecure: true,
     });
 
     const port = 30000 + Math.floor(Math.random() * 10000);

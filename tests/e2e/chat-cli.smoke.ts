@@ -18,7 +18,7 @@ const NODE = process.execPath;
 
 /** Strip ANSI escape codes from a string */
 function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
+  return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/\x1b\].*?\x07/g, "");
 }
 
 /**
@@ -173,7 +173,7 @@ describe("Chat CLI REPL Smoke Tests", () => {
     await waitForOutput(c.output, "Session");
 
     // Wait for terminal event (session.completed or session.failed)
-    await waitForOutput(c.output, /session\.(completed|failed)/, 15000);
+    await waitForOutput(c.output, /Session (completed|failed)/, 15000);
 
     const text = stripAnsi(c.output());
     // Should show session created
@@ -219,7 +219,7 @@ describe("Chat CLI REPL Smoke Tests", () => {
     });
 
     // Wait for terminal event
-    await waitForOutput(c.output, /session\.(completed|failed|aborted)/, 15000);
+    await waitForOutput(c.output, /Session (completed|failed|aborted)/, 15000);
   });
 
   // ─── Server not running → error + retry ──────────────────────────
@@ -277,7 +277,7 @@ describe("Chat CLI REPL Smoke Tests", () => {
 
     // Submit on reconnected connection
     c.send("after restart");
-    await waitForOutput(c.output, /session\.(completed|failed)/, 15000);
+    await waitForOutput(c.output, /Session (completed|failed)/, 15000);
   });
 
   // ─── Auth rejection ──────────────────────────────────────────────
@@ -308,7 +308,7 @@ describe("Chat CLI REPL Smoke Tests", () => {
 
     // Session 1
     c.send("first task");
-    await waitForOutput(c.output, /session\.(completed|failed)/, 15000);
+    await waitForOutput(c.output, /Session (completed|failed)/, 15000);
 
     // Small delay to let readline settle
     await new Promise((r) => setTimeout(r, 200));

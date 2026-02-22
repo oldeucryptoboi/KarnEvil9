@@ -222,9 +222,9 @@ program.command("plan").description("Generate a plan without executing").argumen
     const { plan, usage } = await planner.generatePlan(task, registry.getSchemasForPlanner(), {}, {});
     console.log(JSON.stringify(plan, null, 2));
     if (usage && usage.total_tokens > 0) {
-      console.log(`\nTokens: ${usage.total_tokens.toLocaleString()} (${usage.input_tokens.toLocaleString()} in / ${usage.output_tokens.toLocaleString()} out)`);
+      console.error(`\nTokens: ${usage.total_tokens.toLocaleString()} (${usage.input_tokens.toLocaleString()} in / ${usage.output_tokens.toLocaleString()} out)`);
       if (usage.cost_usd !== undefined && usage.cost_usd > 0) {
-        console.log(`Estimated cost: $${usage.cost_usd.toFixed(4)}`);
+        console.error(`Estimated cost: $${usage.cost_usd.toFixed(4)}`);
       }
     }
   });

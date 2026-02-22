@@ -31,6 +31,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install Playwright browsers
+        run: pnpm --filter @karnevil9/browser-relay exec playwright install --with-deps chromium
+
       - name: Lint
         run: pnpm lint
 

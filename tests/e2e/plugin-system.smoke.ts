@@ -154,6 +154,7 @@ export async function register(api) {
       toolRegistry,
       journal,
       pluginRegistry,
+      insecure: true,
     });
 
     const port = 30000 + Math.floor(Math.random() * 10000);

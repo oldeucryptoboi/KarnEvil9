@@ -74,6 +74,7 @@ describe("Journal Lifecycle Smoke", () => {
     await journal1.init();
     await journal1.emit(sessionId, "session.created", { task_text: "restart test" });
     await journal1.emit(sessionId, "session.started", {});
+    await journal1.close();
 
     // Second journal instance reads them back
     const journal2 = new Journal(journalPath, { fsync: false, redact: false });

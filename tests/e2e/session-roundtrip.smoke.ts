@@ -266,6 +266,7 @@ describe("Session Roundtrip Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner,
+      insecure: true,
     });
 
     const port = 30000 + Math.floor(Math.random() * 10000);

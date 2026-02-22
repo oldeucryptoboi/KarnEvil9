@@ -6,5 +6,6 @@ export default defineConfig({
     environment: "node",
     include: ["tests/e2e/**/*.smoke.ts"],
     testTimeout: 30000,
+    fileParallelism: false,
   },
 });

@@ -1,0 +1,1 @@
+pnpm build && pnpm -r test -- --exclude='**/*.smoke.test.ts'

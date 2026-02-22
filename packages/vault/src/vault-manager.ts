@@ -470,13 +470,16 @@ export class VaultManager {
       const obj = await this.objectStore.get(entry.object_id);
       if (!obj) continue;
 
-      let match: RegExpExecArray | null;
-      while ((match = wikilinkPattern.exec(obj.content)) !== null) {
+      let match: RegExpExecArray | null = wikilinkPattern.exec(obj.content);
+      while (match !== null) {
         const target = match[1]!;
         const targetLower = target.toLowerCase();
 
         // Skip if target already exists
-        if (titleLookup.has(targetLower)) continue;
+        if (titleLookup.has(targetLower)) {
+          match = wikilinkPattern.exec(obj.content);
+          continue;
+        }
 
         // Create stub Note in _Inbox
         const stub = await this.objectStore.create(
@@ -503,6 +506,7 @@ export class VaultManager {
         // Track in lookup to prevent duplicate stubs within same run
         titleLookup.set(targetLower, stub.frontmatter.object_id);
         stubsCreated++;
+        match = wikilinkPattern.exec(obj.content);
       }
     }
 

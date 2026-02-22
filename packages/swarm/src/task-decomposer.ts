@@ -383,11 +383,12 @@ export class TaskDecomposer {
 
   computeVerifiabilityScore(decomposition: TaskDecomposition): number {
     if (decomposition.sub_tasks.length === 0) return 0;
-    const scores = decomposition.sub_tasks.map(st => {
+    const scores: number[] = decomposition.sub_tasks.map(st => {
       switch (st.attributes.verifiability) {
         case "high": return 1.0;
         case "medium": return 0.6;
         case "low": return 0.2;
+        default: return 0;
       }
     });
     return scores.reduce((sum, s) => sum + s, 0) / scores.length;

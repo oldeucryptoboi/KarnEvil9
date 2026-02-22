@@ -199,6 +199,13 @@ export class SignalClient {
     ]);
     this._nativeProcess = child;
 
+    child.on("error", (err) => {
+      this.logger?.error("signal-cli spawn error — disabling native receive", { error: err.message });
+      this._nativeProcess = null;
+      this.connected = false;
+      this._stopping = true; // Stop the retry loop — binary is missing
+    });
+
     let buffer = "";
     child.stdout.on("data", (data) => {
       buffer += data.toString();

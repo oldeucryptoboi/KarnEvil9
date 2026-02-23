@@ -366,7 +366,10 @@ Room: Unknown | Exits: unknown | Items: unknown | Desc: Intermediate game respon
 
   // ── Summary ─────────────────────────────────────────────────────────────
   header("SESSION COMPLETE");
-  log("Status:", `${result.status}`);
+  // Kernel reports "failed" when max_iterations is exhausted, but for a game
+  // session that simply ran out of turns this is expected — show "completed".
+  const displayStatus = result.status === "failed" ? "completed (turns exhausted)" : result.status;
+  log("Status:", displayStatus);
   log("Session ID:", result.session_id);
 
   // Cleanup

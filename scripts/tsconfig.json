@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "outDir": "../dist/scripts"
+  },
+  "include": ["apple2-zork-swarm.ts", "apple2-zork-frotz.ts", "apple2-zork-emulator.ts"]
+}

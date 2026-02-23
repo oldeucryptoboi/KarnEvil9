@@ -275,6 +275,13 @@ export async function register(api: PluginApi): Promise<void> {
   let lastNewRoomTurn = 0;
   let failCount = 0;
 
+  // Cross-hook communication via closure variables
+  // (kernel passes different ctx objects to before_tool_call vs after_tool_call)
+  let _lastCommand = "";
+  let _lastTaskId = "";
+  let _lastAuthority: ReturnType<typeof authorityFromTrust> | undefined;
+  let _lastStepToolName = "";
+
   // ── Register game-state service ─────────────────────────────────────────
 
   const gameStateService: PluginService = {
@@ -349,6 +356,8 @@ export async function register(api: PluginApi): Promise<void> {
 
   api.registerHook("before_step", async (ctx: HookContext): Promise<HookResult> => {
     const toolName = ctx.tool as string | undefined;
+    // Stash tool name for after_step (kernel doesn't pass tool to after_step ctx)
+    _lastStepToolName = toolName ?? "";
     // Only apply friction/firebreak to game command execution
     if (toolName !== "execute-game-command") return { action: "continue" };
 
@@ -406,9 +415,10 @@ export async function register(api: PluginApi): Promise<void> {
       { max_tokens: authority.slo.max_tokens, max_cost_usd: authority.slo.max_cost_usd ?? 0.02, max_duration_ms: authority.slo.max_duration_ms },
     );
 
-    // Stash task metadata for after_tool_call
-    (ctx as Record<string, unknown>)._taskId = taskId;
-    (ctx as Record<string, unknown>)._authority = authority;
+    // Stash for after_tool_call via closure (kernel uses separate ctx objects per hook)
+    _lastCommand = command;
+    _lastTaskId = taskId;
+    _lastAuthority = authority;
 
     return { action: "continue" };
   }, { priority: 20, timeout_ms: 5000 });
@@ -426,9 +436,8 @@ export async function register(api: PluginApi): Promise<void> {
       const success = result.success as boolean ?? false;
       const durationMs = (result.duration_ms as number) ?? 0;
 
-      // Get the command from the input
-      const input = ctx.input as Record<string, unknown> | undefined;
-      const command = (input?.command as string) ?? "";
+      // Get the command from closure (kernel doesn't pass input to after_tool_call)
+      const command = _lastCommand;
 
       // Update cartographer state
       cartState.lastFullScreen = screenText;
@@ -441,7 +450,7 @@ export async function register(api: PluginApi): Promise<void> {
 
       // Build a SwarmTaskResult for the framework
       const tacResult: SwarmTaskResult = {
-        task_id: (ctx as Record<string, unknown>)._taskId as string ?? `task-t-${turn}`,
+        task_id: _lastTaskId || `task-t-${turn}`,
         peer_node_id: tacticianId,
         peer_session_id: ctx.session_id,
         status: success ? "completed" : "failed",
@@ -452,7 +461,7 @@ export async function register(api: PluginApi): Promise<void> {
       };
 
       // Outcome verification (SLO check)
-      const authority = (ctx as Record<string, unknown>)._authority as ReturnType<typeof authorityFromTrust> | undefined;
+      const authority = _lastAuthority;
       const slo = authority?.slo ?? baseSLO;
       const contract: DelegationContract = {
         contract_id: `contract-${uuid().slice(0, 8)}`,
@@ -598,8 +607,8 @@ export async function register(api: PluginApi): Promise<void> {
   // ── after_step: consensus + anomaly + behavioral + checkpoint ───────────
 
   api.registerHook("after_step", async (ctx: HookContext): Promise<HookResult> => {
-    const toolName = ctx.tool as string | undefined;
-    if (toolName !== "execute-game-command") return { action: "observe" };
+    // Kernel doesn't pass tool name to after_step ctx — read from closure
+    if (_lastStepToolName !== "execute-game-command") return { action: "observe" };
 
     // Consensus: read screen independently
     const emulator = config.emulator;

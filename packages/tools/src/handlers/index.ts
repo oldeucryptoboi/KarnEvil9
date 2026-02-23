@@ -4,3 +4,10 @@ export { shellExecHandler, redactSecrets } from "./shell-exec.js";
 export { httpRequestHandler } from "./http-request.js";
 export { browserHandler, createBrowserHandler } from "./browser.js";
 export type { BrowserDriverLike } from "./browser.js";
+export {
+  executeGameCommandHandler,
+  parseGameScreenHandler,
+  setEmulator,
+  setCartographerFn,
+} from "./game-emulator.js";
+export type { EmulatorLike, CartographerFn } from "./game-emulator.js";

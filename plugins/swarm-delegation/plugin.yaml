@@ -1,0 +1,19 @@
+id: swarm-delegation
+name: Swarm Delegation Framework
+version: "1.0.0"
+description: >
+  DeepMind-inspired delegation framework for interactive fiction.
+  Provides escrow, reputation, firebreak, consensus, anomaly detection,
+  behavioral scoring, and re-delegation monitoring as kernel hooks.
+entry: index.ts
+permissions: []
+provides:
+  hooks:
+    - before_plan
+    - before_step
+    - after_step
+    - before_tool_call
+    - after_tool_call
+    - on_error
+  services:
+    - game-state

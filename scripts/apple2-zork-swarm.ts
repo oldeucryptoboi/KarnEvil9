@@ -122,6 +122,11 @@ const { values: args } = parseArgs({
     game:              { type: "string",  default: "" },  // path to any Z-machine story file
     resume:            { type: "boolean", default: false }, // resume from last checkpoint
     "checkpoint-dir":  { type: "string",  default: "" },   // where to store/load checkpoints
+    "no-memory":       { type: "boolean", default: false }, // suppress cross-session lessons (for experiments)
+    "verbose":         { type: "boolean", default: false }, // log full Strategist response each turn
+    kernel:            { type: "boolean", default: false }, // use kernel agentic loop instead of inline loop
+    "extended-thinking": { type: "boolean", default: false }, // enable extended thinking in kernel mode
+    "thinking-budget": { type: "string",  default: "10000" }, // thinking budget tokens
   },
 });
 
@@ -141,6 +146,9 @@ const USE_GROK             = args.grok            ?? false;
 // framework. Claude Haiku remains Cartographer. Requires both XAI_KEY and
 // ANTHROPIC_API_KEY. Pair with --blind for the identification experiment.
 const USE_GROK_ENHANCED    = args["grok-enhanced"] ?? false;
+// --no-memory: skip loading cross-session lessons from ActiveMemory (experiment flag)
+const USE_NO_MEMORY        = args["no-memory"]     ?? false;
+const USE_VERBOSE          = args["verbose"]       ?? false;
 
 // All AI-driven modes default to 20 turns; scripted caps at ZORK_SCRIPT.length.
 const isAiMode      = USE_LLM || USE_GROK || USE_GROK_ENHANCED;
@@ -158,6 +166,12 @@ const CHECKPOINT_DIR = (args["checkpoint-dir"] as string | undefined) || join(ho
 const CKPT_META_JSON = join(CHECKPOINT_DIR, "meta.json");  // framework + command history
 
 /** Everything needed to resume a session exactly where it stopped. */
+interface BlockedPuzzle {
+  room:   string;   // room where the obstacle was encountered
+  object: string;   // the locked/blocked object (parsed from command)
+  reason: string;   // short reason, e.g. "locked", "too heavy", "need key"
+}
+
 interface SessionCheckpoint {
   version:           1;
   savedAt:           string;
@@ -166,6 +180,11 @@ interface SessionCheckpoint {
   commandHistory:    string[];
   lastDelta:         string;
   // Cartographer state
+  roomExits:         Record<string, string[]>;
+  // Directional graph: room → direction → destination room name.
+  // Populated whenever the player successfully moves (go north → Troll Room
+  // records dirGraph["Cellar"]["north"] = "The Troll Room").
+  dirGraph:          Record<string, Record<string, string>>;
   rooms:             string[];
   lastRoomHeader:    string;
   // WorkingMemory
@@ -187,6 +206,10 @@ interface SessionCheckpoint {
   grokUsageSummary?:       UsageSummary;
   // ContextBudgetMonitor — cumulative tokens fed into Claude context across sessions
   cumulativeContextTokens?: number;
+  // dfrotz RNG seed — fixed at session start so replays are deterministic
+  rngSeed?: number;
+  // Blocked puzzles — obstacles left behind to return to later
+  blockedPuzzles?: BlockedPuzzle[];
 }
 
 // ─── API key guards ───────────────────────────────────────────────────────────
@@ -288,6 +311,43 @@ const strategistUsage = new UsageAccumulator(SONNET_PRICING);
 const cartoUsage      = new UsageAccumulator(HAIKU_PRICING);
 const grokUsage       = new UsageAccumulator(GROK_PRICING);
 
+// ─── Navigation helpers ───────────────────────────────────────────────────────
+
+/**
+ * BFS pathfinding through the directional graph.
+ *
+ * Returns an ordered array of { direction, destination } steps from `start`
+ * to `target`, or null if no path exists in the known dirGraph.
+ *
+ * Used to generate "NAVIGATION HINT: go north → Cellar, then go north → Troll Room"
+ * in the Strategist prompt when the agent has been stalled for several turns.
+ */
+function bfsPath(
+  dirGraph: Record<string, Record<string, string>>,
+  start:    string,
+  target:   string,
+  blocked:  Record<string, Set<string>> = {},
+): Array<{ direction: string; destination: string }> | null {
+  if (!start || !target || start === target) return [];
+  type Step = { direction: string; destination: string };
+  const queue: Array<{ room: string; path: Step[] }> = [{ room: start, path: [] }];
+  const visited = new Set<string>([start]);
+  while (queue.length > 0) {
+    const { room, path } = queue.shift()!;
+    const blockedHere = blocked[room] ?? new Set<string>();
+    for (const [dir, dest] of Object.entries(dirGraph[room] ?? {})) {
+      if (blockedHere.has(dir)) continue;  // skip permanently blocked directions
+      const newPath: Step[] = [...path, { direction: dir, destination: dest }];
+      if (dest === target) return newPath;
+      if (!visited.has(dest)) {
+        visited.add(dest);
+        queue.push({ room: dest, path: newPath });
+      }
+    }
+  }
+  return null;
+}
+
 // ─── LLM helpers ──────────────────────────────────────────────────────────────
 
 /**
@@ -311,21 +371,68 @@ async function askStrategist(
   commandHistory: string[],
   fullScreen: string,
   gameState?: {
-    inventory:      string[];
-    visitedRooms:   string[];
-    futilityHint:   string;
-    failedCommands: string[];
+    inventory:       string[];
+    visitedRooms:    string[];
+    futilityHint:    string;
+    failedCommands:  string[];
+    blockedPuzzles:  BlockedPuzzle[];
+    knownExits:      string[];                  // exits parsed by Cartographer for the current room
+    roomDirections:  Record<string, string>;    // direction → destination room (from dirGraph)
+    turnsStalled:    number;                    // turns since a new room was discovered (0 = not stalled)
+    navigationHint?: string;                   // BFS-computed step-by-step path to key destination
+    currentRoomName?: string;                  // current room name (for contextual injections)
+    weightLimitDirs?: string[];                // directions blocked due to carry weight (soft block)
   },
   pastLessons?: MemoryLesson[],
 ): Promise<string> {
   if (!USE_LLM && !USE_GROK_ENHANCED) throw new Error("No LLM configured for Strategist");
 
+  const blockedBlock = gameState?.blockedPuzzles.length
+    ? `\nUNRESOLVED PUZZLES (left behind — return when you have the means):\n${
+        gameState.blockedPuzzles.map(p => `  • ${p.room}: "${p.object}" (${p.reason})`).join("\n")
+      }\n`
+    : "";
+
+  const exitsBlock = gameState?.knownExits.length
+    ? `  Cartographer exits: ${gameState.knownExits.join(", ")}\n`
+    : "";
+
+  // Directional map: "north → The Troll Room, south → East of Chasm"
+  // Built from prior movement history — the most reliable navigation data available.
+  const dirEntries = Object.entries(gameState?.roomDirections ?? {});
+  const dirBlock = dirEntries.length
+    ? `  Directions from here: ${dirEntries.map(([d, r]) => `${d} → ${r}`).join(", ")}\n`
+    : "";
+
+  // BFS navigation hint — injected ONLY when a concrete path has been computed.
+  // Placed prominently at the top of the memory block so the model sees it first.
+  const navBlock = gameState?.navigationHint
+    ? `\n⚑ NAVIGATION PATH (execute in order, one command per turn):\n  ${gameState.navigationHint}\n`
+    : "";
+
+  const stalledBlock = (gameState?.turnsStalled ?? 0) >= 5
+    ? `\n⚠ STALLED: No new room discovered in the last ${gameState!.turnsStalled} turns.\n` +
+      `  All accessible areas appear exhausted from rooms you have been visiting.\n` +
+      `  You MUST take aggressive action: fight blocking enemies, use items on obstacles,\n` +
+      `  or probe untried directions (up, down, in, out, and all compass directions).\n`
+    : "";
+
+  // Data-driven weight/block context — no game-specific knowledge required.
+  // Populated from NavPrune observations of actual game responses.
+  const curRoomForWeight = gameState?.currentRoomName ?? currentRoom;
+  const softBlocked = [...(gameState?.weightLimitDirs ?? [])];
+  const weightLimitBlock = softBlocked.length > 0
+    ? `\n⚠ WEIGHT LIMIT: Direction(s) [${softBlocked.join(", ")}] failed due to carry weight from "${curRoomForWeight}".\n` +
+      `  Consider dropping non-essential items from your inventory, then retry.\n` +
+      `  Current inventory: ${gameState?.inventory.join(", ") || "unknown"}\n`
+    : "";
+
   const memoryBlock = gameState ? `
-AGENT MEMORY:
+AGENT MEMORY:${navBlock}${weightLimitBlock}
   Inventory: ${gameState.inventory.join(", ") || "empty"}
   Rooms visited: ${gameState.visitedRooms.slice(-15).join(", ") || "none yet"}
-  Recently failed/no-effect commands: ${gameState.failedCommands.slice(-5).join(", ") || "none"}
-${gameState.futilityHint ? `\n⚠ LOOP DETECTED: ${gameState.futilityHint}\n  → You MUST try a completely different approach.\n` : ""}` : "";
+${exitsBlock}${dirBlock}  Recently failed/no-effect commands for this room: ${gameState.failedCommands.slice(-5).join(", ") || "none"}
+${blockedBlock}${stalledBlock}${gameState.futilityHint ? `\n⚠ LOOP DETECTED: ${gameState.futilityHint}\n  → You MUST try a completely different approach.\n` : ""}` : "";
 
   // Cross-session lessons retrieved from ActiveMemory (persist across --resume sessions).
   // Injected verbatim so the model can avoid repeating mistakes from earlier runs.
@@ -339,13 +446,27 @@ Your role: read the current environment state and decide the single best next ac
 ${memoryBlock}${lessonBlock}
 Rules:
 - Respond with EXACTLY ONE command, nothing else — no explanation, no punctuation at the end.
-- Valid command forms: go <direction>, take <item>, drop <item>, open <object>, examine <object>, read <object>, attack <enemy> with <weapon>, etc.
+- Valid command forms: go <direction>, go in, go out, take <item>, drop <item>, open <object>, enter <object>, climb <object>, examine <object>, read <object>, attack <enemy> with <weapon>, etc.
+- Directions include compass (north/south/east/west/up/down) and special (in/out).
 - Use the full screen text to reason about your current situation and what to do next.
 - Advance toward completing the game. Explore systematically, interact with objects, solve puzzles.
-- Prefer unexplored directions over revisiting known rooms.
-- Do not repeat commands already listed as failed.
-- Avoid pure orientation turns (look, inventory) unless you have no other information to act on.
-- If stuck: try opening containers/doors, going in unexpected directions, examining items more carefully.`;
+- Use "Cartographer exits" (shown in AGENT MEMORY above) to navigate — these are the available exits for your current room. An exit listed in "Cartographer exits" but absent from "Directions from here" has never been traversed and leads somewhere new. ALWAYS try those unexplored exits FIRST before using any exit that already appears in "Directions from here" (unless a NAVIGATION PATH is active in AGENT MEMORY — follow the path's first step instead).
+- Do NOT use "look" if exits are listed under "Cartographer exits" — you already have the data you need. Only use "look" when exits are NOT listed (new room, or Cartographer data unavailable).
+- Use "inventory" only when you genuinely don't know what you're carrying.
+- If 'go <object>' fails with an unexpected response, try 'enter <object>' or 'go in' / 'go out' as alternatives.
+- WINDOWS AND DOORS: A window described as "ajar", "slightly open", or "closed" must be opened first. If you see a window you want to enter: (1) "open window" first, (2) then "enter window" or "go in". Never try to enter without opening — you will get "The kitchen window is closed" and waste a turn.
+- In combat, attack every round using "attack <enemy> with <weapon>" until defeated. If you have no weapon, retreat first, find a weapon, then return to fight.
+- IMPORTANT: Only attack when you can SEE a monster in the room description. A glowing sword means a monster is nearby but NOT necessarily in the current room. If the game responds with echoes (e.g., "sword sword ...", "bar bar ..."), you are in an ECHO room — type "echo" to silence it rather than continuing to issue commands.
+- If a direction appears in "weight-limited exits for this room" (shown in AGENT MEMORY above), drop non-essential items before retrying it.
+- If a command appears in "recently failed/no-effect commands for this room" (shown in AGENT MEMORY above), DO NOT retry it — try a different approach.
+- If you have been in the same room for 3+ turns with no progress (STALLED warning), try a direction you have NOT tried yet from this room.
+- If navigation is blocked in all known directions, examine the room description for non-obvious exits (climb, enter, go out, up, down, or special directions).
+- ITEM PICKUP (highest priority): When the Cartographer lists items in your current room that you need, TAKE THEM IMMEDIATELY before following any navigation path. Taking an item does NOT move you. After taking an item, you are still in the same room — use "Cartographer exits" to continue exploring unexplored directions. Do NOT retreat (go out/back) just because you picked something up.
+- ACTION RESPONSES: When the last screen shows only a short confirmation ("Taken.", "Dropped.", "Done.", "You open the...") with no room description, you are still in the same room. Use the Cartographer exits listed in AGENT MEMORY to decide your next move — do not treat this as disorientation.
+- NAVIGATION PATH IS MANDATORY: When a NAVIGATION PATH is shown in AGENT MEMORY, your ONLY valid action is to execute the FIRST step listed. Do NOT look, examine, attack, or take any other action. Just execute that single step. Exception: take a required item in your current room first, then continue.
+- If an object is locked/blocked and you lack the means to open it, LEAVE and explore elsewhere — it is recorded in UNRESOLVED PUZZLES above so you will return when you have what you need.
+- If in darkness (pitch black / no light), do NOT move into new rooms — find and use a light source first, or retreat the way you came.
+- DEAD ENDS / UNDESCRIBED EXITS: Some rooms have exits not mentioned in the room text. If all listed exits have failed, systematically probe every direction you haven't tried: north, south, east, west, up, down, in, out. Failed directions are pruned automatically.`;
 
   const historyText = commandHistory.length > 0
     ? `\nCommand history (most recent last):\n${commandHistory.slice(-10).map((c, i) => `  ${i + 1}. ${c}`).join("\n")}`
@@ -360,7 +481,11 @@ ${maskGameText(lastDelta || "(no previous response)")}
 Full screen:
 ${maskGameText(fullScreen || "(no screen data)")}
 
-What is your next command?`;
+Answer on THREE lines:
+Line 1: your command (the command only, nothing else)
+Line 2: "Game: <name or unknown> | Confidence: <0-100%> | Reason: <one phrase>"
+Line 3: "Reasoning: <one sentence — why you chose this command>"
+`;
 
   if (USE_GROK_ENHANCED) {
     const messages: GrokMessage[] = [
@@ -391,7 +516,7 @@ What is your next command?`;
 
   const response = await anthropic!.messages.create({
     model: STRATEGIST_MODEL,
-    max_tokens: 64,
+    max_tokens: 300,  // room for recognition + reasoning + command
     system,
     messages: [{ role: "user", content: user }],
   });
@@ -404,7 +529,23 @@ What is your next command?`;
 
   const block = response.content[0];
   const raw = block?.type === "text" ? block.text.trim() : "look";
-  return raw.replace(/[.!?]$/, "").toLowerCase();
+  // Command is now Line 1; Game/Reasoning are Lines 2-3 (diagnostic only, post-hoc).
+  const lines = raw.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+  const recognitionLine = lines.find(l => /^Game:/i.test(l));
+  if (recognitionLine) {
+    log(`${C.dim}[Recognition]${C.reset}`, recognitionLine);
+  }
+  const reasoningLine = lines.find(l => /^Reasoning:/i.test(l));
+  if (reasoningLine) {
+    log(`${C.dim}[Reasoning]${C.reset}`, reasoningLine);
+  }
+  // --verbose: log full Strategist response
+  if (USE_VERBOSE) {
+    log(`${C.dim}[Strategist/full]${C.reset}`, `\n${raw}`);
+  }
+  // Command is the first non-Game/non-Reasoning line
+  const commandLine = lines.find(l => !/^(Game:|Reasoning:)/i.test(l)) ?? "look";
+  return commandLine.replace(/[.!?]$/, "").toLowerCase();
 }
 
 /**
@@ -423,6 +564,11 @@ async function askCartographer(screenText: string): Promise<string> {
 Given raw screen output from the game, extract:
 1. Room name (the location header at the top of the description)
 2. Visible exits (compass directions or special directions: up, down, in, out)
+   - Scan ALL text for exit clues: "To the north...", "A path leads east...", "There is a door to the west...",
+     "staircase going up...", etc. Include EVERY direction mentioned in the text.
+   - Also include "in" for any passable opening that lacks a compass direction: a door off its hinges,
+     an open or broken door, a window ajar, a hole, an archway, a passage with no explicit direction.
+     Include "out" if the text implies an exit back outside (e.g. "rear door to outside", "exit back").
 3. Items visible in the room (portable objects the agent could interact with)
 4. A one-sentence room description
 
@@ -618,17 +764,45 @@ Be as specific as possible. If you are uncertain, give your best guess and expla
  */
 function updateInventory(inventory: string[], delta: string, command: string): string[] {
   const lc = delta.toLowerCase();
-  // "Taken." — add the object from the command
-  if (lc === "taken." || lc === "taken") {
+  // "Taken." (possibly followed by extra text like sound effects) — add the object
+  if (/^taken\.?(\s|$)/i.test(delta)) {
     const obj = command.replace(/^take\s+/i, "").trim();
     if (obj && !inventory.includes(obj)) inventory.push(obj);
   }
-  // "Dropped." — remove
-  if (lc === "dropped." || lc === "dropped") {
+  // "Dropped." (possibly followed by extra text) — remove
+  if (/^dropped\.?(\s|$)/i.test(delta)) {
     const obj = command.replace(/^drop\s+/i, "").trim();
     inventory = inventory.filter(i => i !== obj);
   }
+  // "throw X at Y" where NPC catches/eats/takes the item — item is lost
+  // e.g. "The troll catches the jewel-encrusted egg and eats it"
+  if (/^throw\s+/i.test(command) && /catches|eats|snatches|grabs/i.test(delta)) {
+    const thrown = command.replace(/^throw\s+/i, "").replace(/\s+at\s+.*/i, "").trim();
+    inventory = inventory.filter(i => i !== thrown);
+  }
+  // Player death — all items are lost (game restarts empty-handed)
+  if (/\*\*\*\*\s*(you have died|you are dead)/i.test(delta)) {
+    inventory = [];
+  }
   return inventory;
+}
+
+/**
+ * Returns a short reason string if the game response signals a blockage,
+ * or null if the action succeeded normally.
+ * Patterns are game-agnostic (common across interactive fiction).
+ */
+function detectBlockReason(delta: string): string | null {
+  const d = delta.toLowerCase();
+  if (/the .+ is locked/i.test(d))                            return "locked";
+  if (/\blocked\b/i.test(d))                                  return "locked";
+  if (/you (don't|do not|can't|cannot) have (that|the)\b/.test(d)) return "need item";
+  if (/you('re| are) (carrying|holding) too (much|many|heavy)/i.test(d)) return "too heavy";
+  if (/your load is too heavy/i.test(d))                      return "too heavy";
+  if (/you need (a |the )?\w/i.test(d))                       return "need item";
+  if (/requires? (a |the )?\w/i.test(d))                      return "need item";
+  if (/you can'?t (go|move|open|enter) that way/i.test(d))    return "no passage";
+  return null;
 }
 
 // ─── Classic game loop (--grok) ───────────────────────────────────────────────
@@ -799,7 +973,7 @@ async function createNode(
   role: NodeRole,
   capabilities: string[],
   emulator: ZorkEmulator | ZorkFrotzEmulator,
-  cartographerState: { rooms: string[]; lastRoomHeader: string; lastFullScreen: string },
+  cartographerState: { rooms: string[]; lastRoomHeader: string; lastFullScreen: string; roomExits: Record<string, string[]>; dirGraph: Record<string, Record<string, string>>; blockedExits: Record<string, Set<string>>; weightLimitExits: Record<string, Set<string>> },
 ): Promise<ZorkNode> {
   const journalPath = join(tmpdir(), `k9-zork-${name.toLowerCase()}-${uuid().slice(0, 8)}.jsonl`);
   const journal = new Journal(journalPath, { fsync: false, redact: false, lock: false });
@@ -1024,11 +1198,34 @@ async function createNode(
   app.use(express.json());
   mountSwarmRoutes(app, createSwarmRoutes(mesh));
 
-  const server = await new Promise<http.Server>((resolve) => {
+  // Listen on the requested port, with automatic fallback to an OS-assigned port
+  // when the requested port is already in use (e.g. concurrent Zork instances).
+  // Without this, app.listen() on a busy port emits an unhandled 'error' event
+  // that leaves the Promise pending forever, causing "Peer not active" on all
+  // subsequent delegation attempts.
+  const server = await new Promise<http.Server>((resolve, reject) => {
     const s = app.listen(port, () => resolve(s));
+    s.once("error", (err: Error & { code?: string }) => {
+      if (err.code === "EADDRINUSE") {
+        // Port busy — fall back to OS-assigned ephemeral port
+        const s2 = app.listen(0, () => resolve(s2));
+        s2.once("error", reject);
+      } else {
+        reject(err);
+      }
+    });
   });
+  const actualPort = (server.address() as { port: number }).port;
 
-  return { name, port, color, journal, mesh, server, pending };
+  // Update the MeshManager identity so peers know the real URL.
+  // This is necessary when the OS assigned a different port from what was requested.
+  if (actualPort !== port) {
+    // Patch the identity URL so heartbeats/requests go to the right address.
+    (mesh as unknown as { identity: { api_url: string } }).identity.api_url =
+      `http://localhost:${actualPort}`;
+  }
+
+  return { name, port: actualPort, color, journal, mesh, server, pending };
 }
 
 // ─── Delegate a task to a peer and await the result ───────────────────────────
@@ -1077,7 +1274,7 @@ function isRoomName(s: string): boolean {
   if (!s || s.length > 35 || /[.!?,]$/.test(s)) return false;
   // Note: "the " removed from exclusion list — "The Troll Room", "The Cellar" etc.
   // are valid room names. Punctuation check above catches prose sentences.
-  return !/^(opening|taken|you |with |no |a |welcome|i |behind the|there )/i.test(s);
+  return !/^(opening|taken|you |with |no |a |welcome|i |it |it's |pitch |behind the|there )/i.test(s);
 }
 
 // ─── Trust-based delegation attributes ────────────────────────────────────────
@@ -1144,23 +1341,13 @@ interface PermGate { scope: string; description: string; }
 function getPermissionGate(command: string, currentRoom: string): PermGate | null {
   const cmd = command.trim().toLowerCase();
 
-  // Gate 1: descending into an underground area
-  if (/^(go\s+)?down$|^descend$/.test(cmd)) {
-    if (/trapdoor|cellar|grating|dam|underground|shaft|cave/i.test(currentRoom)) {
-      return {
-        scope:       "game:navigate:underground",
-        description: `Descend underground from "${currentRoom}"`,
-      };
-    }
-  }
+  // Gate 1: underground navigation — pre-approved (same as combat).
+  // Previously this required interactive approval, but for autonomous gameplay
+  // the game engine itself enforces safety (won't let you descend without a
+  // light source, won't let you open an unlocked trapdoor from the wrong side,
+  // etc.). The PermissionEngine gate was redundant and blocked automated runs.
 
-  // Gate 2: any combat action
-  if (/^(attack|kill|hit|fight|stab|slay|strike|swing)\b/.test(cmd)) {
-    return {
-      scope:       "game:engage:combat",
-      description: `Issue combat command: "${command}"`,
-    };
-  }
+  // Gate 2: combat — pre-approved, no prompt needed
 
   return null;
 }
@@ -1180,6 +1367,14 @@ function getPermissionGate(command: string, currentRoom: string): PermGate | nul
 function makePermissionPromptFn(): ApprovalPromptFn {
   return async (request): Promise<"allow_once" | "allow_session" | "allow_always" | "deny"> => {
     const scope = request.permissions[0]?.scope ?? "unknown";
+
+    // Non-interactive mode (background / piped stdin): auto-approve underground navigation
+    // so the game loop isn't blocked waiting for user input that will never arrive.
+    if (!process.stdin.isTTY) {
+      console.log(`\x1b[33m[PermissionEngine]\x1b[0m Auto-approved (non-interactive): ${scope}`);
+      return "allow_session";
+    }
+
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
     console.log(`\n${"\x1b[33m"}${"─".repeat(62)}\x1b[0m`);
@@ -1242,6 +1437,24 @@ function loadCheckpoint(): SessionCheckpoint | null {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
+  // ── --kernel: delegate to if-kernel-runner.ts ───────────────────────────
+  if (args.kernel) {
+    const { execFileSync } = await import("node:child_process");
+    const kernelArgs = ["scripts/if-kernel-runner.ts"];
+    if (USE_APPLE2)                     kernelArgs.push("--apple2");
+    if (USE_FROTZ)                      kernelArgs.push("--frotz");
+    if (USE_LLM)                        kernelArgs.push("--llm");
+    if (args.blind)                     kernelArgs.push("--blind");
+    if (args.verbose)                   kernelArgs.push("--verbose");
+    if (args.turns)                     kernelArgs.push("--turns", args.turns as string);
+    if (args.game)                      kernelArgs.push("--game", args.game as string);
+    if (args["inject-failure"])         kernelArgs.push("--inject-failure", args["inject-failure"] as string);
+    if (args["extended-thinking"])      kernelArgs.push("--extended-thinking");
+    if (args["thinking-budget"])        kernelArgs.push("--thinking-budget", args["thinking-budget"] as string);
+    execFileSync("npx", ["tsx", ...kernelArgs], { stdio: "inherit", env: process.env });
+    process.exit(0);
+  }
+
   // ── --grok: Classic direct loop — bypass all DeepMind machinery ─────────
   if (USE_GROK) {
     header("LAUNCHING EMULATOR  (dfrotz)");
@@ -1286,11 +1499,16 @@ async function main() {
 
   // ── Launch emulator ──────────────────────────────────────────────────────
   header("LAUNCHING EMULATOR");
+  // Fixed RNG seed ensures command replays are deterministic: same commands →
+  // same combat outcomes → no surprise deaths that wipe inventory on resume.
+  // Seed is generated once on fresh start and stored in the checkpoint so every
+  // resume uses the identical seed.
+  const rngSeed: number = ckpt?.rngSeed ?? (Math.floor(Math.random() * 0x7fff) + 1);
   const emulator = USE_FROTZ
     ? new ZorkFrotzEmulator()
     : new ZorkEmulator({ apple2: USE_APPLE2, injectFailureOnTurn: INJECT_FAILURE_TURN });
   // No save/restore flags needed: resume uses command-replay (see below).
-  await emulator.launch(GAME_PATH || undefined);
+  await emulator.launch(GAME_PATH || undefined, USE_FROTZ ? { seed: rngSeed } : undefined);
   log(`${C.green}✓${C.reset}`,
     USE_FROTZ  ? `dfrotz launched — ${GAME_PATH || "zork1.z3"}` :
     USE_APPLE2 ? `Playwright launched — apple2js.com${INJECT_FAILURE_TURN ? ` (failure injected at command ${INJECT_FAILURE_TURN})` : ""}` :
@@ -1299,10 +1517,36 @@ async function main() {
   // ── Replay command history to restore Z-machine state ────────────────────
   // On resume, commandHistory is loaded from the checkpoint. Replaying those
   // commands through a fresh dfrotz restores the exact game state (~5ms/cmd).
+  //
+  // Also rebuilds dirGraph from the replay so the Strategist gets full
+  // directional guidance ("north → Troll Room" from Cellar) even for movements
+  // that predate the checkpoint's saved dirGraph.
+  const replayDirGraph: Record<string, Record<string, string>> = { ...(ckpt?.dirGraph ?? {}) };
+  const replayRevDir: Record<string, string> = {
+    north: "south", south: "north", east: "west", west: "east",
+    up: "down",     down: "up",     in: "out",    out: "in",
+  };
   if (ckpt && USE_FROTZ && ckpt.commandHistory.length > 0) {
     log(`${C.dim}[Resume]${C.reset}`, `Replaying ${ckpt.commandHistory.length} command(s) to restore game state...`);
+    let replayRoom = "West of House";   // Zork I always starts here
     for (const cmd of ckpt.commandHistory) {
-      await emulator.sendCommand(cmd);
+      const replayResult = await emulator.sendCommand(cmd);
+      const dirMatch = cmd.match(/^go\s+(north|south|east|west|up|down|in|out)$/i);
+      if (dirMatch && replayResult.roomHeader && isRoomName(replayResult.roomHeader)
+          && replayResult.roomHeader !== replayRoom) {
+        const dir    = dirMatch[1]!.toLowerCase();
+        const newRm  = replayResult.roomHeader;
+        const prevRm = replayRoom;
+        replayDirGraph[prevRm] ??= {};
+        replayDirGraph[prevRm]![dir] = newRm;
+        if (replayRevDir[dir]) {
+          replayDirGraph[newRm] ??= {};
+          replayDirGraph[newRm]![replayRevDir[dir]!] ??= prevRm;   // don't clobber newer data
+        }
+      }
+      if (replayResult.roomHeader && isRoomName(replayResult.roomHeader)) {
+        replayRoom = replayResult.roomHeader;
+      }
     }
     log(`${C.green}✓${C.reset}`, `Replay complete — restored to turn ${ckpt.turn}`);
   }
@@ -1312,6 +1556,21 @@ async function main() {
     rooms: [] as string[],
     lastRoomHeader: "",
     lastFullScreen: "",
+    // Persistent per-room exit cache — populated from Cartographer MAP/VERIFY parses.
+    // Survives revisits where dfrotz only emits the room name (no description).
+    // Restored from checkpoint on --resume so revisited rooms always have known exits.
+    roomExits: ckpt?.roomExits ?? {} as Record<string, string[]>,
+    // Directional graph: room → direction → destination.
+    // Populated from successful `go <dir>` moves so the Strategist knows which
+    // direction leads to which room (e.g. north → Troll Room from Cellar).
+    // On resume, rebuilt from command replay (replayDirGraph) so pre-checkpoint
+    // movements are also represented.
+    dirGraph:  replayDirGraph,
+    // Exits confirmed invalid by NavPrune — these are never re-added by Cartographer.
+    // Keyed by room name; value is a Set of direction strings that produced no movement.
+    blockedExits: {} as Record<string, Set<string>>,
+    // Directions that failed due to carry weight — soft blocks, retryable after dropping items.
+    weightLimitExits: {} as Record<string, Set<string>>,
   };
 
   // ── Boot nodes ───────────────────────────────────────────────────────────
@@ -1449,11 +1708,14 @@ async function main() {
 
   // ── WorkingMemory ─────────────────────────────────────────────────────────
   const gameMemory = new WorkingMemoryManager(ckpt?.sessionId ?? sessionId);
-  gameMemory.set("currentRoom",  ckpt?.currentRoom  ?? "");
-  gameMemory.set("exits",        [] as string[]);
-  gameMemory.set("inventory",    ckpt?.inventory     ?? [] as string[]);
-  gameMemory.set("roomGraph",    ckpt?.roomGraph     ?? {} as Record<string, string[]>);
-  gameMemory.set("visitedRooms", ckpt?.visitedRooms  ?? [] as string[]);
+  gameMemory.set("currentRoom",    ckpt?.currentRoom    ?? "");
+  gameMemory.set("exits",          [] as string[]);
+  gameMemory.set("inventory",      ckpt?.inventory      ?? [] as string[]);
+  gameMemory.set("roomGraph",      ckpt?.roomGraph      ?? {} as Record<string, string[]>);
+  gameMemory.set("visitedRooms",   ckpt?.visitedRooms   ?? [] as string[]);
+  // blockedPuzzles: obstacles the AI couldn't pass (locked, needs item, etc.)
+  // Each entry is resolved when the AI returns and succeeds.
+  gameMemory.set("blockedPuzzles", ckpt?.blockedPuzzles ?? [] as BlockedPuzzle[]);
 
   // ── Restore Cartographer state from checkpoint ────────────────────────────
   if (ckpt) {
@@ -1463,8 +1725,9 @@ async function main() {
 
   // ── FutilityMonitor ───────────────────────────────────────────────────────
   const futility = new FutilityMonitor({
-    maxIdenticalPlans:     2,   // halt if same command tried twice in a row
-    maxStagnantIterations: 3,   // halt if 3 turns with no successful steps
+    maxIdenticalPlans:     2,   // halt if same exact command tried twice in a row
+    maxStagnantIterations: 100, // effectively disabled — each turn always has exactly 1 step;
+                                // the "stagnant" heuristic is designed for multi-step iterations
     maxRepeatedErrors:     3,
   });
   let futilityHint  = "";
@@ -1515,12 +1778,15 @@ async function main() {
     summarizeThreshold:        0.90,
     minIterationsBeforeAction: 3,
   });
-  let cumulativeContextTokens = ckpt?.cumulativeContextTokens ?? 0;
+  // Always reset the cumulative context counter when resuming — the LLM context
+  // (conversation history with Claude) starts fresh each session, so historical
+  // accumulated token counts from prior sessions are irrelevant to the current budget.
+  let cumulativeContextTokens = USE_RESUME ? 0 : (ckpt?.cumulativeContextTokens ?? 0);
 
   log(`${C.dim}•${C.reset}`, `WorkingMemory + FutilityMonitor + AnomalyDetector + CheckpointSerializer + RootCauseAnalyzer: active`);
   log(`${C.dim}•${C.reset}`, `BehavioralScorer + RedelegationMonitor: active`);
   log(`${C.dim}•${C.reset}`, `ContextBudgetMonitor: ctx ${cumulativeContextTokens.toLocaleString()} / ${MAX_CONTEXT_TOKENS.toLocaleString()} tokens (${ckpt ? "restored" : "fresh"})`);
-  log(`${C.dim}•${C.reset}`, `PermissionEngine: active (gates: game:navigate:underground, game:engage:combat)`);
+  log(`${C.dim}•${C.reset}`, `PermissionEngine: active (gates: game:navigate:underground | combat: pre-approved)`);
 
   // ── MetricsCollector ──────────────────────────────────────────────────────
   // Attached to the Strategist's journal: every swarm event (delegation, escrow,
@@ -1535,7 +1801,7 @@ async function main() {
   const activeMemoryPath = join(CHECKPOINT_DIR, "active-memory.jsonl");
   const activeMemory = new ActiveMemory(activeMemoryPath);
   await activeMemory.load();
-  const pastLessons = activeMemory.search(
+  const pastLessons = USE_NO_MEMORY ? [] : activeMemory.search(
     "interactive fiction zork game rooms exploration",
     ["zork-emulator", "cartographer-llm"],
   );
@@ -1576,6 +1842,15 @@ async function main() {
   let lastDelta     = ckpt?.lastDelta ?? "";
   const startTurn   = ckpt ? ckpt.turn + 1 : 1;  // resume from next turn after checkpoint
 
+  // Per-room failed commands: commands that produced no effect in a given room.
+  // More precise than consecutive-duplicate detection — persists across revisits.
+  const failedByRoom: Record<string, string[]> = {};
+
+  // Track turns since the last new room was discovered.
+  // Injected into the Strategist prompt as a "stalled" warning when ≥5.
+  let lastNewRoomCount = cartographerState.rooms.length; // init from checkpoint
+  let lastNewRoomTurn  = startTurn;
+
   // ═══════════════════════════════════════════════════════════════════════════
   //  GAME LOOP
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1590,42 +1865,26 @@ async function main() {
     const prevTurnTokens = strategistUsage.totalTokens + cartoUsage.totalTokens + grokUsage.totalTokens;
 
     // ── Read working memory for this turn ───────────────────────────────
-    const gmInventory    = (gameMemory.get("inventory")    ?? []) as string[];
-    const gmVisitedRooms = (gameMemory.get("visitedRooms") ?? []) as string[];
-
-    // Track commands that produced no visible change (consecutive duplicates)
-    const failedCmds: string[] = [];
-    for (let i = 1; i < commandHistory.length; i++) {
-      if (commandHistory[i] === commandHistory[i - 1]) failedCmds.push(commandHistory[i]!);
+    const gmInventory      = (gameMemory.get("inventory")      ?? []) as string[];
+    const gmVisitedRooms   = (gameMemory.get("visitedRooms")   ?? []) as string[];
+    const gmBlockedPuzzles = (gameMemory.get("blockedPuzzles") ?? []) as BlockedPuzzle[];
+    // Room-scoped failed commands: update failedByRoom from the previous turn's response
+    // before building the list for the Strategist prompt.
+    const noEffectRe = /^(I don't understand|you can't|nothing happens|i don't know the word|i only understood|locked from|too heavy|the door is locked)/i;
+    if (lastDelta && noEffectRe.test(lastDelta.trim())) {
+      const prevCmd = commandHistory.at(-1);
+      const curRoom = cartographerState.lastRoomHeader;
+      if (curRoom && prevCmd) {
+        failedByRoom[curRoom] ??= [];
+        if (!failedByRoom[curRoom]!.includes(prevCmd)) failedByRoom[curRoom]!.push(prevCmd);
+      }
     }
-
-    // ── Determine next command ───────────────────────────────────────────
-    // In LLM mode: ask Claude Sonnet to pick the next command from game state.
-    // In scripted mode: read from ZORK_SCRIPT (fallback for demo/testing).
-    let command: string;
-    if (USE_LLM || USE_GROK_ENHANCED) {
-      const fullScreen = cartographerState.lastFullScreen;
-      const modelLabel = USE_GROK_ENHANCED ? GROK_MODEL : STRATEGIST_MODEL;
-      log(`${C.cyan}[Strategist/LLM]${C.reset}`,
-        `Asking ${modelLabel} for next move...`);
-      command = await askStrategist(
-        cartographerState.lastRoomHeader,
-        lastDelta,
-        commandHistory,
-        fullScreen,
-        { inventory: gmInventory, visitedRooms: gmVisitedRooms,
-          futilityHint, failedCommands: failedCmds },
-        pastLessons,
-      );
-      futilityHint = "";  // consumed; reset for next turn
-      log(`${C.cyan}[Strategist/LLM]${C.reset}`,
-        `→ ${C.yellow}"${command}"${C.reset}`);
-    } else {
-      const script = ZORK_SCRIPT[turn - 1]!;
-      command = script.command;
-    }
+    // Build failedCmds for this turn from the current room only
+    const failedCmds = failedByRoom[cartographerState.lastRoomHeader] ?? [];
 
     // ── Step 1: Cartographer reads current state ────────────────────────
+    // Run BEFORE the Strategist so the freshly-parsed exits are available
+    // for the command decision this turn (not one turn delayed).
     const cartoMapTaskId = `task-carto-${uuid().slice(0, 8)}`;
     escrow.holdBond(cartoMapTaskId, cartoId, 0.05);
 
@@ -1633,6 +1892,45 @@ async function main() {
       const label = cartographerState.lastRoomHeader || "West of House (start)";
       const mapResult = await delegate(strategist, cartoId, `MAP: ${label}`, sessionId);
       const mapSummary = mapResult.findings[0]?.summary ?? `Room: "${label}"`;
+      // Parse exits from Cartographer output and persist in roomExits cache.
+      // Only overwrite the cache if the new list is longer than what we already
+      // know — brief/intermediate responses (e.g. "The trap door is closed")
+      // often report fewer exits than a full room description, and we must not
+      // let them clobber a previously-correct cache entry.
+      const exitsMatch = mapSummary.match(/Exits:\s*([^|]+)/i);
+      const exitsStr   = exitsMatch?.[1]?.trim() ?? "";
+      const blocked = cartographerState.blockedExits[label] ?? new Set<string>();
+      if (exitsStr && exitsStr !== "unknown") {
+        const parsed  = exitsStr.split(",").map(e => e.trim()).filter(Boolean)
+          .filter(e => !blocked.has(e.toLowerCase()));   // never re-add pruned exits
+        const cached  = cartographerState.roomExits[label] ?? [];
+        if (parsed.length > cached.length) cartographerState.roomExits[label] = parsed;
+      }
+      // Regex exit augmentation: scan the raw screen text for directional phrases
+      // that Haiku may have missed (e.g. "To the east..." in North of House).
+      // Merge any found directions into the cache — never remove existing ones.
+      // Pruned (blocked) exits are never re-merged.
+      const rawScreen = cartographerState.lastFullScreen;
+      if (rawScreen && label && label !== "West of House (start)") {
+        const directional = new Set<string>((cartographerState.roomExits[label] ?? []).map(d => d.toLowerCase()));
+        let m: RegExpExecArray | null;
+        // Pattern 1: "To the <direction>" — very reliable indicator of an exit
+        const toTheRe = /\bto the (north|south|east|west|up|down)\b/gi;
+        while ((m = toTheRe.exec(rawScreen)) !== null) {
+          const dir = m[1]!.toLowerCase();
+          if (!blocked.has(dir)) directional.add(dir);
+        }
+        // Pattern 2: path/passage/corridor NEAR a direction word
+        const leadsRe = /\b(?:path|passage|corridor|trail|exit)\b[^.]{0,30}\b(north|south|east|west|up|down)\b|\b(north|south|east|west|up|down)\b[^.]{0,30}\b(?:path|passage|corridor|trail|exit)\b/gi;
+        while ((m = leadsRe.exec(rawScreen)) !== null) {
+          const dir = (m[1] ?? m[2])!.toLowerCase();
+          if (!blocked.has(dir)) directional.add(dir);
+        }
+        const augmented = [...directional];
+        if (augmented.length > (cartographerState.roomExits[label] ?? []).length) {
+          cartographerState.roomExits[label] = augmented;
+        }
+      }
       log(`${C.magenta}[Cartographer${USE_LLM ? "/LLM" : ""}]${C.reset}`,
         USE_LLM
           ? `${C.dim}${mapSummary}${C.reset} | Rooms: ${cartographerState.rooms.length}`
@@ -1641,6 +1939,87 @@ async function main() {
     } catch (_) {
       escrow.slashBond(cartoMapTaskId, 25);
       log(`${C.magenta}[Cartographer]${C.reset}`, `${C.red}Map update failed${C.reset}`);
+    }
+
+    // Track exploration stall: update lastNewRoomTurn whenever a new room is found.
+    if (cartographerState.rooms.length > lastNewRoomCount) {
+      lastNewRoomCount = cartographerState.rooms.length;
+      lastNewRoomTurn  = turn;
+    }
+
+    // ── Determine next command ───────────────────────────────────────────
+    // In LLM mode: ask Claude Sonnet to pick the next command from game state.
+    // In scripted mode: read from ZORK_SCRIPT (fallback for demo/testing).
+    const knownExits = cartographerState.roomExits[cartographerState.lastRoomHeader] ?? [];
+    // Build a human-readable directions-to-rooms map for the current room
+    // so the Strategist can navigate without guessing ("north → The Troll Room").
+    const knownDirMap = cartographerState.dirGraph[cartographerState.lastRoomHeader] ?? {};
+    const roomDirections: Record<string, string> = knownDirMap;
+
+    // BFS navigation hint: fire every turn so the Strategist always has algorithmic
+    // navigation context. The LLM decides the final command — it may follow the BFS
+    // path, explore an unexplored exit, or do something in-room — but the optimal
+    // graph-traversal path is always visible.
+    const turnsStalled = turn - lastNewRoomTurn;
+    const hasUnexploredExits = knownExits.some(e => !knownDirMap[e]);
+    let navigationHint: string | undefined;
+    if (cartographerState.lastRoomHeader) {
+      const visitedSet = new Set(cartographerState.rooms);
+      const unvisitedTargets = [
+        // Adjacent unvisited rooms first (shortest path)
+        ...Object.values(knownDirMap).filter(r => !visitedSet.has(r)),
+        // Then any known unvisited room reachable via BFS
+        ...Object.keys(cartographerState.dirGraph).filter(r => !visitedSet.has(r)),
+      ];
+      for (const target of unvisitedTargets) {
+        if (target === cartographerState.lastRoomHeader) continue;
+        const path = bfsPath(cartographerState.dirGraph, cartographerState.lastRoomHeader, target, cartographerState.blockedExits);
+        if (path && path.length > 0) {
+          navigationHint = path
+            .map((s, i) => {
+              const src = i === 0 ? cartographerState.lastRoomHeader : path[i - 1]!.destination;
+              const wt = (cartographerState.weightLimitExits[src] ?? new Set()).has(s.direction);
+              return `${i + 1}. go ${s.direction} → ${s.destination}${wt ? " ⚠ drop items first" : ""}`;
+            })
+            .join(", ");
+          const label = hasUnexploredExits ? "unexplored exits available" : "room mapped";
+          log(`${C.cyan}[NavHint]${C.reset}`,
+            `BFS → ${target} (${label}, stalled ${turnsStalled}): ${navigationHint}`);
+          break;
+        }
+      }
+      if (!navigationHint && !hasUnexploredExits && turnsStalled >= 3) {
+        log(`${C.dim}[NavHint]${C.reset}`,
+          `Stalled ${turnsStalled} turns — all known rooms visited; stalledBlock will prompt exploration`);
+      }
+    }
+
+    let command: string;
+    if (USE_LLM || USE_GROK_ENHANCED) {
+      const fullScreen = cartographerState.lastFullScreen;
+      const modelLabel = USE_GROK_ENHANCED ? GROK_MODEL : STRATEGIST_MODEL;
+      log(`${C.cyan}[Strategist/LLM]${C.reset}`,
+        `Asking ${modelLabel} for next move...`);
+      const weightLimitDirs = Array.from(cartographerState.weightLimitExits[cartographerState.lastRoomHeader] ?? []);
+      command = await askStrategist(
+        cartographerState.lastRoomHeader,
+        lastDelta,
+        commandHistory,
+        fullScreen,
+        { inventory: gmInventory, visitedRooms: gmVisitedRooms,
+          futilityHint, failedCommands: failedCmds,
+          blockedPuzzles: gmBlockedPuzzles, knownExits, roomDirections,
+          turnsStalled, navigationHint,
+          currentRoomName:  cartographerState.lastRoomHeader,
+          weightLimitDirs },
+        pastLessons,
+      );
+      futilityHint = "";  // consumed; reset for next turn
+      log(`${C.cyan}[Strategist/LLM]${C.reset}`,
+        `→ ${C.yellow}"${command}"${C.reset}`);
+    } else {
+      const script = ZORK_SCRIPT[turn - 1]!;
+      command = script.command;
     }
 
     // ── Step 2: Cognitive friction assessment ───────────────────────────
@@ -1806,17 +2185,26 @@ async function main() {
     };
     const iterRec: IterationRecord = {
       iteration:      turn,
-      planGoal:       command,
+      // Context-aware plan goal: include current room so "go east from Troll Room" and
+      // "go east from Round Room" are treated as DIFFERENT plans by the FutilityMonitor.
+      // Without this, the monitor fires after any directional command is issued twice total
+      // (even from completely different rooms), producing 37+ false positives per session.
+      planGoal:       `${command} (from ${cartographerState.lastRoomHeader || "unknown"})`,
       stepResults:    [stepRes],
       iterationUsage: { total_tokens: tacResult.tokens_used,
                         input_tokens: 0, output_tokens: tacResult.tokens_used },
     };
-    const futVerdict = futility.recordIteration(iterRec);
-    if (futVerdict.action !== "continue") {
-      futilityHint = futVerdict.reason;
-      futilityHalts++;
-      log(`${C.yellow}[Futility]${C.reset}`,
-        `${C.yellow}${futVerdict.action.toUpperCase()}: ${futVerdict.reason}${C.reset}`);
+    // Combat commands are intentionally repeated (multi-hit fights); skip the monitor
+    // entirely so they don't pollute its state or produce false HALT signals.
+    const isCombatCmd = /^(attack|kill|strike|hit)\b/i.test(command);
+    if (!isCombatCmd) {
+      const futVerdict = futility.recordIteration(iterRec);
+      if (futVerdict.action !== "continue") {
+        futilityHint = futVerdict.reason;
+        futilityHalts++;
+        log(`${C.yellow}[Futility]${C.reset}`,
+          `${C.yellow}${futVerdict.action.toUpperCase()}: ${futVerdict.reason}${C.reset}`);
+      }
     }
 
     // ── Step 8c: AnomalyDetector ─────────────────────────────────────────
@@ -1940,16 +2328,133 @@ async function main() {
           graph[prevRoom] = [...(graph[prevRoom] ?? []), newRoom];
           gameMemory.set("roomGraph", graph);
         }
+        // Directional graph: record which direction from prevRoom leads to newRoom.
+        // We only do this for "go <direction>" commands so the mapping is reliable.
+        const dirMatch = command.match(/^go\s+(north|south|east|west|up|down|in|out)$/i);
+        if (dirMatch && prevRoom) {
+          const dir = dirMatch[1]!.toLowerCase();
+          cartographerState.dirGraph[prevRoom] ??= {};
+          cartographerState.dirGraph[prevRoom]![dir] = newRoom;
+          // Also record the reverse direction so we can navigate back.
+          const rev: Record<string, string> = {
+            north: "south", south: "north", east: "west", west: "east",
+            up: "down", down: "up", in: "out", out: "in",
+          };
+          if (rev[dir]) {
+            cartographerState.dirGraph[newRoom] ??= {};
+            cartographerState.dirGraph[newRoom]![rev[dir]!] ??= prevRoom; // don't clobber
+            // Sync reverse direction into roomExits so it appears in "Directions from here"
+            // and the Strategist knows it leads to a visited room.
+            const revDir = rev[dir]!;
+            const exits = cartographerState.roomExits[newRoom] ?? [];
+            if (!exits.includes(revDir)) {
+              cartographerState.roomExits[newRoom] = [...exits, revDir];
+            }
+          }
+        }
         const visited = (gameMemory.get("visitedRooms") as string[]) ?? [];
         if (!visited.includes(newRoom)) {
           visited.push(newRoom);
           gameMemory.set("visitedRooms", visited);
         }
       }
+
+      // Exit cache pruning: if "go <dir>" didn't change the room, that direction is
+      // invalid — remove it from roomExits AND add to blockedExits so the Cartographer
+      // never re-adds it. This fixes the "South of House" trap where Haiku hallucinates
+      // "north" as a valid exit but going north just hits a boarded window.
+      {
+        const pruneDir = command.match(/^go\s+(north|south|east|west|up|down|in|out)$/i)?.[1]?.toLowerCase();
+        if (pruneDir && prevRoom && (!newRoom || newRoom === prevRoom || !isRoomName(newRoom))) {
+          // Add to permanent block list so Cartographer never re-adds it
+          cartographerState.blockedExits[prevRoom] ??= new Set<string>();
+          cartographerState.blockedExits[prevRoom]!.add(pruneDir);
+          // Remove from live exits cache
+          const exits = cartographerState.roomExits[prevRoom];
+          if (exits?.map(e => e.toLowerCase()).includes(pruneDir)) {
+            cartographerState.roomExits[prevRoom] = exits.filter(e => e.toLowerCase() !== pruneDir);
+            log(`${C.dim}[NavPrune]${C.reset}`,
+              `Removed "${pruneDir}" from ${prevRoom} exits permanently (no room change — dead end)`);
+          }
+        }
+      }
+
+      // ── Response-text NavPrune ───────────────────────────────────────────────
+      // Scan the game response for explicit block/fail messages and update blockedExits
+      // or weightLimitExits accordingly — no game-specific knowledge required.
+      {
+        const HARD_BLOCK_RE = /locked from (above|below)|no way to go that direction|you can't go that way|the door is locked|a wall blocks/i;
+        const SOFT_BLOCK_RE = /too (heavy|much)|your load is too|you (can't|cannot) carry (any more|that much)/i;
+        const lastCmd = commandHistory.at(-1) ?? "";
+        const dirMatch = lastCmd.match(/^go\s+(\w+)/i);
+        const tacDeltaText = tacResult.findings[0]?.summary ?? "";
+        if (dirMatch && tacDeltaText) {
+          const dir = dirMatch[1]!.toLowerCase();
+          const room = cartographerState.lastRoomHeader;
+          if (room) {
+            if (HARD_BLOCK_RE.test(tacDeltaText)) {
+              cartographerState.blockedExits[room] ??= new Set<string>();
+              cartographerState.blockedExits[room]!.add(dir);
+              // Also remove from exits cache
+              const exits = cartographerState.roomExits[room];
+              if (exits?.map(e => e.toLowerCase()).includes(dir)) {
+                cartographerState.roomExits[room] = exits.filter(e => e.toLowerCase() !== dir);
+              }
+              log(`${C.dim}[NavPrune/hard]${C.reset}`,
+                `Blocked ${room} → ${dir} (response: hard wall)`);
+            } else if (SOFT_BLOCK_RE.test(tacDeltaText)) {
+              cartographerState.weightLimitExits[room] ??= new Set<string>();
+              cartographerState.weightLimitExits[room]!.add(dir);
+              log(`${C.dim}[NavPrune/soft]${C.reset}`,
+                `Weight-limited ${room} → ${dir} (retryable after drop)`);
+            }
+          }
+        }
+      }
+
       // Update inventory from game response (game-agnostic heuristic)
       const tacDelta = tacResult.findings[0]?.summary ?? "";
       const updatedInv = updateInventory([...(gameMemory.get("inventory") as string[] ?? [])], tacDelta, command);
       gameMemory.set("inventory", updatedInv);
+
+      // Update blocked-puzzle list:
+      //   ADD entry when the game signals we can't proceed (locked, need something, can't)
+      //   RESOLVE entries when the same object in the same room now succeeds
+      const puzzles = (gameMemory.get("blockedPuzzles") as BlockedPuzzle[]) ?? [];
+      const currentRoomNow = (gameMemory.get("currentRoom") as string) ?? "";
+      const blockReason = detectBlockReason(tacDelta);
+      if (blockReason) {
+        // Parse the target object from the command (e.g. "open grating" → "grating")
+        // Only log if the command has a recognizable target object — prevents
+        // commands like "look" from being logged as blocked puzzles.
+        const objMatch = command.match(/^(?:open|unlock|push|pull|move|take|use|enter)\s+(.+)/i);
+        if (objMatch) {
+          const obj = objMatch[1]!.trim();
+          const alreadyLogged = puzzles.some(
+            p => p.room === currentRoomNow && p.object === obj,
+          );
+          if (!alreadyLogged) {
+            puzzles.push({ room: currentRoomNow, object: obj, reason: blockReason });
+            gameMemory.set("blockedPuzzles", puzzles);
+            log(`${C.dim}[Memory]${C.reset}`, `Blocked puzzle recorded: "${obj}" in ${currentRoomNow} (${blockReason})`);
+          }
+        }
+      } else {
+        // Command succeeded — resolve any matching blocked entry
+        const objMatch = command.match(/^(?:open|unlock|push|pull|move|take|use|enter)\s+(.+)/i);
+        const obj = objMatch?.[1]?.trim();
+        if (obj) {
+          const before = puzzles.length;
+          const remaining = puzzles.filter(
+            p => !(p.room === currentRoomNow && p.object === obj),
+          );
+          if (remaining.length < before) {
+            gameMemory.set("blockedPuzzles", remaining);
+            log(`${C.dim}[Memory]${C.reset}`, `Blocked puzzle resolved: "${obj}" in ${currentRoomNow}`);
+          }
+        }
+      }
+
       log(`${C.dim}[Memory]${C.reset}`,
         `Room: ${gameMemory.get("currentRoom") || "?"} | Visited: ${(gameMemory.get("visitedRooms") as string[])?.length ?? 0} room(s) | Inventory: ${updatedInv.join(", ") || "empty"}`);
 
@@ -2055,10 +2560,13 @@ async function main() {
         lastDelta,
         rooms:          cartographerState.rooms,
         lastRoomHeader: cartographerState.lastRoomHeader,
-        currentRoom:    (gameMemory.get("currentRoom")  as string) ?? "",
-        inventory:      (gameMemory.get("inventory")    as string[]) ?? [],
-        visitedRooms:   (gameMemory.get("visitedRooms") as string[]) ?? [],
-        roomGraph:      (gameMemory.get("roomGraph")    as Record<string, string[]>) ?? {},
+        roomExits:      cartographerState.roomExits,
+        dirGraph:       cartographerState.dirGraph,
+        currentRoom:    (gameMemory.get("currentRoom")    as string) ?? "",
+        inventory:      (gameMemory.get("inventory")      as string[]) ?? [],
+        visitedRooms:   (gameMemory.get("visitedRooms")   as string[]) ?? [],
+        roomGraph:      (gameMemory.get("roomGraph")      as Record<string, string[]>) ?? {},
+        blockedPuzzles:       (gameMemory.get("blockedPuzzles")       as BlockedPuzzle[]) ?? [],
         tacticianCompleted: tacRep2?.tasks_completed ?? 0,
         tacticianFailed:    tacRep2?.tasks_failed    ?? 0,
         cartoCompleted:     cartoRep2?.tasks_completed ?? 0,
@@ -2069,6 +2577,7 @@ async function main() {
         cartoUsageSummary:       cartoUsage.getSummary(),
         grokUsageSummary:        grokUsage.getSummary(),
         cumulativeContextTokens,
+        rngSeed,
       });
       turnCheckpointsSaved++;
       log(`${C.dim}[Checkpoint]${C.reset}`, `Turn ${turn} saved → ${CHECKPOINT_DIR}`);

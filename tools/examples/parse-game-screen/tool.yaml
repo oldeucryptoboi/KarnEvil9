@@ -1,0 +1,56 @@
+name: parse-game-screen
+version: "1.0.0"
+description: Parse game screen text into structured room data (room name, exits, items, description)
+runner: internal
+input_schema:
+  type: object
+  required:
+    - screen_text
+  properties:
+    screen_text:
+      type: string
+      description: Raw screen text from the game emulator to parse
+  additionalProperties: false
+output_schema:
+  type: object
+  required:
+    - screen_text
+    - room_name
+    - exits
+    - items
+    - description
+  properties:
+    screen_text:
+      type: string
+      description: The original screen text
+    room_name:
+      type: string
+      description: Parsed room name
+    exits:
+      type: array
+      items:
+        type: string
+      description: Available exits from this room
+    items:
+      type: array
+      items:
+        type: string
+      description: Visible items in the room
+    description:
+      type: string
+      description: One-sentence room description
+  additionalProperties: false
+permissions:
+  - "game:read:screen"
+timeout_ms: 30000
+supports:
+  mock: true
+  dry_run: true
+mock_responses:
+  - screen_text: "You are in a room."
+    room_name: "Mock Room"
+    exits:
+      - north
+      - south
+    items: []
+    description: "A mock room for testing."

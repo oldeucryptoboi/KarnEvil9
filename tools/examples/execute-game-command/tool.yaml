@@ -1,0 +1,48 @@
+name: execute-game-command
+version: "1.0.0"
+description: Execute a command in an interactive fiction game emulator and return the response
+runner: internal
+input_schema:
+  type: object
+  required:
+    - command
+  properties:
+    command:
+      type: string
+      description: The game command to execute (e.g. "go north", "take lamp", "open door")
+  additionalProperties: false
+output_schema:
+  type: object
+  required:
+    - delta
+    - room_header
+    - screen_text
+    - success
+    - duration_ms
+  properties:
+    delta:
+      type: string
+      description: Only the new text produced by this command
+    room_header:
+      type: string
+      description: Room name parsed from screen header
+    screen_text:
+      type: string
+      description: Full screen text after command execution
+    success:
+      type: boolean
+    duration_ms:
+      type: number
+  additionalProperties: false
+permissions:
+  - "game:execute:command"
+timeout_ms: 60000
+supports:
+  mock: true
+  dry_run: true
+mock_responses:
+  - delta: "(mock) You are in a room."
+    room_header: "Mock Room"
+    screen_text: ">mock\nYou are in a room."
+    success: true
+    duration_ms: 0

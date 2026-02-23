@@ -96,11 +96,14 @@ export class ZorkFrotzEmulator {
 
   // ── lifecycle ────────────────────────────────────────────────────────────────
 
-  async launch(gamePath?: string, options?: { savePath?: string; restorePath?: string }): Promise<void> {
+  async launch(gamePath?: string, options?: { savePath?: string; restorePath?: string; seed?: number }): Promise<void> {
     this.savePath = options?.savePath ?? null;
     const spawnArgs: string[] = ["-m"];    // suppress [MORE] prompts
+    // -s fixes the Z-machine RNG seed so command replays are deterministic.
+    // Without this, combat outcomes differ on replay (different RNG state →
+    // troll may kill the player → in-game restart → inventory wiped).
+    if (options?.seed != null) spawnArgs.push("-s", String(options.seed));
     // dfrotz uses -L to restore from a save file on startup.
-    // (Note: -s is the random seed, -r sets runtime options — neither is save-related.)
     if (options?.restorePath) spawnArgs.push("-L", options.restorePath);
     spawnArgs.push(gamePath ?? ZORK1_Z3);
 

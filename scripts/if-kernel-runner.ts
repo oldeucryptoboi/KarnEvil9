@@ -66,6 +66,47 @@ const THINKING_BUDGET = parseInt(args["thinking-budget"] as string || "10000", 1
 const INJECT_FAILURE_TURN = args["inject-failure"] ? parseInt(args["inject-failure"] as string, 10) : undefined;
 
 const isAiMode     = USE_LLM;
+const isSigma      = /sigma/i.test(GAME_PATH);
+
+// ─── Sigma vocabulary translation (Zork I → THE MANOR) ──────────────────────
+// When running sigma.z8 in scripted mode, translate Zork-specific nouns so the
+// parser recognises them. Based on the structural isomorph mapping in
+// journal/2026-02-23-structural-isomorphs.md
+
+const SIGMA_VOCAB: [RegExp, string][] = [
+  [/\bleaflet\b/gi, "flyer"],
+  [/\bmailbox\b/gi, "post box"],
+  [/\bsack\b/gi, "sack"],       // same in sigma
+  [/\blantern\b/gi, "torch"],
+  [/\bsword\b/gi, "shiv"],
+  [/\btroll\b/gi, "beast"],
+  [/\bthief\b/gi, "dip"],
+  [/\brope\b/gi, "line"],
+  [/\bknife\b/gi, "chopper"],
+  [/\bbell\b/gi, "bell"],
+  [/\bcandelabrum\b/gi, "candlestick"],
+  [/\bbook\b/gi, "manual"],
+  [/\bspirits?\b/gi, "static"],
+  [/\bbar\b/gi, "bar"],
+  [/\btrapdoor\b/gi, "hatch"],
+];
+
+function translateForSigma(command: string): string {
+  let cmd = command;
+  for (const [pat, rep] of SIGMA_VOCAB) {
+    cmd = cmd.replace(pat, rep);
+  }
+  return cmd;
+}
+
+if (GAME_PATH && !isAiMode && !isSigma) {
+  console.error(
+    `\x1b[31mError:\x1b[0m --game ${GAME_PATH} requires --llm. ` +
+    `Scripted mode only supports Zork I and sigma.z8.`,
+  );
+  process.exit(1);
+}
+
 const DEFAULT_TURNS = isAiMode ? 20 : ZORK_SCRIPT.length;
 const MAX_TURNS    = isAiMode
   ? parseInt(args.turns || String(DEFAULT_TURNS), 10)
@@ -275,7 +316,8 @@ Room: Unknown | Exits: unknown | Items: unknown | Desc: Intermediate game respon
         const scriptIdx = (callModel as unknown as { _idx: number })._idx ?? 0;
         (callModel as unknown as { _idx: number })._idx = scriptIdx + 1;
         const entry = ZORK_SCRIPT[scriptIdx];
-        const command = entry?.command ?? "look";
+        let command = entry?.command ?? "look";
+        if (isSigma) command = translateForSigma(command);
         return { text: command, usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, model: "scripted" } };
       };
 

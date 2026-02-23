@@ -320,8 +320,14 @@ export async function register(api: PluginApi): Promise<void> {
     }
     const failedCmds = failedByRoom[cartState.lastRoomHeader] ?? [];
 
-    const knownExits = cartState.roomExits[cartState.lastRoomHeader] ?? [];
+    const knownExits = [...(cartState.roomExits[cartState.lastRoomHeader] ?? [])];
     const roomDirections = cartState.dirGraph[cartState.lastRoomHeader] ?? {};
+    // Merge dirGraph keys so traversed exits always appear as known
+    for (const dir of Object.keys(roomDirections)) {
+      if (!knownExits.some(e => e.toLowerCase() === dir.toLowerCase())) {
+        knownExits.push(dir);
+      }
+    }
     const turnsStalled = turn - lastNewRoomTurn;
     const weightLimitDirs = Array.from(cartState.weightLimitExits[cartState.lastRoomHeader] ?? []);
 
@@ -501,16 +507,21 @@ export async function register(api: PluginApi): Promise<void> {
           gameMemory.roomGraph[prevRoom] = [...(gameMemory.roomGraph[prevRoom] ?? []), newRoom];
         }
         // Directional graph
-        const dirMatch = command.match(/^go\s+(north|south|east|west|up|down|in|out)$/i);
+        const dirMatch = command.match(/^(?:go\s+)?(north|south|east|west|up|down|in|out)$/i);
         if (dirMatch && prevRoom) {
           const dir = dirMatch[1]!.toLowerCase();
           cartState.dirGraph[prevRoom] ??= {};
           cartState.dirGraph[prevRoom]![dir] = newRoom;
+          // Sync forward direction into roomExits for source room
+          const srcExits = cartState.roomExits[prevRoom] ?? [];
+          if (!srcExits.some(e => e.toLowerCase() === dir)) {
+            cartState.roomExits[prevRoom] = [...srcExits, dir];
+          }
           if (REVERSE_DIR[dir]) {
             cartState.dirGraph[newRoom] ??= {};
             cartState.dirGraph[newRoom]![REVERSE_DIR[dir]!] ??= prevRoom;
             const exits = cartState.roomExits[newRoom] ?? [];
-            if (!exits.includes(REVERSE_DIR[dir]!)) {
+            if (!exits.some(e => e.toLowerCase() === REVERSE_DIR[dir]!.toLowerCase())) {
               cartState.roomExits[newRoom] = [...exits, REVERSE_DIR[dir]!];
             }
           }
@@ -521,7 +532,7 @@ export async function register(api: PluginApi): Promise<void> {
       }
 
       // Exit cache pruning
-      const pruneDir = command.match(/^go\s+(north|south|east|west|up|down|in|out)$/i)?.[1]?.toLowerCase();
+      const pruneDir = command.match(/^(?:go\s+)?(north|south|east|west|up|down|in|out)$/i)?.[1]?.toLowerCase();
       if (pruneDir && prevRoom && (!newRoom || newRoom === prevRoom || !isRoomName(newRoom))) {
         cartState.blockedExits[prevRoom] ??= new Set<string>();
         cartState.blockedExits[prevRoom]!.add(pruneDir);
@@ -533,8 +544,9 @@ export async function register(api: PluginApi): Promise<void> {
       }
 
       // Response-text NavPrune
-      if (command.match(/^go\s+(\w+)/i)) {
-        const dir = command.match(/^go\s+(\w+)/i)![1]!.toLowerCase();
+      const navMatch = command.match(/^(?:go\s+)?(\w+)$/i);
+      if (navMatch && /^(north|south|east|west|up|down|in|out)$/i.test(navMatch[1]!)) {
+        const dir = navMatch[1]!.toLowerCase();
         const room = cartState.lastRoomHeader;
         if (room && delta) {
           if (HARD_BLOCK_RE.test(delta)) {

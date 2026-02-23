@@ -191,19 +191,60 @@ export class IFPlanner implements Planner {
   // ─── BFS navigation ────────────────────────────────────────────────────
 
   private computeNavHint(gameState: IFGameState): string | undefined {
-    // Simple heuristic: find unresolved puzzles that we might now be able to reach
-    if (gameState.blockedPuzzles.length === 0) return undefined;
+    if (!gameState.currentRoom) return undefined;
 
-    for (const puzzle of gameState.blockedPuzzles) {
-      const path = this.bfs(
-        gameState.dirGraph,
-        gameState.currentRoom,
-        puzzle.room,
-        gameState.blockedExits as Record<string, Set<string>>,
-      );
-      if (path && path.length > 0) {
-        return path.map((s: BfsStep) => `go ${s.direction} → ${s.destination}`).join(", then ");
+    const knownExits = gameState.knownExits ?? [];
+    const knownDirMap = gameState.roomDirections ?? {};
+    const hasUnexploredExits = knownExits.some(e => !knownDirMap[e]);
+    const visitedSet = new Set(gameState.visitedRooms);
+    const blocked = gameState.blockedExits as Record<string, Set<string>>;
+    const weightLimited = new Set(gameState.weightLimitDirs ?? []);
+
+    // Collect unvisited rooms reachable via known edges
+    const unvisitedTargets: string[] = [];
+    // Adjacent rooms first (shortest path — 1 hop)
+    for (const dest of Object.values(knownDirMap)) {
+      if (dest && !visitedSet.has(dest) && !unvisitedTargets.includes(dest)) {
+        unvisitedTargets.push(dest);
       }
+    }
+    // Then any room in the full dirGraph
+    for (const room of Object.keys(gameState.dirGraph)) {
+      if (!visitedSet.has(room) && !unvisitedTargets.includes(room)) {
+        unvisitedTargets.push(room);
+      }
+    }
+
+    // BFS to first reachable unvisited room
+    for (const target of unvisitedTargets) {
+      if (target === gameState.currentRoom) continue;
+      const path = this.bfs(gameState.dirGraph, gameState.currentRoom, target, blocked);
+      if (path && path.length > 0) {
+        const label = hasUnexploredExits ? "unexplored exits available" : "room mapped";
+        this.onVerbose?.("[NavHint]", `${label} — path to ${target}: ${path.length} step(s)`);
+        return path.map((s: BfsStep, i: number) => {
+          const src = i === 0 ? gameState.currentRoom : path[i - 1]!.destination;
+          const wt = weightLimited.has(s.direction) || (blocked[src]?.has(s.direction) ?? false);
+          return `${i + 1}. go ${s.direction} → ${s.destination}${wt ? " ⚠ drop items first" : ""}`;
+        }).join(", ");
+      }
+    }
+
+    // Fallback: BFS to blocked puzzles (may be revisitable with new items)
+    for (const puzzle of gameState.blockedPuzzles) {
+      if (puzzle.room === gameState.currentRoom) continue;
+      const path = this.bfs(gameState.dirGraph, gameState.currentRoom, puzzle.room, blocked);
+      if (path && path.length > 0) {
+        this.onVerbose?.("[NavHint]", `path to puzzle at ${puzzle.room}: ${path.length} step(s)`);
+        return path.map((s: BfsStep, i: number) =>
+          `${i + 1}. go ${s.direction} → ${s.destination}`,
+        ).join(", ");
+      }
+    }
+
+    // No reachable unvisited room and no puzzle target
+    if (!hasUnexploredExits && (gameState.turnsStalled ?? 0) >= 3) {
+      this.onVerbose?.("[NavHint]", `stalled ${gameState.turnsStalled} turns, no BFS path found`);
     }
     return undefined;
   }
@@ -243,7 +284,22 @@ export class IFPlanner implements Planner {
       ? `\n\u2691 NAVIGATION PATH (execute in order, one command per turn):\n  ${gs.navigationHint}\n`
       : "";
 
-    const stalledBlock = (gs.turnsStalled ?? 0) >= 5
+    // Detect when all known exits lead to already-visited rooms
+    const visitedSet = new Set(gs.visitedRooms);
+    const allExitsExplored = gs.knownExits.length > 0
+      && dirEntries.length >= gs.knownExits.length
+      && dirEntries.every(([, dest]) => visitedSet.has(dest));
+
+    const deadEndBlock = allExitsExplored && (gs.turnsStalled ?? 0) >= 2
+      ? `\n\u26a0 DEAD END: Every exit from this room leads to an already-visited room.\n` +
+        `  Do NOT navigate to visited rooms — you will just loop.\n` +
+        `  Instead: READ the room description carefully for interactive objects (windows, doors,\n` +
+        `  trapdoors, hatches, passages). Try "open <object>", "enter <object>", "go in",\n` +
+        `  "climb <object>", or probe hidden directions (up, down, in, out).\n` +
+        `  If nothing works after multiple attempts, retreat to a room with truly unexplored exits.\n`
+      : "";
+
+    const stalledBlock = (gs.turnsStalled ?? 0) >= 3
       ? `\n\u26a0 STALLED: No new room discovered in the last ${gs.turnsStalled} turns.\n` +
         `  All accessible areas appear exhausted from rooms you have been visiting.\n` +
         `  You MUST take aggressive action: fight blocking enemies, use items on obstacles,\n` +
@@ -262,7 +318,7 @@ AGENT MEMORY:${navBlock}${weightLimitBlock}
   Inventory: ${gs.inventory.join(", ") || "empty"}
   Rooms visited: ${gs.visitedRooms.slice(-15).join(", ") || "none yet"}
 ${exitsBlock}${dirBlock}  Recently failed/no-effect commands for this room: ${gs.failedCommands.slice(-5).join(", ") || "none"}
-${blockedBlock}${stalledBlock}${gs.futilityHint ? `\n\u26a0 LOOP DETECTED: ${gs.futilityHint}\n  \u2192 You MUST try a completely different approach.\n` : ""}`;
+${blockedBlock}${deadEndBlock}${stalledBlock}${gs.futilityHint ? `\n\u26a0 LOOP DETECTED: ${gs.futilityHint}\n  \u2192 You MUST try a completely different approach.\n` : ""}`;
 
     const lessonBlock = gs.pastLessons && gs.pastLessons.length > 0 ? `
 CROSS-SESSION MEMORY (from ${gs.pastLessons.length} prior session(s)):

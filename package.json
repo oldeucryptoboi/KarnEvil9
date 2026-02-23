@@ -36,6 +36,7 @@
     "@karnevil9/tools": "workspace:^",
     "@openai/codex-sdk": "^0.99.0",
     "@slack/bolt": "^4.1.0",
+    "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.0.0",
@@ -44,6 +45,7 @@
     "googleapis": "^148.0.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
+    "playwright": "^1.58.2",
     "qrcode-terminal": "^0.12.0",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
@@ -57,5 +59,9 @@
   "lint-staged": {
     "packages/*/src/**/*.ts": "biome lint --no-errors-on-unmatched"
   },
-  "packageManager": "pnpm@9.15.0"
+  "packageManager": "pnpm@9.15.0",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "express": "^5.0.0"
+  }
 }

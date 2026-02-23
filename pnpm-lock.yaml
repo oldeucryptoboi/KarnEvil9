@@ -7,6 +7,13 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.39.0
+        version: 0.39.0
+      express:
+        specifier: ^5.0.0
+        version: 5.2.1
     devDependencies:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.2.39
@@ -68,6 +75,9 @@ importers:
       '@slack/bolt':
         specifier: ^4.1.0
         version: 4.6.0(@types/express@5.0.6)
+      '@types/express':
+        specifier: ^5.0.0
+        version: 5.0.6
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.9
@@ -92,6 +102,9 @@ importers:
       lint-staged:
         specifier: ^16.2.7
         version: 16.2.7
+      playwright:
+        specifier: ^1.58.2
+        version: 1.58.2
       qrcode-terminal:
         specifier: ^0.12.0
         version: 0.12.0
@@ -4775,8 +4788,7 @@ snapshots:
       sonic-boom: 4.2.1
       thread-stream: 3.1.0
 
-  playwright-core@1.58.2:
-    optional: true
+  playwright-core@1.58.2: {}
 
   playwright-extra@4.3.6(playwright-core@1.58.2)(playwright@1.58.2):
     dependencies:
@@ -4793,7 +4805,6 @@ snapshots:
       playwright-core: 1.58.2
     optionalDependencies:
       fsevents: 2.3.2
-    optional: true
 
   postcss@8.5.6:
     dependencies:

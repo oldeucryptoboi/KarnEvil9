@@ -62,6 +62,7 @@
 import "dotenv/config";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
+import * as readline from "node:readline";
 import { createHash } from "node:crypto";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import * as http from "node:http";
@@ -70,8 +71,10 @@ import { parseArgs } from "node:util";
 import { v4 as uuid } from "uuid";
 import Anthropic from "@anthropic-ai/sdk";
 import { Journal } from "@karnevil9/journal";
-import { FutilityMonitor, type IterationRecord } from "@karnevil9/kernel";
-import { WorkingMemoryManager } from "@karnevil9/memory";
+import { PermissionEngine, type ApprovalPromptFn } from "@karnevil9/permissions";
+import { FutilityMonitor, UsageAccumulator, ContextBudgetMonitor, type IterationRecord, type UsageSummary, type ContextIteration } from "@karnevil9/kernel";
+import { WorkingMemoryManager, ActiveMemory } from "@karnevil9/memory";
+import { MetricsCollector } from "@karnevil9/metrics";
 import {
   MeshManager,
   createSwarmRoutes,
@@ -86,6 +89,9 @@ import {
   AnomalyDetector,
   CheckpointSerializer,
   RootCauseAnalyzer,
+  BehavioralScorer,
+  RedelegationMonitor,
+  SybilDetector,
   getTrustTier,
   authorityFromTrust,
   type SwarmConfig,
@@ -97,7 +103,7 @@ import {
   type ContractMonitoring,
   type DelegationContract,
 } from "@karnevil9/swarm";
-import type { StepResult } from "@karnevil9/schemas";
+import type { StepResult, PermissionRequest, MemoryLesson, ModelPricing } from "@karnevil9/schemas";
 import { ZorkEmulator, ZORK_SCRIPT, extractRoomHeader } from "./apple2-zork-emulator.js";
 import { ZorkFrotzEmulator } from "./apple2-zork-frotz.js";
 
@@ -175,6 +181,12 @@ interface SessionCheckpoint {
   // Escrow — free balances so slashes carry over across sessions
   tacticianEscrow:   number;
   cartoEscrow:       number;
+  // Usage accumulators — cumulative real API cost across all sessions
+  strategistUsageSummary?: UsageSummary;
+  cartoUsageSummary?:      UsageSummary;
+  grokUsageSummary?:       UsageSummary;
+  // ContextBudgetMonitor — cumulative tokens fed into Claude context across sessions
+  cumulativeContextTokens?: number;
 }
 
 // ─── API key guards ───────────────────────────────────────────────────────────
@@ -261,6 +273,21 @@ function maskGameText(text: string): string {
     .replace(/^Revision\s+\d+\s*\/\s*Serial number\s+\d+.*/gim, blk);
 }
 
+// ─── Real cost tracking ───────────────────────────────────────────────────────
+//
+// UsageAccumulator instances are module-level so they can be updated from inside
+// askStrategist(), askCartographer(), and askGrok() without changing call sites.
+// Pricing (per 1k tokens) matches Anthropic and xAI published rates as of 2025-Q4.
+
+const SONNET_PRICING: ModelPricing = { input_cost_per_1k_tokens: 0.003,   output_cost_per_1k_tokens: 0.015   };
+const HAIKU_PRICING:  ModelPricing = { input_cost_per_1k_tokens: 0.00025, output_cost_per_1k_tokens: 0.00125 };
+const GROK_PRICING:   ModelPricing = { input_cost_per_1k_tokens: 0.005,   output_cost_per_1k_tokens: 0.015   };
+
+// Separate accumulator per model so the session summary shows per-agent spend.
+const strategistUsage = new UsageAccumulator(SONNET_PRICING);
+const cartoUsage      = new UsageAccumulator(HAIKU_PRICING);
+const grokUsage       = new UsageAccumulator(GROK_PRICING);
+
 // ─── LLM helpers ──────────────────────────────────────────────────────────────
 
 /**
@@ -289,6 +316,7 @@ async function askStrategist(
     futilityHint:   string;
     failedCommands: string[];
   },
+  pastLessons?: MemoryLesson[],
 ): Promise<string> {
   if (!USE_LLM && !USE_GROK_ENHANCED) throw new Error("No LLM configured for Strategist");
 
@@ -299,9 +327,16 @@ AGENT MEMORY:
   Recently failed/no-effect commands: ${gameState.failedCommands.slice(-5).join(", ") || "none"}
 ${gameState.futilityHint ? `\n⚠ LOOP DETECTED: ${gameState.futilityHint}\n  → You MUST try a completely different approach.\n` : ""}` : "";
 
+  // Cross-session lessons retrieved from ActiveMemory (persist across --resume sessions).
+  // Injected verbatim so the model can avoid repeating mistakes from earlier runs.
+  const lessonBlock = pastLessons && pastLessons.length > 0 ? `
+CROSS-SESSION MEMORY (from ${pastLessons.length} prior session(s)):
+${pastLessons.map(l => `  • [${l.outcome}] ${l.lesson}`).join("\n")}
+` : "";
+
   const system = `You are the Strategist agent in an autonomous multi-agent system playing an interactive text-based game.
 Your role: read the current environment state and decide the single best next action to make progress.
-${memoryBlock}
+${memoryBlock}${lessonBlock}
 Rules:
 - Respond with EXACTLY ONE command, nothing else — no explanation, no punctuation at the end.
 - Valid command forms: go <direction>, take <item>, drop <item>, open <object>, examine <object>, read <object>, attack <enemy> with <weapon>, etc.
@@ -339,8 +374,18 @@ What is your next command?`;
       body: JSON.stringify({ model: GROK_MODEL, messages, max_tokens: 64 }),
     });
     if (!resp.ok) throw new Error(`xAI strategist error ${resp.status}`);
-    const json = await resp.json() as { choices: Array<{ message: { content: string } }> };
-    const raw  = json.choices[0]?.message?.content?.trim() ?? "look";
+    const json = await resp.json() as {
+      choices: Array<{ message: { content: string } }>;
+      usage?: { prompt_tokens: number; completion_tokens: number };
+    };
+    if (json.usage) {
+      grokUsage.record({
+        input_tokens:  json.usage.prompt_tokens,
+        output_tokens: json.usage.completion_tokens,
+        total_tokens:  json.usage.prompt_tokens + json.usage.completion_tokens,
+      });
+    }
+    const raw = json.choices[0]?.message?.content?.trim() ?? "look";
     return raw.replace(/^["'`]|["'`]$/g, "").replace(/[.!?]$/, "").toLowerCase().trim();
   }
 
@@ -349,6 +394,12 @@ What is your next command?`;
     max_tokens: 64,
     system,
     messages: [{ role: "user", content: user }],
+  });
+  // Record real token usage for cost tracking
+  strategistUsage.record({
+    input_tokens:  response.usage.input_tokens,
+    output_tokens: response.usage.output_tokens,
+    total_tokens:  response.usage.input_tokens + response.usage.output_tokens,
   });
 
   const block = response.content[0];
@@ -388,6 +439,12 @@ Do not output prose explanations or ask for clarification.`;
     max_tokens: 128,
     system,
     messages: [{ role: "user", content: `Screen text:\n${maskGameText(screenText)}` }],
+  });
+  // Record real token usage for cost tracking
+  cartoUsage.record({
+    input_tokens:  response.usage.input_tokens,
+    output_tokens: response.usage.output_tokens,
+    total_tokens:  response.usage.input_tokens + response.usage.output_tokens,
   });
 
   const block = response.content[0];
@@ -488,6 +545,13 @@ What is your single next command?`;
     choices: Array<{ message: { content: string } }>;
     usage?: { prompt_tokens: number; completion_tokens: number };
   };
+  if (json.usage) {
+    grokUsage.record({
+      input_tokens:  json.usage.prompt_tokens,
+      output_tokens: json.usage.completion_tokens,
+      total_tokens:  json.usage.prompt_tokens + json.usage.completion_tokens,
+    });
+  }
 
   const raw = json.choices[0]?.message?.content?.trim() ?? "look";
   // Strip accidental punctuation / quotes / markdown
@@ -1058,6 +1122,89 @@ function delegationAttributes(trustScore: number): TaskAttribute {
   };
 }
 
+// ─── PermissionEngine helpers ─────────────────────────────────────────────────
+
+/**
+ * Returns a permission gate descriptor when a command requires human approval.
+ *
+ * Two gates are wired in:
+ *   game:navigate:underground — triggered when the agent attempts to descend
+ *     underground from a location that has a trapdoor or leads to the cellar.
+ *   game:engage:combat — triggered on any attack / kill command.
+ *
+ * Both gates are domain-agnostic: "game" as the permission domain means they
+ * work for any Z-machine title, not just Zork.
+ *
+ * PermissionEngine caches session-level approvals: once the user approves with
+ * "allow_session" they are not prompted again in the same run.  On the next
+ * --resume session they will be asked once more (per-session policy).
+ */
+interface PermGate { scope: string; description: string; }
+
+function getPermissionGate(command: string, currentRoom: string): PermGate | null {
+  const cmd = command.trim().toLowerCase();
+
+  // Gate 1: descending into an underground area
+  if (/^(go\s+)?down$|^descend$/.test(cmd)) {
+    if (/trapdoor|cellar|grating|dam|underground|shaft|cave/i.test(currentRoom)) {
+      return {
+        scope:       "game:navigate:underground",
+        description: `Descend underground from "${currentRoom}"`,
+      };
+    }
+  }
+
+  // Gate 2: any combat action
+  if (/^(attack|kill|hit|fight|stab|slay|strike|swing)\b/.test(cmd)) {
+    return {
+      scope:       "game:engage:combat",
+      description: `Issue combat command: "${command}"`,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Builds the interactive ApprovalPromptFn used by PermissionEngine.
+ *
+ * Pauses the game loop and presents the user with a Y/O/N prompt on stdout.
+ * Response options:
+ *   y / yes   → allow_session  (approved for the remainder of this session)
+ *   o / once  → allow_once     (approved for this single action only)
+ *   n / no    → deny
+ *
+ * A clear separator is printed before and after the prompt so the user can
+ * distinguish it from the normal game-loop output.
+ */
+function makePermissionPromptFn(): ApprovalPromptFn {
+  return async (request): Promise<"allow_once" | "allow_session" | "allow_always" | "deny"> => {
+    const scope = request.permissions[0]?.scope ?? "unknown";
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+    console.log(`\n${"\x1b[33m"}${"─".repeat(62)}\x1b[0m`);
+    console.log(`  \x1b[1m\x1b[33m[PermissionEngine]\x1b[0m Permission required`);
+    console.log(`  Scope   : ${scope}`);
+    console.log(`  Action  : ${request.permissions[0]?.domain}:${request.permissions[0]?.action}:${request.permissions[0]?.target}`);
+    console.log(`  Step    : ${request.step_id}`);
+    console.log(`${"\x1b[33m"}${"─".repeat(62)}\x1b[0m`);
+
+    return new Promise((resolve) => {
+      rl.question(
+        "  Approve? \x1b[2m(y=allow session / o=allow once / n=deny)\x1b[0m > ",
+        (answer) => {
+          rl.close();
+          const a = answer.trim().toLowerCase();
+          console.log(`${"\x1b[33m"}${"─".repeat(62)}\x1b[0m\n`);
+          if (a === "y" || a === "yes") resolve("allow_session");
+          else if (a === "o" || a === "once") resolve("allow_once");
+          else resolve("deny");
+        },
+      );
+    });
+  };
+}
+
 // ─── Checkpoint helpers ───────────────────────────────────────────────────────
 
 /**
@@ -1183,6 +1330,12 @@ async function main() {
   // ── Form mesh ────────────────────────────────────────────────────────────
   header("FORMING MESH");
 
+  // SybilDetector — screens every identity as it joins. In a 3-known-node setup
+  // it never fires, but establishes the security posture: any node that joins
+  // with a capability overlap > 0.9 or bursts more than 5 joins in 5 s is flagged.
+  const sybilDetector = new SybilDetector();
+  let   sybilSuspects = 0;
+
   await Promise.all(nodes.map((n) => n.mesh.start()));
   const pairs: [ZorkNode, ZorkNode][] = [
     [strategist, tactician],
@@ -1193,6 +1346,19 @@ async function main() {
     a.mesh.handleJoin(b.mesh.getIdentity());
     b.mesh.handleJoin(a.mesh.getIdentity());
     log(`${C.blue}↔${C.reset}`, `${a.color}${a.name}${C.reset} ←→ ${b.color}${b.name}${C.reset}`);
+  }
+  // Analyze every non-strategist node join for Sybil patterns
+  for (const node of [tactician, cartographer]) {
+    const identity = node.mesh.getIdentity();
+    sybilDetector.recordJoin(identity);
+    const reports = sybilDetector.analyzeJoin(identity);
+    if (reports.length > 0) {
+      sybilSuspects += reports.length;
+      for (const r of reports)
+        log(`${C.red}[Sybil]${C.reset}`, `${C.red}${r.indicator} (confidence ${r.confidence.toFixed(2)}, action: ${r.action})${C.reset}`);
+    } else {
+      log(`${C.dim}[Sybil]${C.reset}`, `${node.name} identity verified — no anomalies`);
+    }
   }
   await new Promise<void>((r) => setTimeout(r, 200));
 
@@ -1267,6 +1433,12 @@ async function main() {
   const firebreak = new LiabilityFirebreak();
   const router    = new DelegateeRouter();
 
+  // PermissionEngine — human-in-the-loop gate for dangerous game actions.
+  // Wired to the Strategist's journal so every approval/denial is hash-chained.
+  const permEngine = new PermissionEngine(strategist.journal, makePermissionPromptFn());
+  let permDenials  = 0;
+  let permApprovals = 0;
+
   strategist.mesh.setLiabilityFirebreak(firebreak);
   strategist.mesh.setCognitiveFriction(friction);
 
@@ -1317,7 +1489,78 @@ async function main() {
     reputationStore: reputation,
   });
 
+  // ── BehavioralScorer ──────────────────────────────────────────────────
+  // Tracks transparency, safety compliance, and protocol adherence per node
+  // alongside the raw completion-ratio in ReputationStore. Inferred each turn
+  // from SLO pass/fail: pass = safety_compliant + protocol_followed,
+  // fail = safety_violation + protocol_violated.
+  const behavioralScorer = new BehavioralScorer();
+
+  // ── RedelegationMonitor ───────────────────────────────────────────────
+  // Formally tracks every delegation and re-delegation chain. Enforces the
+  // max_redelegations ceiling via the framework instead of hand-written logic.
+  const redelegationMonitor = new RedelegationMonitor({
+    max_redelegations:        3,
+    redelegation_cooldown_ms: 0,
+  });
+
+  // ── ContextBudgetMonitor ──────────────────────────────────────────────
+  // Watches cumulative LLM tokens vs the Claude context window limit.
+  // Fires verdicts at 70 % (delegate), 80 % (checkpoint), 90 % (summarize)
+  // so long resumed sessions save state before the context overflows.
+  const MAX_CONTEXT_TOKENS = 200_000;
+  const contextBudget = new ContextBudgetMonitor({
+    delegateThreshold:         0.70,
+    checkpointThreshold:       0.80,
+    summarizeThreshold:        0.90,
+    minIterationsBeforeAction: 3,
+  });
+  let cumulativeContextTokens = ckpt?.cumulativeContextTokens ?? 0;
+
   log(`${C.dim}•${C.reset}`, `WorkingMemory + FutilityMonitor + AnomalyDetector + CheckpointSerializer + RootCauseAnalyzer: active`);
+  log(`${C.dim}•${C.reset}`, `BehavioralScorer + RedelegationMonitor: active`);
+  log(`${C.dim}•${C.reset}`, `ContextBudgetMonitor: ctx ${cumulativeContextTokens.toLocaleString()} / ${MAX_CONTEXT_TOKENS.toLocaleString()} tokens (${ckpt ? "restored" : "fresh"})`);
+  log(`${C.dim}•${C.reset}`, `PermissionEngine: active (gates: game:navigate:underground, game:engage:combat)`);
+
+  // ── MetricsCollector ──────────────────────────────────────────────────────
+  // Attached to the Strategist's journal: every swarm event (delegation, escrow,
+  // consensus, firebreak, reputation) is automatically counted in Prometheus format.
+  // Written to a .prom file at session end for optional scraping / dashboarding.
+  const metrics = new MetricsCollector();
+  metrics.attach(strategist.journal);
+
+  // ── ActiveMemory ──────────────────────────────────────────────────────────
+  // Cross-session JSONL file that persists game lessons between runs.
+  // Loaded here so the game loop can inject past lessons into the Strategist prompt.
+  const activeMemoryPath = join(CHECKPOINT_DIR, "active-memory.jsonl");
+  const activeMemory = new ActiveMemory(activeMemoryPath);
+  await activeMemory.load();
+  const pastLessons = activeMemory.search(
+    "interactive fiction zork game rooms exploration",
+    ["zork-emulator", "cartographer-llm"],
+  );
+  if (pastLessons.length > 0) {
+    log(`${C.blue}[Memory]${C.reset}`,
+      `Loaded ${pastLessons.length} lesson(s) from prior session(s) — injecting into Strategist`);
+    for (const l of pastLessons) {
+      log(`${C.dim}  ↳${C.reset}`, `[${l.outcome}] ${l.lesson.slice(0, 100)}`);
+    }
+  } else {
+    log(`${C.dim}[Memory]${C.reset}`, `No prior lessons found — starting fresh`);
+  }
+
+  // ── Restore usage accumulators from checkpoint ────────────────────────────
+  // Lets the session summary show cumulative cost across ALL sessions, not just
+  // the current one. Fresh starts have no saved summaries (optional fields).
+  if (ckpt?.strategistUsageSummary) strategistUsage.restoreFrom(ckpt.strategistUsageSummary);
+  if (ckpt?.cartoUsageSummary)      cartoUsage.restoreFrom(ckpt.cartoUsageSummary);
+  if (ckpt?.grokUsageSummary)       grokUsage.restoreFrom(ckpt.grokUsageSummary);
+  if (ckpt && (ckpt.strategistUsageSummary || ckpt.cartoUsageSummary || ckpt.grokUsageSummary)) {
+    const prevTotal = (ckpt.strategistUsageSummary?.total_cost_usd ?? 0)
+                    + (ckpt.cartoUsageSummary?.total_cost_usd ?? 0)
+                    + (ckpt.grokUsageSummary?.total_cost_usd ?? 0);
+    log(`${C.dim}[Cost]${C.reset}`, `Restored prior spend: $${prevTotal.toFixed(4)} (carries forward)`);
+  }
 
   // ── Base SLO ─────────────────────────────────────────────────────────────
   const baseSLO: ContractSLO = { max_duration_ms: 5000, max_tokens: 500, max_cost_usd: 0.02 };
@@ -1341,6 +1584,10 @@ async function main() {
 
   for (let turn = startTurn; turn <= startTurn + MAX_TURNS - 1; turn++) {
     console.log(`\n${C.bold}${C.dim}── Turn ${turn}${ckpt ? ` (session total) / ${ckpt.turn + MAX_TURNS}` : ` / ${MAX_TURNS}`} ──────────────────────────────────────────${C.reset}`);
+
+    // Snapshot cumulative token spend before any LLM calls this turn so we can
+    // compute the per-turn delta for ContextBudgetMonitor.
+    const prevTurnTokens = strategistUsage.totalTokens + cartoUsage.totalTokens + grokUsage.totalTokens;
 
     // ── Read working memory for this turn ───────────────────────────────
     const gmInventory    = (gameMemory.get("inventory")    ?? []) as string[];
@@ -1368,6 +1615,7 @@ async function main() {
         fullScreen,
         { inventory: gmInventory, visitedRooms: gmVisitedRooms,
           futilityHint, failedCommands: failedCmds },
+        pastLessons,
       );
       futilityHint = "";  // consumed; reset for next turn
       log(`${C.cyan}[Strategist/LLM]${C.reset}`,
@@ -1431,6 +1679,38 @@ async function main() {
       continue;
     }
 
+    // ── Step 3b: PermissionEngine — human-in-the-loop gate ──────────────
+    //
+    // Checked AFTER CognitiveFriction + Firebreak (machine guards) and BEFORE
+    // any escrow is held.  Only commands that match a registered gate pattern
+    // are checked; all others pass through without prompting the user.
+    //
+    // The gate is session-aware: once the user approves "allow_session", the
+    // permission is cached and won't prompt again in this run.  Every approval
+    // and denial is appended to the Strategist's SHA-256 hash chain journal.
+    const permGate = getPermissionGate(command, cartographerState.lastRoomHeader);
+    if (permGate) {
+      const permReq: PermissionRequest = {
+        request_id:  `perm-${uuid().slice(0, 8)}`,
+        session_id:  sessionId,
+        step_id:     `step-${turn}`,
+        tool_name:   "zork-emulator",
+        permissions: [PermissionEngine.parse(permGate.scope)],
+      };
+      log(`${C.yellow}[Permission]${C.reset}`,
+        `Gate "${C.bold}${permGate.scope}${C.reset}" — ${permGate.description}`);
+      const permResult = await permEngine.check(permReq);
+      if (!permResult.allowed) {
+        permDenials++;
+        log(`${C.red}[Permission]${C.reset}`,
+          `${C.red}Action denied by operator — skipping turn${C.reset}`);
+        emulator.skipTurn();
+        continue;
+      }
+      permApprovals++;
+      log(`${C.green}[Permission]${C.reset}`, `${C.green}Approved — proceeding${C.reset}`);
+    }
+
     // ── Step 4: Graduated authority → dynamic SLO ──────────────────────
     const authority = authorityFromTrust(trustNow, baseSLO, baseMonitoring);
     const tier      = getTrustTier(trustNow);
@@ -1464,6 +1744,13 @@ async function main() {
       `Bond held: $0.10 for ${C.dim}${tacTaskId}${C.reset} (held: ${bondResult.held})`);
 
     // ── Step 7: Delegate to executor ────────────────────────────────────
+    // RedelegationMonitor: register this delegation before it runs so the
+    // monitor can enforce the re-delegation ceiling if the task later fails.
+    redelegationMonitor.trackDelegation(
+      tacTaskId, executorId, `EXECUTE: ${command}`, sessionId,
+      { max_tokens: authority.slo.max_tokens, max_cost_usd: authority.slo.max_cost_usd ?? 0.02, max_duration_ms: authority.slo.max_duration_ms },
+    );
+
     let tacResult: SwarmTaskResult;
     let redelegated = false;
 
@@ -1540,6 +1827,44 @@ async function main() {
         log(`${C.red}[Anomaly]${C.reset}`, `${a.type} (${a.severity}): ${a.description}`);
     }
 
+    // ── Step 8d: BehavioralScorer ─────────────────────────────────────────
+    // Infer observations from the SLO result: a pass means the executor was
+    // safety-compliant and followed protocol; a fail is the inverse.
+    // checkpointsMissed = 0 because we checkpoint every successful turn.
+    behavioralScorer.inferObservationsFromResult(executorId, 0, !sloOk);
+    const behavScore = behavioralScorer.computeCompositeScore(executorId);
+    log(`${C.dim}[Behavior]${C.reset}`,
+      `${executorName} behavioral score: ${C.green}${behavScore.toFixed(2)}${C.reset}`);
+
+    // ── Step 8e: ContextBudgetMonitor ─────────────────────────────────────
+    // Compute per-turn token delta and feed it to the context budget monitor.
+    // Fires a warning when cumulative context approaches the window limit.
+    const turnTokens = (strategistUsage.totalTokens + cartoUsage.totalTokens + grokUsage.totalTokens) - prevTurnTokens;
+    cumulativeContextTokens += turnTokens;
+    const ctxIter: ContextIteration = {
+      iteration:               turn,
+      tokensUsedThisIteration: turnTokens,
+      cumulativeTokens:        cumulativeContextTokens,
+      maxTokens:               MAX_CONTEXT_TOKENS,
+      toolsUsed:               ["zork-emulator", USE_LLM ? "claude-sonnet" : USE_GROK_ENHANCED ? "grok" : "scripted"],
+      planGoal:                command,
+      stepCount:               turn,
+    };
+    const ctxVerdict = contextBudget.recordIteration(ctxIter);
+    const ctxPct = ((cumulativeContextTokens / MAX_CONTEXT_TOKENS) * 100).toFixed(1);
+    if (ctxVerdict.action !== "continue") {
+      const reason = (ctxVerdict as { action: string; reason: string }).reason;
+      log(`${C.yellow}[ContextBudget]${C.reset}`,
+        `${C.yellow}${ctxVerdict.action.toUpperCase()}: ${reason} (${ctxPct}% of window)${C.reset}`);
+      if (ctxVerdict.action === "checkpoint" || ctxVerdict.action === "summarize") {
+        log(`${C.yellow}[ContextBudget]${C.reset}`,
+          `→ Consider --resume after this session to reset context accumulation`);
+      }
+    } else {
+      log(`${C.dim}[ContextBudget]${C.reset}`,
+        `${cumulativeContextTokens.toLocaleString()} / ${MAX_CONTEXT_TOKENS.toLocaleString()} tokens (${ctxPct}%)`);
+    }
+
     // ── Step 9: Re-delegation if SLO violated ──────────────────────────
     if (!sloOk) {
       log(`${C.red}[Strategist]${C.reset}`,
@@ -1562,8 +1887,16 @@ async function main() {
         `Cause: ${diag.root_cause} (${(diag.confidence * 100).toFixed(0)}%) → ${recovery}`);
 
       // Re-delegate a simpler variant to Cartographer
+      const reOk = redelegationMonitor.recordRedelegation(tacTaskId, cartoId);
+      if (!reOk) {
+        log(`${C.red}[Redelegation]${C.reset}`,
+          `${C.red}Max re-delegations reached for task ${tacTaskId} — aborting${C.reset}`);
+        failCount++;
+        continue;
+      }
+      const reCount = redelegationMonitor.getRedelegationCount(tacTaskId);
       log(`${C.magenta}[Strategist]${C.reset}`,
-        `${C.yellow}Re-delegating to Cartographer (simpler variant)...${C.reset}`);
+        `${C.yellow}Re-delegating to Cartographer (attempt ${reCount})...${C.reset}`);
 
       const reTaskId = `task-re-${uuid().slice(0, 8)}`;
       escrow.holdBond(reTaskId, cartoId, 0.10);
@@ -1619,6 +1952,20 @@ async function main() {
       gameMemory.set("inventory", updatedInv);
       log(`${C.dim}[Memory]${C.reset}`,
         `Room: ${gameMemory.get("currentRoom") || "?"} | Visited: ${(gameMemory.get("visitedRooms") as string[])?.length ?? 0} room(s) | Inventory: ${updatedInv.join(", ") || "empty"}`);
+
+    // ── Real cost snapshot ────────────────────────────────────────────────
+    {
+      const s = strategistUsage.getSummary();
+      const c = cartoUsage.getSummary();
+      const g = grokUsage.getSummary();
+      const total = s.total_cost_usd + c.total_cost_usd + g.total_cost_usd;
+      const parts: string[] = [];
+      if (s.call_count > 0) parts.push(`Strategist $${s.total_cost_usd.toFixed(4)} (${s.call_count} calls)`);
+      if (c.call_count > 0) parts.push(`Cartographer $${c.total_cost_usd.toFixed(4)} (${c.call_count} calls)`);
+      if (g.call_count > 0) parts.push(`Grok $${g.total_cost_usd.toFixed(4)} (${g.call_count} calls)`);
+      log(`${C.dim}[Cost]${C.reset}`,
+        `Session total: ${C.yellow}$${total.toFixed(4)}${C.reset} | ${parts.join(" | ")}`);
+    }
     }
 
     // ── Step 10: Independent consensus ──────────────────────────────────
@@ -1718,6 +2065,10 @@ async function main() {
         cartoFailed:        cartoRep2?.tasks_failed    ?? 0,
         tacticianEscrow:    escrow.getFreeBalance(tacticianId),
         cartoEscrow:        escrow.getFreeBalance(cartoId),
+        strategistUsageSummary:  strategistUsage.getSummary(),
+        cartoUsageSummary:       cartoUsage.getSummary(),
+        grokUsageSummary:        grokUsage.getSummary(),
+        cumulativeContextTokens,
       });
       turnCheckpointsSaved++;
       log(`${C.dim}[Checkpoint]${C.reset}`, `Turn ${turn} saved → ${CHECKPOINT_DIR}`);
@@ -1776,6 +2127,101 @@ async function main() {
   log(`${C.dim}•${C.reset}`,   `Futility detections: ${futilityHalts} (loop guard activations)`);
   log(`${C.dim}•${C.reset}`,   `Anomalies detected: ${anomalyCount}`);
   log(`${C.dim}•${C.reset}`,   `Checkpoints saved: ${turnCheckpointsSaved} turn(s) → ${CHECKPOINT_DIR}${ckpt ? ` (resumed from turn ${ckpt.turn})` : ""}`);
+  log(`${C.dim}•${C.reset}`,   `PermissionEngine: ${permApprovals} approval(s), ${permDenials} denial(s) | Grants: ${permEngine.listGrants(sessionId).map(g => g.scope).join(", ") || "none"}`);
+
+  // BehavioralScorer summary
+  const tacBehav   = behavioralScorer.getMetrics(tacticianId);
+  const cartoBehav = behavioralScorer.getMetrics(cartoId);
+  if (tacBehav) {
+    log(`${C.dim}•${C.reset}`,
+      `Tactician behavioral: composite ${C.green}${tacBehav.composite_score.toFixed(2)}${C.reset} | safety ${tacBehav.safety.toFixed(2)} | protocol ${tacBehav.protocol_compliance.toFixed(2)} | ${tacBehav.observation_count} obs`);
+  }
+  if (cartoBehav) {
+    log(`${C.dim}•${C.reset}`,
+      `Cartographer behavioral: composite ${C.green}${cartoBehav.composite_score.toFixed(2)}${C.reset} | safety ${cartoBehav.safety.toFixed(2)} | protocol ${cartoBehav.protocol_compliance.toFixed(2)} | ${cartoBehav.observation_count} obs`);
+  }
+
+  // RedelegationMonitor summary
+  const trackedDelegations = redelegationMonitor.getTrackedDelegations();
+  const totalRedelegations = trackedDelegations.reduce((s, d) => s + d.redelegation_count, 0);
+  log(`${C.dim}•${C.reset}`,
+    `RedelegationMonitor: ${trackedDelegations.length} task(s) tracked, ${totalRedelegations} re-delegation(s)`);
+
+  // SybilDetector summary
+  log(`${C.dim}•${C.reset}`,
+    `SybilDetector: ${sybilDetector.getReports().length} report(s), ${sybilSuspects} suspect(s) flagged`);
+
+  // ContextBudgetMonitor summary
+  const ctxFinalPct = ((cumulativeContextTokens / MAX_CONTEXT_TOKENS) * 100).toFixed(1);
+  log(`${C.dim}•${C.reset}`,
+    `ContextBudget: ${cumulativeContextTokens.toLocaleString()} / ${MAX_CONTEXT_TOKENS.toLocaleString()} tokens used (${ctxFinalPct}% of window)`);
+
+  // ── Real cost summary ────────────────────────────────────────────────────
+  {
+    const s = strategistUsage.getSummary();
+    const c = cartoUsage.getSummary();
+    const g = grokUsage.getSummary();
+    const sessionTotal = s.total_cost_usd + c.total_cost_usd + g.total_cost_usd;
+    const sessionTokens = s.total_tokens + c.total_tokens + g.total_tokens;
+    console.log();
+    log(`${C.bold}💰${C.reset}`, `${C.bold}Actual API cost (this session):${C.reset} ${C.yellow}$${sessionTotal.toFixed(4)}${C.reset} / ${sessionTokens.toLocaleString()} tokens`);
+    if (s.call_count > 0) {
+      log(`${C.dim}  ↳${C.reset}`, `Strategist (${STRATEGIST_MODEL}): ${s.total_tokens.toLocaleString()} tokens (${s.total_input_tokens} in / ${s.total_output_tokens} out) → $${s.total_cost_usd.toFixed(4)}`);
+    }
+    if (c.call_count > 0) {
+      log(`${C.dim}  ↳${C.reset}`, `Cartographer (${CARTOGRAPHER_MODEL}): ${c.total_tokens.toLocaleString()} tokens (${c.total_input_tokens} in / ${c.total_output_tokens} out) → $${c.total_cost_usd.toFixed(4)}`);
+    }
+    if (g.call_count > 0) {
+      log(`${C.dim}  ↳${C.reset}`, `Grok (${GROK_MODEL}): ${g.total_tokens.toLocaleString()} tokens (${g.total_input_tokens} in / ${g.total_output_tokens} out) → $${g.total_cost_usd.toFixed(4)}`);
+    }
+    if (!USE_LLM && !USE_GROK && !USE_GROK_ENHANCED) {
+      log(`${C.dim}•${C.reset}`, `No LLM active — cost is $0.00 (scripted mode)`);
+    }
+  }
+
+  // ── Cross-session lesson ─────────────────────────────────────────────────
+  // Distil this session into a MemoryLesson and persist it.  On the next run
+  // (--resume or fresh start) the Strategist will receive it as context.
+  if (commandHistory.length > 0) {
+    const rooms = cartographerState.rooms;
+    const inv   = (gameMemory.get("inventory") as string[]) ?? [];
+    const visitedCount = (gameMemory.get("visitedRooms") as string[])?.length ?? 0;
+    const efficiencyPct = MAX_TURNS > 0 ? Math.round((successCount / MAX_TURNS) * 100) : 0;
+
+    const lessonText = [
+      `Explored ${rooms.length} room(s): ${rooms.slice(0, 8).join(", ")}${rooms.length > 8 ? "…" : ""}.`,
+      inv.length > 0 ? `Items acquired: ${inv.join(", ")}.` : "No items acquired.",
+      `${successCount}/${MAX_TURNS} turns effective (${efficiencyPct}%).`,
+      commandHistory.length > 0
+        ? `Last 5 commands: ${commandHistory.slice(-5).join(", ")}.`
+        : "",
+    ].filter(Boolean).join(" ").slice(0, 400);
+
+    const lesson: MemoryLesson = {
+      lesson_id:       `zork-${(ckpt?.sessionId ?? sessionId).slice(0, 8)}-t${startTurn}-${startTurn + MAX_TURNS - 1}`,
+      session_id:      ckpt?.sessionId ?? sessionId,
+      task_summary:    `Interactive fiction session: turns ${startTurn}–${startTurn + MAX_TURNS - 1}, ${rooms.length} rooms`,
+      outcome:         successCount > failCount ? "succeeded" : "failed",
+      lesson:          lessonText,
+      tool_names:      ["zork-emulator", "cartographer-llm"],
+      created_at:      new Date().toISOString(),
+      relevance_count: 0,
+    };
+    activeMemory.addLesson(lesson);
+    await activeMemory.save();
+    log(`${C.blue}[Memory]${C.reset}`,
+      `Lesson saved → ${activeMemoryPath} (${activeMemory.getLessons().length} total)`);
+    log(`${C.dim}  ↳${C.reset}`, lessonText.slice(0, 120));
+  }
+
+  // ── Prometheus metrics file ──────────────────────────────────────────────
+  try {
+    const metricsOutput = await metrics.getMetrics();
+    const metricsFile   = join(CHECKPOINT_DIR, "metrics.prom");
+    writeFileSync(metricsFile, metricsOutput);
+    log(`${C.dim}[Metrics]${C.reset}`, `Prometheus metrics → ${metricsFile}`);
+  } catch { /* non-fatal */ }
+  metrics.detach();
 
   if (USE_BLIND) {
     header("GAME IDENTIFICATION  (blind mode)");
@@ -1793,6 +2239,7 @@ async function main() {
   // ── Shutdown ──────────────────────────────────────────────────────────────
   header("SHUTDOWN");
 
+  permEngine.clearSession(sessionId);
   await emulator.close();
   log(`${C.green}✓${C.reset}`, "Emulator closed");
 

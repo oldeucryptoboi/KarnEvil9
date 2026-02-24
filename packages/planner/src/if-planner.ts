@@ -158,6 +158,22 @@ export class IFPlanner implements Planner {
       }
     }
 
+    // ── Suppress backtracking to already-visited room when unexplored exits exist ──
+    // Only when there's no active nav hint (BFS path), otherwise trust the route.
+    const dirMove = command.match(/^(?:go\s+)?(north|south|east|west|up|down|in|out)$/i);
+    if (dirMove && !navHint) {
+      const dir = dirMove[1]!.toLowerCase();
+      const destination = gameState.roomDirections?.[dir];
+      if (destination && gameState.visitedRooms.includes(destination)) {
+        const explored = new Set(Object.keys(gameState.roomDirections ?? {}));
+        const unexplored = gameState.knownExits.find(e => !explored.has(e.toLowerCase()));
+        if (unexplored) {
+          this.onVerbose?.("[AntiBacktrack]", `Suppressed ${dir} → ${destination} (visited); redirecting to unexplored exit: ${unexplored}`);
+          return this.buildPlan(`go ${unexplored}`, `Explore: go ${unexplored} (anti-backtrack)`, usage);
+        }
+      }
+    }
+
     // ── Route to compound tools when applicable ──────────────────────────
 
     // Combat: "attack <target> with <weapon>"

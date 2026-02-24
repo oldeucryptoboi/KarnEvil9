@@ -354,7 +354,7 @@ async function main(): Promise<void> {
 Given raw screen output from the game, extract:
 1. Room name (the location header at the top of the description)
 2. Visible exits (compass directions or special directions: up, down, in, out)
-3. Items visible in the room (portable objects the agent could interact with)
+3. Items visible in the room that are LYING ON THE GROUND and could be picked up — NOT items held, wielded, or worn by enemies or NPCs
 4. A one-sentence room description
 
 Respond with EXACTLY this format (no markdown, no extra text):

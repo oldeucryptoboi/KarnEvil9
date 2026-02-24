@@ -136,6 +136,12 @@ export class IFPlanner implements Planner {
     // exit from the current room leads to an already-visited room.
     const explorationExhausted = !navHint && this.isExplorationExhausted(gameState);
 
+    // Early stall probe: when stalled (turnsStalled >= 2), try unexplored known
+    // exits and non-compass probes BEFORE deferring to BFS/LLM. This fires even
+    // when BFS has assumed edges, which often cause oscillation.
+    const earlyProbe = this.computeEarlyStallProbe(gameState);
+    if (earlyProbe) return earlyProbe;
+
     // Hidden direction probe: only during active exploration, not once map is exhausted
     if (!navHint && !explorationExhausted) {
       const probe = this.computeHiddenDirectionProbe(gameState);
@@ -424,6 +430,51 @@ export class IFPlanner implements Planner {
   }
 
   // ─── Hidden direction probing ──────────────────────────────────────────
+
+  private static readonly NON_COMPASS_PROBES = ["in", "out", "up", "down"] as const;
+
+  /**
+   * Early stall probe: when stalled >= 2, bypass the BFS navHint gate and
+   * deterministically try exits. BFS assumed edges often cause oscillation
+   * (e.g. Back Yard ↔ Round Back) because the agent follows BFS/LLM advice
+   * that loops through visited rooms.
+   *
+   * Order:
+   *   1. Unexplored known exits (any direction the Cartographer detected)
+   *   2. Non-compass hidden probes (in/out/up/down — commonly missed by Cartographer)
+   */
+  private computeEarlyStallProbe(
+    gameState: IFGameState,
+    usage?: UsageMetrics,
+  ): PlanResult | undefined {
+    if ((gameState.turnsStalled ?? 0) < 2) return undefined;
+
+    const explored = new Set(Object.keys(gameState.roomDirections ?? {}));
+    const blockedSet = new Set(
+      this.getBlockedDirsForRoom(gameState.blockedExits, gameState.currentRoom),
+    );
+
+    // 1. Try unexplored known exits (mirrors Phase 1 but fires before navHint gate)
+    const unexploredKnown = gameState.knownExits
+      .map(e => e.toLowerCase())
+      .find(e => !explored.has(e) && !blockedSet.has(e));
+    if (unexploredKnown) {
+      this.onVerbose?.("[HiddenProbe]", `Early known exit: ${unexploredKnown} from ${gameState.currentRoom}`);
+      return this.buildPlan(`go ${unexploredKnown}`, `Explore known exit: ${unexploredKnown}`, usage);
+    }
+
+    // 2. Probe non-compass hidden exits (in/out/up/down).
+    // These are commonly missed by the Cartographer and high-value in IF games.
+    const knownSet = new Set(gameState.knownExits.map(e => e.toLowerCase()));
+    const probe = IFPlanner.NON_COMPASS_PROBES.find(d =>
+      !explored.has(d) && !blockedSet.has(d) && !knownSet.has(d)
+    );
+    if (probe) {
+      this.onVerbose?.("[HiddenProbe]", `Early non-compass probe: ${probe} from ${gameState.currentRoom}`);
+      return this.buildPlan(`go ${probe}`, `Probe hidden exit: ${probe}`, usage);
+    }
+    return undefined;
+  }
 
   /**
    * When stalled (no BFS target, turnsStalled >= 2), deterministically probe

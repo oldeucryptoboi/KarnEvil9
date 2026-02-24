@@ -147,6 +147,17 @@ export class IFPlanner implements Planner {
     const commandLine = lines.find(l => !/^(Game:|Reasoning:)/i.test(l)) ?? "look";
     const command = commandLine.replace(/^["'`]|["'`]$/g, "").replace(/[.!?]$/, "").toLowerCase().trim();
 
+    // ── Suppress redundant "look" when we already have screen data ─────
+    if (command === "look" && gameState.knownExits.length > 0) {
+      this.onVerbose?.("[Suppress]", "look — exits already known, re-prompting with nav hint");
+      // Instead of wasting a turn on look, pick the first unexplored exit
+      const explored = new Set(Object.keys(gameState.roomDirections ?? {}));
+      const unexplored = gameState.knownExits.find(e => !explored.has(e.toLowerCase()));
+      if (unexplored) {
+        return this.buildPlan(`go ${unexplored}`, `Explore: go ${unexplored}`, usage);
+      }
+    }
+
     // ── Route to compound tools when applicable ──────────────────────────
 
     // Combat: "attack <target> with <weapon>"
@@ -160,7 +171,7 @@ export class IFPlanner implements Planner {
 
     // Take-all: when LLM says "take <item>" and room has multiple items
     const takeMatch = command.match(/^take\s+(.+)$/i);
-    const roomItems = gameState.roomItems ?? [];
+    const roomItems = (gameState.roomItems ?? []).filter(it => !gameState.inventory.includes(it));
     if (takeMatch && roomItems.length > 1) {
       this.onVerbose?.("[Compound]", `Take-all: ${roomItems.join(", ")}`);
       return this.buildTakeAllPlan(roomItems, usage);

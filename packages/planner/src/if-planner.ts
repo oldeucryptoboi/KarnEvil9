@@ -41,12 +41,14 @@ export interface IFGameState {
   failedCommands: string[];
   blockedPuzzles: BlockedPuzzle[];
   knownExits: string[];
+  roomItems: string[];
   roomDirections: Record<string, string>;
   dirGraph: Record<string, Record<string, string>>;
   blockedExits: Record<string, Set<string>>;
   turnsStalled: number;
   navigationHint?: string;
   currentRoomName?: string;
+  arrivedVia?: string;
   weightLimitDirs?: string[];
   pastLessons?: Array<{ outcome: string; lesson: string }>;
   gameOver?: boolean;
@@ -275,10 +277,16 @@ export class IFPlanner implements Planner {
       ? `  Cartographer exits: ${gs.knownExits.join(", ")}\n`
       : "";
 
+    const itemsBlock = (gs.roomItems ?? []).length > 0
+      ? `  Cartographer items in room: ${gs.roomItems.join(", ")}\n`
+      : "";
+
     const dirEntries = Object.entries(gs.roomDirections ?? {});
     const dirBlock = dirEntries.length
       ? `  Directions from here: ${dirEntries.map(([d, r]) => `${d} \u2192 ${r}`).join(", ")}\n`
       : "";
+
+    const arrivedBlock = ""; // Reserved: arrivedVia data available but not shown (REVERSE_DIR handles it)
 
     const navBlock = gs.navigationHint
       ? `\n\u2691 NAVIGATION PATH (execute in order, one command per turn):\n  ${gs.navigationHint}\n`
@@ -317,7 +325,7 @@ export class IFPlanner implements Planner {
 AGENT MEMORY:${navBlock}${weightLimitBlock}
   Inventory: ${gs.inventory.join(", ") || "empty"}
   Rooms visited: ${gs.visitedRooms.slice(-15).join(", ") || "none yet"}
-${exitsBlock}${dirBlock}  Recently failed/no-effect commands for this room: ${gs.failedCommands.slice(-5).join(", ") || "none"}
+${exitsBlock}${itemsBlock}${dirBlock}${arrivedBlock}  Recently failed/no-effect commands for this room: ${gs.failedCommands.slice(-5).join(", ") || "none"}
 ${blockedBlock}${deadEndBlock}${stalledBlock}${gs.futilityHint ? `\n\u26a0 LOOP DETECTED: ${gs.futilityHint}\n  \u2192 You MUST try a completely different approach.\n` : ""}`;
 
     const lessonBlock = gs.pastLessons && gs.pastLessons.length > 0 ? `

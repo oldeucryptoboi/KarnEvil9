@@ -51,6 +51,7 @@ export interface CartographerState {
   lastRoomHeader: string;
   lastFullScreen: string;
   roomExits: Record<string, string[]>;
+  roomItems: Record<string, string[]>;
   dirGraph: Record<string, Record<string, string>>;
   blockedExits: Record<string, Set<string>>;
   weightLimitExits: Record<string, Set<string>>;
@@ -107,11 +108,12 @@ function detectBlockReason(delta: string): string | null {
 }
 
 function updateInventory(inventory: string[], delta: string, command: string): string[] {
-  if (/^taken\.?(\s|$)/i.test(delta)) {
+  // Multiline: "Taken." may be preceded by score lines like "(Shiv: +5)\n"
+  if (/^taken\.?(\s|$)/im.test(delta)) {
     const obj = command.replace(/^take\s+/i, "").trim();
     if (obj && !inventory.includes(obj)) inventory.push(obj);
   }
-  if (/^dropped\.?(\s|$)/i.test(delta)) {
+  if (/^dropped\.?(\s|$)/im.test(delta)) {
     const obj = command.replace(/^drop\s+/i, "").trim();
     inventory = inventory.filter(i => i !== obj);
   }
@@ -254,6 +256,7 @@ export async function register(api: PluginApi): Promise<void> {
     lastRoomHeader: ckpt?.lastRoomHeader ?? "",
     lastFullScreen: "",
     roomExits: ckpt?.roomExits ?? {},
+    roomItems: {},
     dirGraph: ckpt?.dirGraph ?? {},
     blockedExits: {},
     weightLimitExits: {},
@@ -281,6 +284,7 @@ export async function register(api: PluginApi): Promise<void> {
   let _lastTaskId = "";
   let _lastAuthority: ReturnType<typeof authorityFromTrust> | undefined;
   let _lastStepToolName = "";
+  let _arrivedVia = "";  // direction used to enter current room (e.g. "east")
 
   // ── Register game-state service ─────────────────────────────────────────
 
@@ -347,10 +351,12 @@ export async function register(api: PluginApi): Promise<void> {
             blockedPuzzles: [...gameMemory.blockedPuzzles],
             knownExits,
             roomDirections,
+            roomItems: cartState.roomItems[cartState.lastRoomHeader] ?? [],
             dirGraph: cartState.dirGraph,
             blockedExits: cartState.blockedExits,
             turnsStalled,
             currentRoomName: cartState.lastRoomHeader,
+            arrivedVia: _arrivedVia || undefined,
             weightLimitDirs,
           },
         },
@@ -506,7 +512,10 @@ export async function register(api: PluginApi): Promise<void> {
         if (prevRoom && !(gameMemory.roomGraph[prevRoom] ?? []).includes(newRoom)) {
           gameMemory.roomGraph[prevRoom] = [...(gameMemory.roomGraph[prevRoom] ?? []), newRoom];
         }
-        // Directional graph
+        // Directional graph: record forward edge and assume reverse.
+        // The ??= for reverse means it won't overwrite a verified edge.
+        // Non-Euclidean maps may have wrong reverse assumptions, but the
+        // agent will correct them on traversal (forward always uses =).
         const dirMatch = command.match(/^(?:go\s+)?(north|south|east|west|up|down|in|out)$/i);
         if (dirMatch && prevRoom) {
           const dir = dirMatch[1]!.toLowerCase();
@@ -520,11 +529,14 @@ export async function register(api: PluginApi): Promise<void> {
           if (REVERSE_DIR[dir]) {
             cartState.dirGraph[newRoom] ??= {};
             cartState.dirGraph[newRoom]![REVERSE_DIR[dir]!] ??= prevRoom;
-            const exits = cartState.roomExits[newRoom] ?? [];
-            if (!exits.some(e => e.toLowerCase() === REVERSE_DIR[dir]!.toLowerCase())) {
-              cartState.roomExits[newRoom] = [...exits, REVERSE_DIR[dir]!];
+            const dstExits = cartState.roomExits[newRoom] ?? [];
+            if (!dstExits.some(e => e.toLowerCase() === REVERSE_DIR[dir]!.toLowerCase())) {
+              cartState.roomExits[newRoom] = [...dstExits, REVERSE_DIR[dir]!];
             }
           }
+          _arrivedVia = dir;
+        } else {
+          _arrivedVia = "";
         }
         if (!gameMemory.visitedRooms.includes(newRoom)) {
           gameMemory.visitedRooms.push(newRoom);
@@ -565,6 +577,14 @@ export async function register(api: PluginApi): Promise<void> {
 
       // Update inventory
       gameMemory.inventory = updateInventory([...gameMemory.inventory], delta, command);
+
+      // Remove picked-up items from roomItems cache
+      const curRoom = cartState.lastRoomHeader;
+      if (curRoom && cartState.roomItems[curRoom]) {
+        cartState.roomItems[curRoom] = cartState.roomItems[curRoom]!.filter(
+          it => !gameMemory.inventory.includes(it),
+        );
+      }
 
       // Update blocked puzzles
       const blockReason = detectBlockReason(delta);
@@ -609,6 +629,14 @@ export async function register(api: PluginApi): Promise<void> {
         const cached = cartState.roomExits[roomName] ?? [];
         if (filtered.length > cached.length) {
           cartState.roomExits[roomName] = filtered;
+        }
+      }
+      // Store Cartographer-detected items (subtract already-held inventory)
+      const items = result.items as string[] | undefined;
+      if (roomName && roomName !== "Unknown" && items && items.length > 0) {
+        const roomItems = items.filter(it => !gameMemory.inventory.includes(it));
+        if (roomItems.length > 0) {
+          cartState.roomItems[roomName] = roomItems;
         }
       }
     }

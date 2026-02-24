@@ -43,12 +43,13 @@ export interface IFGameState {
   knownExits: string[];
   roomItems: string[];
   roomDirections: Record<string, string>;
+  /** Assumed reverse-direction edges (unverified). */
+  assumedDirections?: Record<string, string>;
   dirGraph: Record<string, Record<string, string>>;
   blockedExits: Record<string, Set<string>>;
   turnsStalled: number;
   navigationHint?: string;
   currentRoomName?: string;
-  arrivedVia?: string;
   weightLimitDirs?: string[];
   pastLessons?: Array<{ outcome: string; lesson: string }>;
   gameOver?: boolean;
@@ -282,21 +283,29 @@ export class IFPlanner implements Planner {
       : "";
 
     const dirEntries = Object.entries(gs.roomDirections ?? {});
-    const dirBlock = dirEntries.length
-      ? `  Directions from here: ${dirEntries.map(([d, r]) => `${d} \u2192 ${r}`).join(", ")}\n`
+    const assumedEntries = Object.entries(gs.assumedDirections ?? {})
+      .filter(([d]) => !gs.roomDirections?.[d]); // exclude if already verified
+    const allDirParts = [
+      ...dirEntries.map(([d, r]) => `${d} \u2192 ${r}`),
+      ...assumedEntries.map(([d, r]) => `${d} \u2192 ${r} (unverified)`),
+    ];
+    const dirBlock = allDirParts.length
+      ? `  Directions from here: ${allDirParts.join(", ")}\n`
       : "";
-
-    const arrivedBlock = ""; // Reserved: arrivedVia data available but not shown (REVERSE_DIR handles it)
 
     const navBlock = gs.navigationHint
       ? `\n\u2691 NAVIGATION PATH (execute in order, one command per turn):\n  ${gs.navigationHint}\n`
       : "";
 
-    // Detect when all known exits lead to already-visited rooms
+    // Detect when all known exits lead to already-visited rooms (verified edges only;
+    // assumed/unverified edges don't count — the agent should try those first).
     const visitedSet = new Set(gs.visitedRooms);
+    const verifiedCount = dirEntries.length;
+    const unverifiedCount = assumedEntries.length;
     const allExitsExplored = gs.knownExits.length > 0
-      && dirEntries.length >= gs.knownExits.length
-      && dirEntries.every(([, dest]) => visitedSet.has(dest));
+      && (verifiedCount + unverifiedCount) >= gs.knownExits.length
+      && dirEntries.every(([, dest]) => visitedSet.has(dest))
+      && assumedEntries.every(([, dest]) => visitedSet.has(dest));
 
     const deadEndBlock = allExitsExplored && (gs.turnsStalled ?? 0) >= 2
       ? `\n\u26a0 DEAD END: Every exit from this room leads to an already-visited room.\n` +
@@ -325,7 +334,7 @@ export class IFPlanner implements Planner {
 AGENT MEMORY:${navBlock}${weightLimitBlock}
   Inventory: ${gs.inventory.join(", ") || "empty"}
   Rooms visited: ${gs.visitedRooms.slice(-15).join(", ") || "none yet"}
-${exitsBlock}${itemsBlock}${dirBlock}${arrivedBlock}  Recently failed/no-effect commands for this room: ${gs.failedCommands.slice(-5).join(", ") || "none"}
+${exitsBlock}${itemsBlock}${dirBlock}  Recently failed/no-effect commands for this room: ${gs.failedCommands.slice(-5).join(", ") || "none"}
 ${blockedBlock}${deadEndBlock}${stalledBlock}${gs.futilityHint ? `\n\u26a0 LOOP DETECTED: ${gs.futilityHint}\n  \u2192 You MUST try a completely different approach.\n` : ""}`;
 
     const lessonBlock = gs.pastLessons && gs.pastLessons.length > 0 ? `
@@ -343,6 +352,7 @@ Rules:
 - Use the full screen text to reason about your current situation and what to do next.
 - Advance toward completing the game. Explore systematically, interact with objects, solve puzzles.
 - Use "Cartographer exits" (shown in AGENT MEMORY above) to navigate — these are the available exits for your current room. An exit listed in "Cartographer exits" but absent from "Directions from here" has never been traversed and leads somewhere new. ALWAYS try those unexplored exits FIRST before using any exit that already appears in "Directions from here" (unless a NAVIGATION PATH is active in AGENT MEMORY — follow the path's first step instead).
+- Directions marked "(unverified)" in "Directions from here" are reverse-direction guesses — they MIGHT lead to the listed room, but in non-Euclidean maps they could lead somewhere new. Treat them as low-priority: try truly unexplored exits first, but do try unverified exits before revisiting verified ones.
 - Do NOT use "look" if exits are listed under "Cartographer exits" — you already have the data you need. Only use "look" when exits are NOT listed (new room, or Cartographer data unavailable).
 - Use "inventory" only when you genuinely don't know what you're carrying.
 - If 'go <object>' fails with an unexpected response, try 'enter <object>' or 'go in' / 'go out' as alternatives.

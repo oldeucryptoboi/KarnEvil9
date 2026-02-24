@@ -53,6 +53,8 @@ export interface CartographerState {
   roomExits: Record<string, string[]>;
   roomItems: Record<string, string[]>;
   dirGraph: Record<string, Record<string, string>>;
+  /** Reverse-direction assumptions (not yet verified by forward traversal). */
+  assumedEdges: Record<string, Record<string, string>>;
   blockedExits: Record<string, Set<string>>;
   weightLimitExits: Record<string, Set<string>>;
 }
@@ -258,6 +260,7 @@ export async function register(api: PluginApi): Promise<void> {
     roomExits: ckpt?.roomExits ?? {},
     roomItems: {},
     dirGraph: ckpt?.dirGraph ?? {},
+    assumedEdges: {},
     blockedExits: {},
     weightLimitExits: {},
   };
@@ -284,7 +287,7 @@ export async function register(api: PluginApi): Promise<void> {
   let _lastTaskId = "";
   let _lastAuthority: ReturnType<typeof authorityFromTrust> | undefined;
   let _lastStepToolName = "";
-  let _arrivedVia = "";  // direction used to enter current room (e.g. "east")
+  // _arrivedVia removed — assumed-edge tracking replaces it
 
   // ── Register game-state service ─────────────────────────────────────────
 
@@ -352,11 +355,11 @@ export async function register(api: PluginApi): Promise<void> {
             knownExits,
             roomDirections,
             roomItems: cartState.roomItems[cartState.lastRoomHeader] ?? [],
+            assumedDirections: cartState.assumedEdges[cartState.lastRoomHeader] ?? {},
             dirGraph: cartState.dirGraph,
             blockedExits: cartState.blockedExits,
             turnsStalled,
             currentRoomName: cartState.lastRoomHeader,
-            arrivedVia: _arrivedVia || undefined,
             weightLimitDirs,
           },
         },
@@ -512,31 +515,36 @@ export async function register(api: PluginApi): Promise<void> {
         if (prevRoom && !(gameMemory.roomGraph[prevRoom] ?? []).includes(newRoom)) {
           gameMemory.roomGraph[prevRoom] = [...(gameMemory.roomGraph[prevRoom] ?? []), newRoom];
         }
-        // Directional graph: record forward edge and assume reverse.
-        // The ??= for reverse means it won't overwrite a verified edge.
-        // Non-Euclidean maps may have wrong reverse assumptions, but the
-        // agent will correct them on traversal (forward always uses =).
+        // Directional graph: forward edge is verified (=), reverse goes to
+        // assumedEdges (??=) — never into dirGraph. BFS uses only dirGraph,
+        // so non-Euclidean false edges don't corrupt pathfinding. The prompt
+        // shows assumed edges as "(unverified)" so the LLM deprioritizes
+        // but doesn't ignore them.
         const dirMatch = command.match(/^(?:go\s+)?(north|south|east|west|up|down|in|out)$/i);
         if (dirMatch && prevRoom) {
           const dir = dirMatch[1]!.toLowerCase();
           cartState.dirGraph[prevRoom] ??= {};
           cartState.dirGraph[prevRoom]![dir] = newRoom;
+          // Forward traversal promotes any assumed edge to verified
+          if (cartState.assumedEdges[prevRoom]?.[dir]) {
+            delete cartState.assumedEdges[prevRoom]![dir];
+          }
           // Sync forward direction into roomExits for source room
           const srcExits = cartState.roomExits[prevRoom] ?? [];
           if (!srcExits.some(e => e.toLowerCase() === dir)) {
             cartState.roomExits[prevRoom] = [...srcExits, dir];
           }
           if (REVERSE_DIR[dir]) {
-            cartState.dirGraph[newRoom] ??= {};
-            cartState.dirGraph[newRoom]![REVERSE_DIR[dir]!] ??= prevRoom;
+            // Reverse goes to assumedEdges (not dirGraph), won't overwrite verified
+            if (!cartState.dirGraph[newRoom]?.[REVERSE_DIR[dir]!]) {
+              cartState.assumedEdges[newRoom] ??= {};
+              cartState.assumedEdges[newRoom]![REVERSE_DIR[dir]!] ??= prevRoom;
+            }
             const dstExits = cartState.roomExits[newRoom] ?? [];
             if (!dstExits.some(e => e.toLowerCase() === REVERSE_DIR[dir]!.toLowerCase())) {
               cartState.roomExits[newRoom] = [...dstExits, REVERSE_DIR[dir]!];
             }
           }
-          _arrivedVia = dir;
-        } else {
-          _arrivedVia = "";
         }
         if (!gameMemory.visitedRooms.includes(newRoom)) {
           gameMemory.visitedRooms.push(newRoom);

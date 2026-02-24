@@ -436,7 +436,11 @@ export class ApiServer {
   }
 
   listen(port: number): Server {
-    this.httpServer = this.app.listen(port, () => { console.log(`KarnEvil9 API listening on http://localhost:${port}`); });
+    this.httpServer = this.app.listen(port, () => {
+      const addr = this.httpServer!.address();
+      const actualPort = typeof addr === "object" && addr ? addr.port : port;
+      console.log(`KarnEvil9 API listening on http://localhost:${actualPort}`);
+    });
     this.rateLimiterPruneInterval = setInterval(() => this.rateLimiter.prune(), RATE_LIMITER_PRUNE_INTERVAL_MS);
     this.rateLimiterPruneInterval.unref();
     this.setupWebSocket(this.httpServer);

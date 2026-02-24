@@ -10,9 +10,15 @@ import { MockPlanner } from "@karnevil9/planner";
 import { ApiServer } from "@karnevil9/api";
 import WebSocket from "ws";
 import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
 
 const ROOT = resolve(import.meta.dirname ?? ".", "../..");
 const TOOLS_DIR = join(ROOT, "tools/examples");
+
+/** Helper: read the OS-assigned port from a listening server */
+function serverPort(server: Server): number {
+  return (server.address() as AddressInfo).port;
+}
 
 /** Helper: open a WS connection and wait for it to be ready */
 function openWs(url: string): Promise<WebSocket> {
@@ -91,7 +97,6 @@ describe("Chat WebSocket Smoke Tests", () => {
   let runtime: ToolRuntime;
   let apiServer: ApiServer;
   let httpServer: Server;
-  let port: number;
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `karnevil9-e2e-chat-ws-${uuid()}`);
@@ -101,8 +106,6 @@ describe("Chat WebSocket Smoke Tests", () => {
     await registry.loadFromDirectory(TOOLS_DIR);
     permissions = new PermissionEngine(journal, async () => "allow_always");
     runtime = new ToolRuntime(registry, permissions, journal);
-
-    port = 30000 + Math.floor(Math.random() * 10000);
   });
 
   afterEach(async () => {
@@ -125,11 +128,11 @@ describe("Chat WebSocket Smoke Tests", () => {
         planner: new MockPlanner(),
         insecure: true,
       });
-      httpServer = apiServer.listen(port);
+      httpServer = apiServer.listen(0);
     });
 
     it("connects to /api/ws and receives pong", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         ws.send(JSON.stringify({ type: "ping" }));
         const msg = await waitForMessage(ws, (m) => m.type === "pong");
@@ -140,7 +143,7 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("submit creates a session and streams events to completion", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         // Start collecting before submitting
         const allMessages = collectUntil(ws, (m) => {
@@ -177,7 +180,7 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("submit with invalid text returns error", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         ws.send(JSON.stringify({ type: "submit", text: "" }));
         const msg = await waitForMessage(ws, (m) => m.type === "error");
@@ -189,7 +192,7 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("submit with missing text returns error", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         ws.send(JSON.stringify({ type: "submit" }));
         const msg = await waitForMessage(ws, (m) => m.type === "error");
@@ -200,7 +203,7 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("invalid JSON returns error", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         ws.send("not json{{{");
         const msg = await waitForMessage(ws, (m) => m.type === "error");
@@ -212,7 +215,7 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("unknown message type returns error", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         ws.send(JSON.stringify({ type: "bogus" }));
         const msg = await waitForMessage(ws, (m) => m.type === "error");
@@ -224,7 +227,7 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("abort on a running session sends abort", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         // Submit a session
         const ackPromise = waitForMessage(ws, (m) => m.type === "session.created");
@@ -250,7 +253,7 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("multiple sequential sessions work on same connection", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         // Session 1
         const all1 = collectUntil(ws, (m) => {
@@ -282,7 +285,7 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("registerApproval broadcasts approve.needed to WS client", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         // Submit a session to get a session ID tracked by this WS client
         const ackPromise = waitForMessage(ws, (m) => m.type === "session.created");
@@ -328,7 +331,7 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("approve.needed is not sent to WS clients not tracking the session", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         // Register an approval for a session this WS client is NOT tracking
         apiServer.registerApproval("orphan-req", {
@@ -351,11 +354,11 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("rejects upgrade on non /api/ws path", async () => {
-      await expect(openWs(`ws://localhost:${port}/other`)).rejects.toThrow();
+      await expect(openWs(`ws://localhost:${serverPort(httpServer)}/other`)).rejects.toThrow();
     });
 
     it("server shutdown closes WS clients", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
 
       const closePromise = new Promise<number>((resolve) => {
         ws.on("close", (code) => resolve(code));
@@ -382,11 +385,11 @@ describe("Chat WebSocket Smoke Tests", () => {
         planner: new MockPlanner(),
         apiToken: TOKEN,
       });
-      httpServer = apiServer.listen(port);
+      httpServer = apiServer.listen(0);
     });
 
     it("connects with valid token", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws?token=${TOKEN}`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws?token=${TOKEN}`);
       try {
         ws.send(JSON.stringify({ type: "ping" }));
         const msg = await waitForMessage(ws, (m) => m.type === "pong");
@@ -397,15 +400,15 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("rejects connection with wrong token", async () => {
-      await expect(openWs(`ws://localhost:${port}/api/ws?token=wrong`)).rejects.toThrow();
+      await expect(openWs(`ws://localhost:${serverPort(httpServer)}/api/ws?token=wrong`)).rejects.toThrow();
     });
 
     it("rejects connection with no token", async () => {
-      await expect(openWs(`ws://localhost:${port}/api/ws`)).rejects.toThrow();
+      await expect(openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`)).rejects.toThrow();
     });
 
     it("submit works with valid token", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws?token=${TOKEN}`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws?token=${TOKEN}`);
       try {
         const allMessages = collectUntil(ws, (m) => {
           if (m.type !== "event") return false;
@@ -436,11 +439,11 @@ describe("Chat WebSocket Smoke Tests", () => {
         planner: new MockPlanner(),
         insecure: true,
       });
-      httpServer = apiServer.listen(port);
+      httpServer = apiServer.listen(0);
     });
 
     it("submit with mode=mock uses mock execution", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         const allMessages = collectUntil(ws, (m) => {
           if (m.type !== "event") return false;
@@ -490,11 +493,11 @@ describe("Chat WebSocket Smoke Tests", () => {
         insecure: true,
       });
       serverRef = approvalServer;
-      httpServer = approvalServer.listen(port);
+      httpServer = approvalServer.listen(0);
     });
 
     it("full approval flow: submit → approve.needed → approve → session completes", async () => {
-      const ws = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         // Start collecting all messages
         const messages: Record<string, unknown>[] = [];
@@ -548,10 +551,10 @@ describe("Chat WebSocket Smoke Tests", () => {
         planner: new MockPlanner(),
         insecure: true,
       });
-      httpServer = apiServer.listen(port);
+      httpServer = apiServer.listen(0);
 
       // Connect and verify
-      const ws1 = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws1 = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       ws1.send(JSON.stringify({ type: "ping" }));
       const pong1 = await waitForMessage(ws1, (m) => m.type === "pong");
       expect(pong1.type).toBe("pong");
@@ -566,7 +569,7 @@ describe("Chat WebSocket Smoke Tests", () => {
       const closeCode = await closePromise;
       expect(closeCode).toBe(1001);
 
-      // Start a new server on the same port with a fresh journal
+      // Start a new server on a fresh OS-assigned port with a fresh journal
       const journal2 = new Journal(join(testDir, "journal2.jsonl"), { fsync: false, redact: false });
       await journal2.init();
       const registry2 = new ToolRegistry();
@@ -582,10 +585,10 @@ describe("Chat WebSocket Smoke Tests", () => {
         planner: new MockPlanner(),
         insecure: true,
       });
-      httpServer = apiServer2.listen(port);
+      httpServer = apiServer2.listen(0);
 
       // Connect again — simulating what the client reconnect logic does
-      const ws2 = await openWs(`ws://localhost:${port}/api/ws`);
+      const ws2 = await openWs(`ws://localhost:${serverPort(httpServer)}/api/ws`);
       try {
         ws2.send(JSON.stringify({ type: "ping" }));
         const pong2 = await waitForMessage(ws2, (m) => m.type === "pong");
@@ -608,9 +611,8 @@ describe("Chat WebSocket Smoke Tests", () => {
     });
 
     it("WS connection fails when server is not running", async () => {
-      // Pick a port where nothing is listening
-      const deadPort = 30000 + Math.floor(Math.random() * 10000);
-      await expect(openWs(`ws://localhost:${deadPort}/api/ws`)).rejects.toThrow();
+      // Use port 1 — unprivileged processes can't bind it, nothing should be listening
+      await expect(openWs(`ws://localhost:1/api/ws`)).rejects.toThrow();
     });
   });
 });

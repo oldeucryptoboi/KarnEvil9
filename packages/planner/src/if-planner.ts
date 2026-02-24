@@ -132,14 +132,18 @@ export class IFPlanner implements Planner {
       gameState.navigationHint = navHint;
     }
 
-    // Hidden direction probe: when stalled with no BFS target, skip LLM entirely
-    if (!navHint) {
+    // Detect when the map is fully explored: no BFS target AND every known
+    // exit from the current room leads to an already-visited room.
+    const explorationExhausted = !navHint && this.isExplorationExhausted(gameState);
+
+    // Hidden direction probe: only during active exploration, not once map is exhausted
+    if (!navHint && !explorationExhausted) {
       const probe = this.computeHiddenDirectionProbe(gameState);
       if (probe) return probe;
     }
 
     // Build strategist prompts
-    const system = this.buildSystemPrompt(gameState);
+    const system = this.buildSystemPrompt(gameState, explorationExhausted);
     const user = this.buildUserPrompt(gameState);
 
     // Call LLM
@@ -162,7 +166,8 @@ export class IFPlanner implements Planner {
     const command = commandLine.replace(/^["'`]|["'`]$/g, "").replace(/[.!?]$/, "").toLowerCase().trim();
 
     // ── Suppress redundant "look" when we already have screen data ─────
-    if (command === "look" && gameState.knownExits.length > 0) {
+    // Once exploration is exhausted, "look" is a valid curiosity action — don't suppress it.
+    if (command === "look" && gameState.knownExits.length > 0 && !explorationExhausted) {
       this.onVerbose?.("[Suppress]", "look — exits already known, re-prompting with nav hint");
       // Instead of wasting a turn on look, pick the first unexplored exit
       const explored = new Set(Object.keys(gameState.roomDirections ?? {}));
@@ -175,11 +180,13 @@ export class IFPlanner implements Planner {
     // ── Suppress backtracking to already-visited room when unexplored exits exist ──
     // Bypass anti-backtrack ONLY when the LLM direction matches the first BFS step.
     // If the LLM deviates from the nav hint, apply anti-backtrack normally.
+    // Once exploration is exhausted, disable anti-backtrack — the agent may need
+    // to revisit rooms to try items on puzzles.
     const dirMove = command.match(/^(?:go\s+)?(north|south|east|west|up|down|in|out)$/i);
     const followingNavHint = navHint && dirMove
       ? this.directionMatchesNavHintFirstStep(dirMove[1]!, navHint)
       : false;
-    if (dirMove && !followingNavHint) {
+    if (dirMove && !followingNavHint && !explorationExhausted) {
       const dir = dirMove[1]!.toLowerCase();
       const destination = gameState.roomDirections?.[dir];
       if (destination && gameState.visitedRooms.includes(destination)) {
@@ -389,6 +396,33 @@ export class IFPlanner implements Planner {
     return matches.map(m => ({ direction: m[1]!.trim(), destination: m[2]!.trim() }));
   }
 
+  // ─── Exploration exhaustion detection ───────────────────────────────────
+
+  /**
+   * Returns true when the map is fully explored: no BFS navigation target
+   * exists and every known exit from the current room leads to a visited room.
+   */
+  private isExplorationExhausted(gs: IFGameState): boolean {
+    if (gs.knownExits.length === 0) return false;
+
+    const visitedSet = new Set(gs.visitedRooms);
+    const dirMap = gs.roomDirections ?? {};
+    const assumedMap = gs.assumedDirections ?? {};
+
+    // Every known exit must map to a visited room (via verified or assumed edges)
+    for (const exit of gs.knownExits) {
+      const dest = dirMap[exit.toLowerCase()] ?? dirMap[exit] ?? assumedMap[exit.toLowerCase()] ?? assumedMap[exit];
+      if (!dest || !visitedSet.has(dest)) return false;
+    }
+
+    // Also check globally: no unvisited rooms reachable in the full graph
+    for (const room of Object.keys(gs.dirGraph)) {
+      if (!visitedSet.has(room)) return false;
+    }
+
+    return true;
+  }
+
   // ─── Hidden direction probing ──────────────────────────────────────────
 
   /**
@@ -558,7 +592,7 @@ export class IFPlanner implements Planner {
       .replace(/^Revision\s+\d+\s*\/\s*Serial number\s+\d+.*/gim, blk);
   }
 
-  private buildSystemPrompt(gs: IFGameState): string {
+  private buildSystemPrompt(gs: IFGameState, explorationExhausted = false): string {
     const blockedBlock = gs.blockedPuzzles.length
       ? `\nUNRESOLVED PUZZLES (left behind — return when you have the means):\n${
           gs.blockedPuzzles.map(p => `  \u2022 ${p.room}: "${p.object}" (${p.reason})`).join("\n")
@@ -599,19 +633,36 @@ export class IFPlanner implements Planner {
       && assumedEntries.every(([, dest]) => visitedSet.has(dest));
 
     const deadEndBlock = allExitsExplored && (gs.turnsStalled ?? 0) >= 2
-      ? `\n\u26a0 DEAD END: Every exit from this room leads to an already-visited room.\n` +
-        `  Do NOT navigate to visited rooms — you will just loop.\n` +
-        `  Instead: READ the room description carefully for interactive objects (windows, doors,\n` +
-        `  trapdoors, hatches, passages). Try "open <object>", "enter <object>", "go in",\n` +
-        `  "climb <object>", or probe hidden directions (up, down, in, out).\n` +
-        `  If nothing works after multiple attempts, retreat to a room with truly unexplored exits.\n`
+      ? explorationExhausted
+        ? `\n\u26a0 ALL ROOMS EXPLORED — time to interact with the world.\n` +
+          `  Navigation alone will not make progress. Look at your inventory and the\n` +
+          `  unresolved puzzles. What items could solve which obstacles?\n` +
+          `  Try: unlock, open, use, read, examine, attack. Revisit rooms where puzzles remain.\n`
+        : `\n\u26a0 DEAD END: Every exit from this room leads to an already-visited room.\n` +
+          `  Read the room description for interactive objects (windows, doors, trapdoors,\n` +
+          `  hatches, passages). Try "open <object>", "enter <object>", "go in",\n` +
+          `  "climb <object>", or probe hidden directions (up, down, in, out).\n`
       : "";
 
     const stalledBlock = (gs.turnsStalled ?? 0) >= 3
-      ? `\n\u26a0 STALLED: No new room discovered in the last ${gs.turnsStalled} turns.\n` +
-        `  All accessible areas appear exhausted from rooms you have been visiting.\n` +
-        `  You MUST take aggressive action: fight blocking enemies, use items on obstacles,\n` +
-        `  or probe untried directions (up, down, in, out, and all compass directions).\n`
+      ? explorationExhausted
+        ? `\n\u26a0 STALLED ${gs.turnsStalled} turns — THINK creatively.\n` +
+          `  You have explored the map. Now interact with it.\n` +
+          `  Look at your inventory and the unresolved puzzles above.\n` +
+          `  What items could solve which obstacles? Try: unlock, open, use, read, examine, attack.\n` +
+          `  Navigation alone will not make progress from here.\n`
+        : `\n\u26a0 STALLED: No new room discovered in the last ${gs.turnsStalled} turns.\n` +
+          `  Take aggressive action: fight blocking enemies, use items on obstacles,\n` +
+          `  or probe untried directions (up, down, in, out, and all compass directions).\n`
+      : "";
+
+    // When exploration is exhausted, surface inventory–puzzle connections
+    const puzzleHintBlock = explorationExhausted
+      && gs.blockedPuzzles.length > 0
+      && gs.inventory.length > 0
+      ? `\n\ud83d\udca1 HINT: You have [${gs.inventory.join(", ")}] and unresolved obstacles:\n` +
+        gs.blockedPuzzles.map(p => `  \u2022 ${p.room}: "${p.object}" (${p.reason})`).join("\n") + "\n" +
+        `  Consider which items might help with which obstacles.\n`
       : "";
 
     const softBlocked = [...(gs.weightLimitDirs ?? [])];
@@ -626,7 +677,7 @@ AGENT MEMORY:${navBlock}${weightLimitBlock}
   Inventory: ${gs.inventory.join(", ") || "empty"}
   Rooms visited: ${gs.visitedRooms.slice(-15).join(", ") || "none yet"}
 ${exitsBlock}${itemsBlock}${dirBlock}  Recently failed/no-effect commands for this room: ${gs.failedCommands.slice(-5).join(", ") || "none"}
-${blockedBlock}${deadEndBlock}${stalledBlock}${gs.futilityHint ? `\n\u26a0 LOOP DETECTED: ${gs.futilityHint}\n  \u2192 You MUST try a completely different approach.\n` : ""}`;
+${blockedBlock}${deadEndBlock}${stalledBlock}${puzzleHintBlock}${gs.futilityHint ? `\n\u26a0 LOOP DETECTED: ${gs.futilityHint}\n  \u2192 You MUST try a completely different approach.\n` : ""}`;
 
     const lessonBlock = gs.pastLessons && gs.pastLessons.length > 0 ? `
 CROSS-SESSION MEMORY (from ${gs.pastLessons.length} prior session(s)):

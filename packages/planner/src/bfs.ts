@@ -16,23 +16,23 @@ export interface BfsStep {
  * @param dirGraph  - room → direction → destination room mapping
  * @param start     - current room name
  * @param target    - destination room name
- * @param blocked   - per-room set of permanently blocked directions
+ * @param blocked   - per-room list of permanently blocked directions
  * @returns Array of steps from start to target, null if unreachable, [] if already there
  */
 export function bfsPath(
   dirGraph: Record<string, Record<string, string>>,
   start: string,
   target: string,
-  blocked: Record<string, Set<string>> = {},
+  blocked: Record<string, string[] | Set<string>> = {},
 ): BfsStep[] | null {
   if (!start || !target || start === target) return [];
   const queue: Array<{ room: string; path: BfsStep[] }> = [{ room: start, path: [] }];
   const visited = new Set<string>([start]);
   while (queue.length > 0) {
     const { room, path } = queue.shift()!;
-    const blockedHere = blocked[room] ?? new Set<string>();
+    const blockedHere = blocked[room];
     for (const [dir, dest] of Object.entries(dirGraph[room] ?? {})) {
-      if (blockedHere.has(dir)) continue;
+      if (blockedHere && (Array.isArray(blockedHere) ? blockedHere.includes(dir) : blockedHere.has(dir))) continue;
       const newPath: BfsStep[] = [...path, { direction: dir, destination: dest }];
       if (dest === target) return newPath;
       if (!visited.has(dest)) {

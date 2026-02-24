@@ -357,7 +357,9 @@ export async function register(api: PluginApi): Promise<void> {
             roomItems: cartState.roomItems[cartState.lastRoomHeader] ?? [],
             assumedDirections: cartState.assumedEdges[cartState.lastRoomHeader] ?? {},
             dirGraph: cartState.dirGraph,
-            blockedExits: cartState.blockedExits,
+            blockedExits: Object.fromEntries(
+              Object.entries(cartState.blockedExits).map(([k, v]) => [k, [...v]]),
+            ),
             turnsStalled,
             currentRoomName: cartState.lastRoomHeader,
             weightLimitDirs,

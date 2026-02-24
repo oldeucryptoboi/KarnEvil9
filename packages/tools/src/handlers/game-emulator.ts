@@ -136,11 +136,11 @@ export const parseGameScreenHandler: ToolHandler = async (
 
 // ─── game-combat ─────────────────────────────────────────────────────────────
 
-const COMBAT_END_VICTORY = /defeated|killed|dispatched|collapses|dies|staggers.*fall/i;
+const COMBAT_END_VICTORY = /defeated|killed|dispatched|collapses|dies|staggers.*fall|falls|slumps|crumbles|dissolves|vanish(?:es)?|drops dead|is dead|no more/i;
 const COMBAT_END_DEATH   = /you have died|you are dead|\*\*\*\*.*you.*died/i;
 const COMBAT_END_FLED    = /flees|retreats|runs away/i;
 const COMBAT_END_WEAPON  = /breaks|shattered|disarmed/i;
-const COMBAT_MAX_ROUNDS  = 10;
+const COMBAT_MAX_ROUNDS  = 25;
 
 export const gameCombatHandler: ToolHandler = async (
   input: Record<string, unknown>,

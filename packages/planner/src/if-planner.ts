@@ -22,6 +22,14 @@ import type {
 import { bfsPath } from "./bfs.js";
 import type { BfsStep } from "./bfs.js";
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+// Only directions that the exit-pruning regex in the swarm plugin can match.
+// Diagonal directions are excluded — they can't be auto-pruned on failure.
+const PROBE_DIRECTIONS = [
+  "north", "south", "east", "west", "up", "down", "in", "out",
+] as const;
+
 // ─── Game state shape (injected by plugin via before_plan hook) ───────────────
 
 export interface BlockedPuzzle {
@@ -46,7 +54,7 @@ export interface IFGameState {
   /** Assumed reverse-direction edges (unverified). */
   assumedDirections?: Record<string, string>;
   dirGraph: Record<string, Record<string, string>>;
-  blockedExits: Record<string, Set<string>>;
+  blockedExits: Record<string, string[]>;
   turnsStalled: number;
   navigationHint?: string;
   currentRoomName?: string;
@@ -124,6 +132,12 @@ export class IFPlanner implements Planner {
       gameState.navigationHint = navHint;
     }
 
+    // Hidden direction probe: when stalled with no BFS target, skip LLM entirely
+    if (!navHint) {
+      const probe = this.computeHiddenDirectionProbe(gameState);
+      if (probe) return probe;
+    }
+
     // Build strategist prompts
     const system = this.buildSystemPrompt(gameState);
     const user = this.buildUserPrompt(gameState);
@@ -159,9 +173,13 @@ export class IFPlanner implements Planner {
     }
 
     // ── Suppress backtracking to already-visited room when unexplored exits exist ──
-    // Only when there's no active nav hint (BFS path), otherwise trust the route.
+    // Bypass anti-backtrack ONLY when the LLM direction matches the first BFS step.
+    // If the LLM deviates from the nav hint, apply anti-backtrack normally.
     const dirMove = command.match(/^(?:go\s+)?(north|south|east|west|up|down|in|out)$/i);
-    if (dirMove && !navHint) {
+    const followingNavHint = navHint && dirMove
+      ? this.directionMatchesNavHintFirstStep(dirMove[1]!, navHint)
+      : false;
+    if (dirMove && !followingNavHint) {
       const dir = dirMove[1]!.toLowerCase();
       const destination = gameState.roomDirections?.[dir];
       if (destination && gameState.visitedRooms.includes(destination)) {
@@ -371,6 +389,99 @@ export class IFPlanner implements Planner {
     return matches.map(m => ({ direction: m[1]!.trim(), destination: m[2]!.trim() }));
   }
 
+  // ─── Hidden direction probing ──────────────────────────────────────────
+
+  /**
+   * When stalled (no BFS target, turnsStalled >= 2), deterministically probe
+   * directions that have never been tried from the current room.
+   * Returns a plan if a probe is found, or undefined to fall through to the LLM.
+   */
+  private computeHiddenDirectionProbe(
+    gameState: IFGameState,
+    usage?: UsageMetrics,
+  ): PlanResult | undefined {
+    // Only kick in when truly stalled with no BFS path
+    if ((gameState.turnsStalled ?? 0) < 2) return undefined;
+
+    const explored = new Set(Object.keys(gameState.roomDirections ?? {}));
+    const blockedHere = this.getBlockedDirsForRoom(gameState.blockedExits, gameState.currentRoom);
+    const blockedSet = new Set(blockedHere);
+
+    // Step 1: Try unexplored KNOWN exits first (much more likely to lead somewhere)
+    const unexploredKnown = gameState.knownExits
+      .map(e => e.toLowerCase())
+      .find(e => !explored.has(e) && !blockedSet.has(e));
+    if (unexploredKnown) {
+      this.onVerbose?.("[HiddenProbe]", `Unexplored known exit: ${unexploredKnown} from ${gameState.currentRoom}`);
+      return this.buildPlan(`go ${unexploredKnown}`, `Explore known exit: ${unexploredKnown}`, usage);
+    }
+
+    // Step 2: All known exits explored — probe hidden directions sparingly.
+    // Fire every 3rd stalled turn (4,7,10,...) leaving 2/3 turns for LLM creativity.
+    const stalled = gameState.turnsStalled ?? 0;
+    if (stalled >= 4 && stalled % 3 === 1) {
+      const triedDirs = new Set([
+        ...explored,
+        ...gameState.knownExits.map(e => e.toLowerCase()),
+        ...blockedHere,
+      ]);
+
+      const unprobed = PROBE_DIRECTIONS.find(d => !triedDirs.has(d));
+      if (unprobed) {
+        this.onVerbose?.("[HiddenProbe]", `Probing untried direction: ${unprobed} from ${gameState.currentRoom}`);
+        return this.buildPlan(`go ${unprobed}`, `Probe hidden exit: ${unprobed}`, usage);
+      }
+
+      // Step 3: Current room fully probed — BFS to nearest room with unprobed directions
+      const blocked = gameState.blockedExits ?? {};
+      for (const room of Object.keys(gameState.dirGraph)) {
+        if (room === gameState.currentRoom) continue;
+        const roomEdges = gameState.dirGraph[room];
+        if (!roomEdges) continue;
+        const roomBlockedDirs = this.getBlockedDirsForRoom(gameState.blockedExits, room);
+        const roomTriedDirs = new Set([
+          ...Object.keys(roomEdges),
+          ...roomBlockedDirs,
+        ]);
+        const hasUnprobed = PROBE_DIRECTIONS.some(d => !roomTriedDirs.has(d));
+        if (!hasUnprobed) continue;
+
+        const path = this.bfs(gameState.dirGraph, gameState.currentRoom, room, blocked);
+        if (path && path.length > 0) {
+          this.onVerbose?.("[HiddenProbe]", `Navigating to ${room} (has unprobed dirs), ${path.length} step(s)`);
+          if (path.length > 1) {
+            return this.buildNavigatePlan(
+              path.map(s => ({ direction: s.direction, destination: s.destination })),
+              usage,
+            );
+          }
+          return this.buildPlan(`go ${path[0]!.direction}`, `Navigate to ${room} for probing`, usage);
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  /** Safely extract blocked direction strings for a given room. */
+  private getBlockedDirsForRoom(
+    blockedExits: Record<string, string[]> | undefined,
+    room: string,
+  ): string[] {
+    if (!blockedExits) return [];
+    const dirs = blockedExits[room];
+    if (!dirs || !Array.isArray(dirs)) return [];
+    return dirs;
+  }
+
+  // ─── Nav hint direction matching ─────────────────────────────────────
+
+  /** Check if a direction matches the first step of a BFS nav hint string. */
+  private directionMatchesNavHintFirstStep(dir: string, navHint: string): boolean {
+    const match = navHint.match(/^1\.\s*go\s+(\w+)/i);
+    return match ? match[1]!.toLowerCase() === dir.toLowerCase() : false;
+  }
+
   // ─── BFS navigation ────────────────────────────────────────────────────
 
   private computeNavHint(gameState: IFGameState): string | undefined {
@@ -380,7 +491,7 @@ export class IFPlanner implements Planner {
     const knownDirMap = gameState.roomDirections ?? {};
     const hasUnexploredExits = knownExits.some(e => !knownDirMap[e]);
     const visitedSet = new Set(gameState.visitedRooms);
-    const blocked = gameState.blockedExits as Record<string, Set<string>>;
+    const blocked = gameState.blockedExits ?? {};
     const weightLimited = new Set(gameState.weightLimitDirs ?? []);
 
     // Collect unvisited rooms reachable via known edges
@@ -407,7 +518,7 @@ export class IFPlanner implements Planner {
         this.onVerbose?.("[NavHint]", `${label} — path to ${target}: ${path.length} step(s)`);
         return path.map((s: BfsStep, i: number) => {
           const src = i === 0 ? gameState.currentRoom : path[i - 1]!.destination;
-          const wt = weightLimited.has(s.direction) || (blocked[src]?.has(s.direction) ?? false);
+          const wt = weightLimited.has(s.direction) || (blocked[src]?.includes(s.direction) ?? false);
           return `${i + 1}. go ${s.direction} → ${s.destination}${wt ? " ⚠ drop items first" : ""}`;
         }).join(", ");
       }

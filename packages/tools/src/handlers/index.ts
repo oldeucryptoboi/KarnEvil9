@@ -7,6 +7,9 @@ export type { BrowserDriverLike } from "./browser.js";
 export {
   executeGameCommandHandler,
   parseGameScreenHandler,
+  gameCombatHandler,
+  gameTakeAllHandler,
+  gameNavigateHandler,
   setEmulator,
   setCartographerFn,
 } from "./game-emulator.js";

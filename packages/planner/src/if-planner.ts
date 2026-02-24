@@ -147,6 +147,35 @@ export class IFPlanner implements Planner {
     const commandLine = lines.find(l => !/^(Game:|Reasoning:)/i.test(l)) ?? "look";
     const command = commandLine.replace(/^["'`]|["'`]$/g, "").replace(/[.!?]$/, "").toLowerCase().trim();
 
+    // ── Route to compound tools when applicable ──────────────────────────
+
+    // Combat: "attack <target> with <weapon>"
+    const combatMatch = command.match(/^attack\s+(.+?)\s+with\s+(.+)$/i);
+    if (combatMatch) {
+      const target = combatMatch[1]!.trim();
+      const weapon = combatMatch[2]!.trim();
+      this.onVerbose?.("[Compound]", `Combat: target=${target}, weapon=${weapon}`);
+      return this.buildCombatPlan(target, weapon, usage);
+    }
+
+    // Take-all: when LLM says "take <item>" and room has multiple items
+    const takeMatch = command.match(/^take\s+(.+)$/i);
+    const roomItems = gameState.roomItems ?? [];
+    if (takeMatch && roomItems.length > 1) {
+      this.onVerbose?.("[Compound]", `Take-all: ${roomItems.join(", ")}`);
+      return this.buildTakeAllPlan(roomItems, usage);
+    }
+
+    // Navigate: when LLM says "go <dir>" matching a nav hint with >1 step
+    const navMatch = command.match(/^(?:go\s+)?(north|south|east|west|up|down|in|out)$/i);
+    if (navMatch && navHint) {
+      const bfsSteps = this.parseNavHintSteps(navHint);
+      if (bfsSteps.length > 1 && bfsSteps[0]!.direction.toLowerCase() === navMatch[1]!.toLowerCase()) {
+        this.onVerbose?.("[Compound]", `Navigate: ${bfsSteps.length} steps`);
+        return this.buildNavigatePlan(bfsSteps, usage);
+      }
+    }
+
     return this.buildPlan(command, `Execute: ${command}`, usage);
   }
 
@@ -189,6 +218,130 @@ export class IFPlanner implements Planner {
     };
 
     return { plan, usage };
+  }
+
+  private buildCombatPlan(target: string, weapon: string, usage?: UsageMetrics): PlanResult {
+    const combatStepId = uuid();
+    const parseStepId = uuid();
+
+    const plan: Plan = {
+      plan_id: uuid(),
+      schema_version: "0.1",
+      goal: `Combat: attack ${target} with ${weapon}`,
+      assumptions: ["Game emulator is running", "Enemy is present in room"],
+      steps: [
+        {
+          step_id: combatStepId,
+          title: `Combat: attack ${target} with ${weapon}`,
+          tool_ref: { name: "game-combat" },
+          input: { target, weapon },
+          success_criteria: ["Combat resolved"],
+          failure_policy: "replan",
+          timeout_ms: 120000,
+          max_retries: 0,
+        },
+        {
+          step_id: parseStepId,
+          title: "Parse game screen",
+          tool_ref: { name: "parse-game-screen" },
+          input: { screen_text: "" },
+          input_from: { screen_text: `${combatStepId}.screen_text` },
+          depends_on: [combatStepId],
+          success_criteria: ["Screen text parsed"],
+          failure_policy: "continue",
+          timeout_ms: 30000,
+          max_retries: 0,
+        },
+      ],
+      created_at: new Date().toISOString(),
+    };
+
+    return { plan, usage };
+  }
+
+  private buildTakeAllPlan(items: string[], usage?: UsageMetrics): PlanResult {
+    const takeStepId = uuid();
+    const parseStepId = uuid();
+
+    const plan: Plan = {
+      plan_id: uuid(),
+      schema_version: "0.1",
+      goal: `Take all: ${items.join(", ")}`,
+      assumptions: ["Game emulator is running", "Items are in current room"],
+      steps: [
+        {
+          step_id: takeStepId,
+          title: `Take all: ${items.join(", ")}`,
+          tool_ref: { name: "game-take-all" },
+          input: { items },
+          success_criteria: ["Items taken"],
+          failure_policy: "replan",
+          timeout_ms: 60000,
+          max_retries: 0,
+        },
+        {
+          step_id: parseStepId,
+          title: "Parse game screen",
+          tool_ref: { name: "parse-game-screen" },
+          input: { screen_text: "" },
+          input_from: { screen_text: `${takeStepId}.screen_text` },
+          depends_on: [takeStepId],
+          success_criteria: ["Screen text parsed"],
+          failure_policy: "continue",
+          timeout_ms: 30000,
+          max_retries: 0,
+        },
+      ],
+      created_at: new Date().toISOString(),
+    };
+
+    return { plan, usage };
+  }
+
+  private buildNavigatePlan(steps: Array<{ direction: string; destination: string }>, usage?: UsageMetrics): PlanResult {
+    const navStepId = uuid();
+    const parseStepId = uuid();
+
+    const plan: Plan = {
+      plan_id: uuid(),
+      schema_version: "0.1",
+      goal: `Navigate: ${steps.map(s => s.direction).join(" → ")}`,
+      assumptions: ["Game emulator is running", "Path is traversable"],
+      steps: [
+        {
+          step_id: navStepId,
+          title: `Navigate: ${steps.map(s => `${s.direction} → ${s.destination}`).join(", ")}`,
+          tool_ref: { name: "game-navigate" },
+          input: { steps },
+          success_criteria: ["Navigation completed"],
+          failure_policy: "replan",
+          timeout_ms: 120000,
+          max_retries: 0,
+        },
+        {
+          step_id: parseStepId,
+          title: "Parse game screen",
+          tool_ref: { name: "parse-game-screen" },
+          input: { screen_text: "" },
+          input_from: { screen_text: `${navStepId}.screen_text` },
+          depends_on: [navStepId],
+          success_criteria: ["Screen text parsed"],
+          failure_policy: "continue",
+          timeout_ms: 30000,
+          max_retries: 0,
+        },
+      ],
+      created_at: new Date().toISOString(),
+    };
+
+    return { plan, usage };
+  }
+
+  /** Parse nav hint string "1. go north → Room A, 2. go east → Room B" into steps */
+  private parseNavHintSteps(navHint: string): Array<{ direction: string; destination: string }> {
+    const stepRe = /\d+\.\s*go\s+(\w+)\s*→\s*([^,⚠]+)/gi;
+    const matches = Array.from(navHint.matchAll(stepRe));
+    return matches.map(m => ({ direction: m[1]!.trim(), destination: m[2]!.trim() }));
   }
 
   // ─── BFS navigation ────────────────────────────────────────────────────

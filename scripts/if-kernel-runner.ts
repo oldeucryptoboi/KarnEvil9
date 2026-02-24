@@ -27,6 +27,9 @@ import {
   ToolRuntime,
   executeGameCommandHandler,
   parseGameScreenHandler,
+  gameCombatHandler,
+  gameTakeAllHandler,
+  gameNavigateHandler,
   setEmulator,
   setCartographerFn,
 } from "@karnevil9/tools";
@@ -190,6 +193,122 @@ const PARSE_GAME_SCREEN_MANIFEST: ToolManifest = {
   mock_responses: [{ screen_text: "", room_name: "Mock", exits: [], items: [], description: "mock" }],
 };
 
+const GAME_COMBAT_MANIFEST: ToolManifest = {
+  name: "game-combat",
+  version: "1.0.0",
+  description: "Loop attack rounds until combat resolves (victory, death, fled, weapon lost, or max rounds)",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    required: ["target", "weapon"],
+    properties: {
+      target: { type: "string", description: "Enemy to attack" },
+      weapon: { type: "string", description: "Weapon to use" },
+    },
+    additionalProperties: false,
+  },
+  output_schema: {
+    type: "object",
+    required: ["outcome", "rounds", "final_screen", "delta", "screen_text"],
+    properties: {
+      outcome: { type: "string", enum: ["victory", "death", "fled", "weapon_lost", "max_rounds"] },
+      rounds: { type: "number" },
+      final_screen: { type: "string" },
+      delta: { type: "string" },
+      screen_text: { type: "string" },
+    },
+    additionalProperties: false,
+  },
+  permissions: ["game:execute:combat"],
+  timeout_ms: 120000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [{ outcome: "victory", rounds: 1, final_screen: ">mock", delta: "defeated", screen_text: ">mock" }],
+};
+
+const GAME_TAKE_ALL_MANIFEST: ToolManifest = {
+  name: "game-take-all",
+  version: "1.0.0",
+  description: "Take multiple items from the current room in one step",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    required: ["items"],
+    properties: {
+      items: { type: "array", items: { type: "string" }, description: "Items to take" },
+    },
+    additionalProperties: false,
+  },
+  output_schema: {
+    type: "object",
+    required: ["taken", "failed", "final_screen", "screen_text"],
+    properties: {
+      taken: { type: "array", items: { type: "string" } },
+      failed: { type: "array", items: { type: "string" } },
+      final_screen: { type: "string" },
+      screen_text: { type: "string" },
+    },
+    additionalProperties: false,
+  },
+  permissions: ["game:execute:take"],
+  timeout_ms: 60000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [{ taken: ["item"], failed: [], final_screen: ">mock", screen_text: ">mock" }],
+};
+
+const GAME_NAVIGATE_MANIFEST: ToolManifest = {
+  name: "game-navigate",
+  version: "1.0.0",
+  description: "Execute a multi-step navigation path in one step",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    required: ["steps"],
+    properties: {
+      steps: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["direction", "destination"],
+          properties: {
+            direction: { type: "string" },
+            destination: { type: "string" },
+          },
+          additionalProperties: false,
+        },
+        description: "Navigation steps to execute",
+      },
+    },
+    additionalProperties: false,
+  },
+  output_schema: {
+    type: "object",
+    required: ["completed", "final_room", "final_screen", "screen_text", "steps_taken"],
+    properties: {
+      completed: { type: "number" },
+      final_room: { type: "string" },
+      final_screen: { type: "string" },
+      screen_text: { type: "string" },
+      steps_taken: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            direction: { type: "string" },
+            destination: { type: "string" },
+            actual_room: { type: "string" },
+          },
+          additionalProperties: false,
+        },
+      },
+    },
+    additionalProperties: false,
+  },
+  permissions: ["game:execute:navigate"],
+  timeout_ms: 120000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [{ completed: 1, final_room: "Mock", final_screen: ">mock", screen_text: ">mock", steps_taken: [] }],
+};
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -264,6 +383,9 @@ Room: Unknown | Exits: unknown | Items: unknown | Desc: Intermediate game respon
   const toolRegistry = new ToolRegistry();
   toolRegistry.register(EXECUTE_GAME_COMMAND_MANIFEST);
   toolRegistry.register(PARSE_GAME_SCREEN_MANIFEST);
+  toolRegistry.register(GAME_COMBAT_MANIFEST);
+  toolRegistry.register(GAME_TAKE_ALL_MANIFEST);
+  toolRegistry.register(GAME_NAVIGATE_MANIFEST);
 
   // Permission engine (auto-approve all game actions in kernel mode)
   const permPromptFn: ApprovalPromptFn = async () => "allow_session";
@@ -273,7 +395,10 @@ Room: Unknown | Exits: unknown | Items: unknown | Desc: Intermediate game respon
   const toolRuntime = new ToolRuntime(toolRegistry, permEngine, journal);
   toolRuntime.registerHandler("execute-game-command", executeGameCommandHandler);
   toolRuntime.registerHandler("parse-game-screen", parseGameScreenHandler);
-  log(`${C.green}\u2713${C.reset}`, "Tools registered: execute-game-command, parse-game-screen");
+  toolRuntime.registerHandler("game-combat", gameCombatHandler);
+  toolRuntime.registerHandler("game-take-all", gameTakeAllHandler);
+  toolRuntime.registerHandler("game-navigate", gameNavigateHandler);
+  log(`${C.green}\u2713${C.reset}`, "Tools registered: execute-game-command, parse-game-screen, game-combat, game-take-all, game-navigate");
 
   // ── Build callModel function ────────────────────────────────────────────
 

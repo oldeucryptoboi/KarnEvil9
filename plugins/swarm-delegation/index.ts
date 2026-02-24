@@ -373,8 +373,9 @@ export async function register(api: PluginApi): Promise<void> {
     const toolName = ctx.tool as string | undefined;
     // Stash tool name for after_step (kernel doesn't pass tool to after_step ctx)
     _lastStepToolName = toolName ?? "";
-    // Only apply friction/firebreak to game command execution
-    if (toolName !== "execute-game-command") return { action: "continue" };
+    // Only apply friction/firebreak to game execution tools
+    const gameTools = new Set(["execute-game-command", "game-combat", "game-take-all", "game-navigate"]);
+    if (!gameTools.has(toolName ?? "")) return { action: "continue" };
 
     const trustNow = reputation.getTrustScore(tacticianId);
     const attrs = delegationAttributes(trustNow);
@@ -397,10 +398,23 @@ export async function register(api: PluginApi): Promise<void> {
 
   api.registerHook("before_tool_call", async (ctx: HookContext): Promise<HookResult> => {
     const toolName = ctx.tool_name as string | undefined;
-    if (toolName !== "execute-game-command") return { action: "continue" };
+    const gameExecTools = new Set(["execute-game-command", "game-combat", "game-take-all", "game-navigate"]);
+    if (!gameExecTools.has(toolName ?? "")) return { action: "continue" };
 
     const input = ctx.input as Record<string, unknown> | undefined;
-    const command = (input?.command as string) ?? "";
+    // Derive a descriptive command string for logging/tracking
+    let command: string;
+    if (toolName === "game-combat") {
+      command = `attack ${input?.target ?? "?"} with ${input?.weapon ?? "?"}`;
+    } else if (toolName === "game-take-all") {
+      const items = (input?.items as string[]) ?? [];
+      command = `take-all [${items.join(", ")}]`;
+    } else if (toolName === "game-navigate") {
+      const steps = (input?.steps as Array<{ direction: string }>) ?? [];
+      command = `navigate [${steps.map(s => s.direction).join(" → ")}]`;
+    } else {
+      command = (input?.command as string) ?? "";
+    }
     const taskId = `task-t-${uuid().slice(0, 8)}`;
 
     // Graduated authority → dynamic SLO
@@ -627,6 +641,137 @@ export async function register(api: PluginApi): Promise<void> {
       log(`[GameState] Room: ${gameMemory.currentRoom || "?"} | Visited: ${gameMemory.visitedRooms.length} | Inventory: ${gameMemory.inventory.join(", ") || "empty"}`);
     }
 
+    // ── game-combat: update state from combat resolution ─────────────────
+    if (toolName === "game-combat" && result) {
+      const delta = (result.delta as string) ?? "";
+      const screenText = (result.screen_text as string) ?? "";
+      const outcome = (result.outcome as string) ?? "";
+      const rounds = (result.rounds as number) ?? 0;
+      const command = _lastCommand;
+
+      // Update cartographer screen state
+      cartState.lastFullScreen = screenText;
+
+      // Weapon might be lost in combat
+      if (outcome === "weapon_lost" || outcome === "death") {
+        const weaponMatch = command.match(/with\s+(.+)$/i);
+        if (weaponMatch) {
+          const weapon = weaponMatch[1]!.trim();
+          gameMemory.inventory = gameMemory.inventory.filter(i => i !== weapon);
+        }
+      }
+      if (outcome === "death") {
+        gameMemory.inventory = [];
+      }
+
+      // Update command history: record each round as a command
+      for (let i = 0; i < rounds; i++) {
+        commandHistory.push(command);
+      }
+      lastDelta = delta;
+
+      log(`[GameCombat] outcome=${outcome} rounds=${rounds} | Room: ${gameMemory.currentRoom}`);
+    }
+
+    // ── game-take-all: update inventory from taken items ─────────────────
+    if (toolName === "game-take-all" && result) {
+      const taken = (result.taken as string[]) ?? [];
+      const screenText = (result.screen_text as string) ?? "";
+
+      cartState.lastFullScreen = screenText;
+
+      // Add taken items to inventory
+      for (const item of taken) {
+        if (!gameMemory.inventory.includes(item)) {
+          gameMemory.inventory.push(item);
+        }
+        commandHistory.push(`take ${item}`);
+      }
+
+      // Remove taken items from roomItems cache
+      const curRoom = cartState.lastRoomHeader;
+      if (curRoom && cartState.roomItems[curRoom]) {
+        cartState.roomItems[curRoom] = cartState.roomItems[curRoom]!.filter(
+          it => !taken.includes(it),
+        );
+      }
+
+      lastDelta = screenText;
+      log(`[GameTakeAll] taken=[${taken.join(", ")}] | Inventory: ${gameMemory.inventory.join(", ")}`);
+    }
+
+    // ── game-navigate: update dirGraph for each step completed ────────────
+    if (toolName === "game-navigate" && result) {
+      const stepsTaken = (result.steps_taken as Array<{ direction: string; destination: string; actual_room: string }>) ?? [];
+      const screenText = (result.screen_text as string) ?? "";
+      const finalRoom = (result.final_room as string) ?? "";
+
+      cartState.lastFullScreen = screenText;
+
+      let prevRoom = gameMemory.currentRoom;
+      for (const step of stepsTaken) {
+        const dir = step.direction.toLowerCase();
+        const actual = step.actual_room;
+
+        // Update directional graph
+        if (prevRoom && actual && isRoomName(actual)) {
+          cartState.dirGraph[prevRoom] ??= {};
+          cartState.dirGraph[prevRoom]![dir] = actual;
+
+          // Promote assumed edge if it exists
+          if (cartState.assumedEdges[prevRoom]?.[dir]) {
+            delete cartState.assumedEdges[prevRoom]![dir];
+          }
+
+          // Sync into roomExits
+          const srcExits = cartState.roomExits[prevRoom] ?? [];
+          if (!srcExits.some(e => e.toLowerCase() === dir)) {
+            cartState.roomExits[prevRoom] = [...srcExits, dir];
+          }
+
+          // Reverse assumed edge
+          if (REVERSE_DIR[dir]) {
+            if (!cartState.dirGraph[actual]?.[REVERSE_DIR[dir]!]) {
+              cartState.assumedEdges[actual] ??= {};
+              cartState.assumedEdges[actual]![REVERSE_DIR[dir]!] ??= prevRoom;
+            }
+            const dstExits = cartState.roomExits[actual] ?? [];
+            if (!dstExits.some(e => e.toLowerCase() === REVERSE_DIR[dir]!.toLowerCase())) {
+              cartState.roomExits[actual] = [...dstExits, REVERSE_DIR[dir]!];
+            }
+          }
+
+          if (!cartState.rooms.includes(actual)) {
+            cartState.rooms.push(actual);
+          }
+          if (!gameMemory.visitedRooms.includes(actual)) {
+            gameMemory.visitedRooms.push(actual);
+          }
+          if (!(gameMemory.roomGraph[prevRoom] ?? []).includes(actual)) {
+            gameMemory.roomGraph[prevRoom] = [...(gameMemory.roomGraph[prevRoom] ?? []), actual];
+          }
+        }
+
+        commandHistory.push(`go ${step.direction}`);
+        prevRoom = actual;
+      }
+
+      // Update current room
+      if (finalRoom && isRoomName(finalRoom)) {
+        gameMemory.currentRoom = finalRoom;
+        cartState.lastRoomHeader = finalRoom;
+      }
+
+      // Track exploration progress
+      if (cartState.rooms.length > lastNewRoomCount) {
+        lastNewRoomCount = cartState.rooms.length;
+        lastNewRoomTurn = turn;
+      }
+
+      lastDelta = screenText;
+      log(`[GameNavigate] ${stepsTaken.length} steps | Room: ${gameMemory.currentRoom} | Visited: ${gameMemory.visitedRooms.length}`);
+    }
+
     if (toolName === "parse-game-screen" && result) {
       // Update exits from cartographer result
       const roomName = result.room_name as string | undefined;
@@ -656,7 +801,8 @@ export async function register(api: PluginApi): Promise<void> {
 
   api.registerHook("after_step", async (ctx: HookContext): Promise<HookResult> => {
     // Kernel doesn't pass tool name to after_step ctx — read from closure
-    if (_lastStepToolName !== "execute-game-command") return { action: "observe" };
+    const gameStepTools = new Set(["execute-game-command", "game-combat", "game-take-all", "game-navigate"]);
+    if (!gameStepTools.has(_lastStepToolName)) return { action: "observe" };
 
     // Consensus: read screen independently
     const emulator = config.emulator;

@@ -25,6 +25,8 @@ export class MoltbookClient {
     // Advisory rate-limit tracking (real enforcement is server-side)
     this._lastPostAt = 0;
     this._lastCommentAt = 0;
+    // Dedup guard: track recent comments to prevent parallel duplicates
+    this._recentComments = new Map(); // key: "postId:contentPrefix" → timestamp
   }
 
   /**
@@ -77,6 +79,15 @@ export class MoltbookClient {
    * @returns {Promise<object>} Created comment
    */
   async createComment({ postId, content, parentId }) {
+    // Dedup guard: reject if same post+content was commented in the last 60s
+    const dedupKey = `${postId}:${content.slice(0, 80)}`;
+    const lastTime = this._recentComments.get(dedupKey);
+    if (lastTime && Date.now() - lastTime < 60000) {
+      this.logger?.warn("Duplicate comment suppressed", { postId, dedupKey });
+      return { comment: { id: "duplicate_suppressed" }, duplicate: true };
+    }
+    this._recentComments.set(dedupKey, Date.now());
+
     const body = { content };
     if (parentId) body.parent_id = parentId;
 
@@ -370,10 +381,17 @@ const KNOWN_WORDS = [
   "divided", "divide", "halved", "split",
   "gains", "gain", "loses", "lose", "adds", "add", "plus", "minus",
   "times", "drops", "drop", "falls", "fell", "slows", "slow", "more", "less", "fewer",
+  // operations (must also be in KNOWN_WORDS so deobfuscator extracts them)
+  "accelerates", "accelerate", "decelerates", "decelerate",
   // context
-  "lobster", "meters", "speed", "velocity", "second", "total", "whats", "what",
-  "new", "per", "and", "the", "has", "how", "many", "at", "is", "um", "a",
-  "point", "negative",
+  "lobster", "another", "centimeters", "centimeter", "kilometers", "kilometer",
+  "temperature", "distance", "newtons", "newton", "degrees",
+  "celsius", "fahrenheit", "meters", "kilograms", "kilogram", "seconds", "minutes",
+  "weight", "height", "force", "power", "energy", "exerts", "strikes",
+  "speed", "velocity", "second", "total", "whats", "what", "other",
+  "swimming", "swims", "swim", "runs", "run", "moves", "move",
+  "new", "per", "and", "the", "has", "how", "many", "at", "is", "um", "umm", "ehh", "uh", "a",
+  "point", "negative", "claw", "claws", "sum",
 ];
 
 // Sort by length descending for greedy matching
@@ -388,62 +406,100 @@ function matchStretched(buffer, word) {
   let bi = 0;
   for (let wi = 0; wi < word.length; wi++) {
     if (bi >= buffer.length || buffer[bi] !== word[wi]) return null;
-    // Consume all consecutive copies of this character
-    while (bi < buffer.length && buffer[bi] === word[wi]) bi++;
+    bi++; // consume exactly one
+    // Consume extra repeated chars ONLY if next word char is different
+    // (preserves chars needed for consecutive identical letters like 'ee' in "three")
+    if (wi + 1 >= word.length || word[wi + 1] !== word[wi]) {
+      while (bi < buffer.length && buffer[bi] === word[wi]) bi++;
+    }
   }
   return bi;
 }
 
 /**
- * Deobfuscate text by joining all tokens and greedily extracting known words.
- * Handles cases like "tw en ty th ree" → "twenty three".
+ * Deobfuscate text using a two-phase approach.
+ *
+ * Phase 1: Match individual tokens against known words (preserves word boundaries).
+ * Phase 2: Concatenate consecutive unmatched token fragments and greedily extract
+ *          known words from the combined buffer (handles split words like "tw en ty").
+ *
+ * This prevents greedy char consumption from stealing characters across word boundaries
+ * (e.g. "at" + "twenty" → "att..." where matchStretched eats both t's for "at").
  */
 function deobfuscate(cleanText) {
-  // Concatenate alpha fragments; keep digits, operators, and parens as separate tokens
   const tokens = cleanText.split(/\s+/);
-  const segments = []; // { type: 'alpha' | 'pass', value: string }
-  let alphaBuffer = "";
 
+  // Build list of { type, value } entries — 'pass' for digits/operators, 'alpha' for text
+  const entries = [];
   for (const tok of tokens) {
     if (/^\d+(\.\d+)?$/.test(tok) || /^[+\-*/()]+$/.test(tok)) {
-      if (alphaBuffer) { segments.push({ type: "alpha", value: alphaBuffer }); alphaBuffer = ""; }
-      segments.push({ type: "pass", value: tok });
+      entries.push({ type: "pass", value: tok });
     } else {
-      // Strip any embedded operators from alpha tokens before buffering
       const alphaOnly = tok.replace(/[+\-*/()]/g, "");
-      alphaBuffer += alphaOnly;
+      if (alphaOnly) entries.push({ type: "alpha", value: alphaOnly });
     }
   }
-  if (alphaBuffer) segments.push({ type: "alpha", value: alphaBuffer });
 
-  // For each alpha segment, greedily extract known words
+  // Phase 1: Try to match each alpha token individually against known words
+  for (const entry of entries) {
+    if (entry.type !== "alpha") continue;
+    for (const word of SORTED_KNOWN) {
+      const consumed = matchStretched(entry.value, word);
+      if (consumed !== null && consumed === entry.value.length) {
+        // Entire token matches a known word
+        entry.resolved = word;
+        break;
+      }
+    }
+  }
+
+  // Phase 2: Group consecutive unresolved alpha entries, concatenate, and greedily extract
   const resultWords = [];
-  for (const seg of segments) {
-    if (seg.type === "pass") {
-      resultWords.push(seg.value);
-      continue;
-    }
+  let unresolved = [];
 
-    let remaining = seg.value;
-    while (remaining.length > 0) {
-      let matched = false;
-      for (const word of SORTED_KNOWN) {
-        const consumed = matchStretched(remaining, word);
-        if (consumed !== null) {
-          resultWords.push(word);
-          remaining = remaining.slice(consumed);
-          matched = true;
-          break;
-        }
-      }
-      if (!matched) {
-        // Skip one character and try again
-        remaining = remaining.slice(1);
-      }
+  function flushUnresolved() {
+    if (unresolved.length === 0) return;
+    const buffer = unresolved.map(e => e.value).join("");
+    unresolved = [];
+    _extractFromBuffer(buffer, resultWords);
+  }
+
+  for (const entry of entries) {
+    if (entry.type === "pass") {
+      flushUnresolved();
+      resultWords.push(entry.value);
+    } else if (entry.resolved) {
+      flushUnresolved();
+      resultWords.push(entry.resolved);
+    } else {
+      unresolved.push(entry);
     }
   }
+  flushUnresolved();
 
   return resultWords.join(" ");
+}
+
+/**
+ * Greedily extract known words from an alpha buffer using matchStretched.
+ */
+function _extractFromBuffer(buffer, resultWords) {
+  let remaining = buffer;
+  while (remaining.length > 0) {
+    let matched = false;
+    for (const word of SORTED_KNOWN) {
+      const consumed = matchStretched(remaining, word);
+      if (consumed !== null) {
+        resultWords.push(word);
+        remaining = remaining.slice(consumed);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      remaining = remaining.slice(1);
+    }
+  }
 }
 
 // ── Word number parsing ──
@@ -565,8 +621,8 @@ function parseWordNumber(tokens, startIdx) {
 
 // ── Operation detection ──
 
-const ADD_WORDS = new Set(["gains", "gain", "adds", "add", "plus", "increased", "increases", "more", "additional", "combined", "together"]);
-const SUB_WORDS = new Set(["loses", "lose", "minus", "subtract", "subtracts", "decreased", "decreases", "less", "fewer", "drops", "drop", "falls", "fell", "slows", "slow"]);
+const ADD_WORDS = new Set(["gains", "gain", "adds", "add", "plus", "increased", "increases", "more", "additional", "combined", "together", "total", "sum", "accelerates", "accelerate"]);
+const SUB_WORDS = new Set(["loses", "lose", "minus", "subtract", "subtracts", "decreased", "decreases", "less", "fewer", "drops", "drop", "falls", "fell", "slows", "slow", "decelerates", "decelerate"]);
 const MUL_WORDS = new Set(["times", "multiplied", "multiply", "doubled", "tripled", "quadrupled"]);
 const DIV_WORDS = new Set(["divided", "divide", "halved", "split"]);
 

@@ -145,6 +145,7 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
       planner: createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic }),
       mode: opts.mode as "real" | "dry_run" | "mock",
       limits: { max_steps: parseInt(opts.maxSteps, 10), max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000, max_iterations: 10 },
+      plannerTimeoutMs: 90000,
       policy,
       agentic: opts.agentic ?? false,
       activeMemory,

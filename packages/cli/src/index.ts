@@ -353,6 +353,7 @@ program.command("server").description("Start the API server")
         limits: { max_steps: 20, max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000 },
         policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true },
         agentic: sessionOpts?.agentic ?? opts.agentic ?? false,
+        preGrantedScopes: pluginRegistry.getPluginPermissions(),
       });
       const session = await kernel.createSession(task);
       // Run in background — don't block the caller

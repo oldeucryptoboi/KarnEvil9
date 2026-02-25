@@ -78,26 +78,45 @@ export async function register(api) {
       `Karma: ${karma}. Unread notifications: ${unread}. ` +
       `Can post: ${client.canPost()}, Can comment: ${client.canComment()}.`,
 
-      // Strategy
+      // Engagement strategy
       `[Moltbook Strategy] When engaging on Moltbook:\n` +
       `- Before replying to a post/comment, ALWAYS read it first with moltbook-get-post to understand the full context.\n` +
       `- When browsing, use moltbook-feed to see what's active, then moltbook-get-post for posts you want to engage with.\n` +
       `- For research-then-post tasks: gather information first (read-file, claude-code), then compose and post in a later iteration.\n` +
       `- Write substantive, technically accurate content. Be direct and confident — avoid hedging or filler.\n` +
-      `- When replying, reference specific points from the post/comment you're responding to.`,
+      `- When replying, reference specific points from the post/comment you're responding to.\n` +
+      `- Don't force engagement — if nothing is interesting or you have nothing meaningful to add, do nothing.`,
+
+      // DM strategy
+      `[Moltbook DMs] You can manage direct messages with moltbook-dm:\n` +
+      `- list_requests: See pending DM requests from other agents.\n` +
+      `- approve / reject: Accept or decline DM requests (use reject with block:true for spam).\n` +
+      `- list_conversations: See all active DM threads.\n` +
+      `- get_conversation: Read messages in a specific thread.\n` +
+      `- send: Reply in a conversation.\n` +
+      `Approach DMs conversationally — these are 1-on-1 dialogues, not public broadcasts. ` +
+      `Be genuine, ask follow-up questions, and engage with what the other agent is saying.`,
+
+      // Follow strategy
+      `[Moltbook Follows] Use moltbook-follow to follow/unfollow agents.\n` +
+      `- Follow agents who consistently post quality content or engage in interesting discussions.\n` +
+      `- Following builds your home feed — follow agents whose content you want to see regularly.\n` +
+      `- Don't mass-follow; be selective and intentional.`,
+
+      // Notification strategy
+      `[Moltbook Notifications] Use moltbook-notifications to manage notifications:\n` +
+      `- list: See all unread notifications (replies, mentions, follows, votes).\n` +
+      `- mark_read: Mark all notifications as read after processing them.\n` +
+      `- mark_post_read: Mark notifications for a specific post as read.\n` +
+      `Prioritize replying to direct replies and mentions. Votes and new followers are informational only.`,
     ];
 
-    // DM & follow hints
-    hints.push(
-      `[Moltbook DMs] You can manage DMs with moltbook-dm (list_requests, list_conversations, get_conversation, approve, reject, send).`
-    );
-    hints.push(
-      `[Moltbook Follows] You can follow/unfollow agents with moltbook-follow.`
-    );
-
-    // Add notification hint if there are unread notifications
+    // Contextual notification urgency
     if (unread > 0) {
-      hints.push(`[Moltbook] You have ${unread} unread notification(s). Use moltbook-notifications (list, mark_read, mark_post_read) to manage them.`);
+      hints.push(
+        `[Moltbook] You have ${unread} unread notification(s). ` +
+        `Use moltbook-notifications (list) to see what needs attention, then act on anything requiring a response.`
+      );
     }
 
     return { action: "modify", data: { hints } };

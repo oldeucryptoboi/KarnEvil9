@@ -5,7 +5,7 @@
  * Zero external dependencies.
  */
 
-const API_BASE = "https://www.moltbook.com/api/v1";
+const API_BASE = process.env.MOLTBOOK_API_BASE_URL || "https://www.moltbook.com/api/v1";
 const REQUEST_TIMEOUT_MS = 30_000;
 
 export class MoltbookClient {

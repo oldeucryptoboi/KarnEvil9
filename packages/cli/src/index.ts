@@ -116,6 +116,9 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
     const approvalFn = opts.autoApprove
       ? async (_request: PermissionRequest): Promise<ApprovalDecision> => "allow_session"
       : undefined;
+    // Validate planner early — fails fast before plugin loading and network auth
+    const planner = createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic });
+
     const { journal, registry, permissions, runtime } = await createRuntime(policy, approvalFn, browserDriver);
     const removeShutdownHandler = journal.registerShutdownHandler();
     const task: Task = { task_id: uuid(), text: taskText, created_at: new Date().toISOString() };
@@ -142,7 +145,7 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
     const kernel = new Kernel({
       journal, toolRuntime: runtime, toolRegistry: registry, permissions,
       pluginRegistry,
-      planner: createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic }),
+      planner,
       mode: opts.mode as "real" | "dry_run" | "mock",
       limits: { max_steps: parseInt(opts.maxSteps, 10), max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000, max_iterations: 10 },
       plannerTimeoutMs: 90000,

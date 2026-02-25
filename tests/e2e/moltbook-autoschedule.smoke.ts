@@ -26,6 +26,8 @@ function createMockMoltbookServer(): Promise<{ server: Server; url: string }> {
       res.setHeader("Content-Type", "application/json");
       if (req.url?.startsWith("/api/v1/agents/me")) {
         res.end(JSON.stringify({ name: "test-agent", agent_id: "test-id" }));
+      } else if (req.url?.startsWith("/api/v1/agents/dm/requests")) {
+        res.end(JSON.stringify({ requests: [] }));
       } else if (req.url?.startsWith("/api/v1/home")) {
         res.end(JSON.stringify({ your_account: { unread_notification_count: 0 } }));
       } else {

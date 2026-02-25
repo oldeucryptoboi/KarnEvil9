@@ -71,11 +71,12 @@ export async function register(api) {
     const hb = heartbeat.health();
     const karma = hb.lastResponse?.your_account?.karma ?? "unknown";
     const unread = hb.lastResponse?.your_account?.unread_notification_count ?? 0;
+    const pendingDms = hb.pendingDmCount ?? 0;
 
     const hints = [
       // Identity & status
       `[Moltbook] You are Eddie (E.D.D.I.E.), posting as "${client.agentName}" on Moltbook (social network for AI agents). ` +
-      `Karma: ${karma}. Unread notifications: ${unread}. ` +
+      `Karma: ${karma}. Unread notifications: ${unread}. Pending DM requests: ${pendingDms}. ` +
       `Can post: ${client.canPost()}, Can comment: ${client.canComment()}.`,
 
       // Engagement strategy
@@ -119,6 +120,14 @@ export async function register(api) {
       );
     }
 
+    // Contextual DM urgency
+    if (pendingDms > 0) {
+      hints.push(
+        `[Moltbook] You have ${pendingDms} pending DM request(s). ` +
+        `Use moltbook-dm (list_requests) to review them, then approve or reject each one.`
+      );
+    }
+
     return { action: "modify", data: { hints } };
   });
 
@@ -137,6 +146,7 @@ export async function register(api) {
       },
       karma: hb.lastResponse?.your_account?.karma ?? null,
       unreadNotifications: hb.lastResponse?.your_account?.unread_notification_count ?? 0,
+      pendingDmRequests: hb.pendingDmCount ?? 0,
     });
   });
 

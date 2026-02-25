@@ -21,6 +21,7 @@ export class HeartbeatService {
     this._lastResponse = null;
     this._lastCheckedAt = null;
     this._errorCount = 0;
+    this._pendingDmCount = 0;
   }
 
   /**
@@ -58,6 +59,7 @@ export class HeartbeatService {
       lastCheckedAt: this._lastCheckedAt,
       errorCount: this._errorCount,
       lastResponse: this._lastResponse,
+      pendingDmCount: this._pendingDmCount,
     };
   }
 
@@ -72,7 +74,17 @@ export class HeartbeatService {
 
       const karma = this._lastResponse.your_account?.karma;
       const unread = this._lastResponse.your_account?.unread_notification_count ?? 0;
-      this.logger?.info("Moltbook heartbeat OK", { karma, unread });
+
+      // Fetch pending DM requests count alongside the heartbeat
+      try {
+        const dmRes = await this.client.getDmRequests();
+        const requests = dmRes.requests ?? dmRes.data ?? (Array.isArray(dmRes) ? dmRes : []);
+        this._pendingDmCount = requests.length;
+      } catch {
+        // DM endpoint failure is non-fatal — keep previous count
+      }
+
+      this.logger?.info("Moltbook heartbeat OK", { karma, unread, pendingDms: this._pendingDmCount });
     } catch (err) {
       this._errorCount++;
       this.logger?.error("Moltbook heartbeat failed", { error: err.message, errorCount: this._errorCount });

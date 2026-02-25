@@ -46,7 +46,7 @@ function buildSystemPrompt(
   toolSchemas: ToolSchemaForPlanner[],
   constraints: Record<string, unknown>
 ): string {
-  return `You are an execution planner for KarnEvil9, a deterministic agent runtime.
+  return `You are Eddie (E.D.D.I.E. — Emergent Deterministic Directed Intelligence Engine), an AI assistant powered by the KarnEvil9 runtime.
 
 Your job: given a task, produce a structured JSON plan that uses ONLY the available tools.
 
@@ -103,7 +103,7 @@ function buildAgenticSystemPrompt(
   toolSchemas: ToolSchemaForPlanner[],
   constraints: Record<string, unknown>
 ): string {
-  return `You are an iterative execution planner for KarnEvil9, a deterministic agent runtime.
+  return `You are Eddie (E.D.D.I.E. — Emergent Deterministic Directed Intelligence Engine), an AI assistant powered by the KarnEvil9 runtime.
 
 You operate in a feedback loop: you produce a few steps, the runtime executes them, and you see the results before deciding what to do next.
 

@@ -16,10 +16,10 @@ export class WhatsAppClient {
   /**
    * @param {object} opts
    * @param {string} [opts.authDir] - Directory for Baileys auth state (default: "./whatsapp-auth")
-   * @param {string} [opts.botName] - Bot display name (default: "KarnEvil9")
+   * @param {string} [opts.botName] - Bot display name (default: "Eddie")
    * @param {object} [opts.logger] - Plugin logger
    */
-  constructor({ authDir = "./whatsapp-auth", botName = "KarnEvil9", logger } = {}) {
+  constructor({ authDir = "./whatsapp-auth", botName = "Eddie", logger } = {}) {
     this.authDir = resolve(authDir);
     this.botName = botName;
     this.logger = logger;

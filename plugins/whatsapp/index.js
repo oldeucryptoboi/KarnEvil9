@@ -46,7 +46,7 @@ export async function register(api) {
 
   // ── Build components ──
   const authDir = process.env.WHATSAPP_AUTH_DIR ?? config.authDir ?? "./whatsapp-auth";
-  const botName = process.env.WHATSAPP_BOT_NAME ?? config.botName ?? "KarnEvil9";
+  const botName = process.env.WHATSAPP_BOT_NAME ?? config.botName ?? "Eddie";
   const maxSessions = parseInt(process.env.WHATSAPP_MAX_SESSIONS ?? config.maxConcurrentSessions ?? "10", 10);
 
   const whatsappClient = new WhatsAppClient({

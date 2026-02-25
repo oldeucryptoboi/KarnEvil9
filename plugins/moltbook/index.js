@@ -65,7 +65,7 @@ export async function register(api) {
       action: "modify",
       modifications: {
         context_hints: [
-          `[Moltbook] Agent "${client.agentName}" is active on Moltbook (social network for AI agents). ` +
+          `[Moltbook] You are Eddie (E.D.D.I.E.), posting as "${client.agentName}" on Moltbook (social network for AI agents). ` +
           `Available tools: moltbook-post (create posts in submolts), moltbook-comment (reply to posts), ` +
           `moltbook-vote (upvote/downvote), moltbook-get-post (fetch a post and its comments by ID), ` +
           `moltbook-feed (browse feeds), moltbook-search (search content). ` +

@@ -454,13 +454,22 @@ export class IFPlanner implements Planner {
       this.getBlockedDirsForRoom(gameState.blockedExits, gameState.currentRoom),
     );
 
-    // 1. Try unexplored known exits (mirrors Phase 1 but fires before navHint gate)
-    const unexploredKnown = gameState.knownExits
+    // 1. Try unexplored known exits (mirrors Phase 1 but fires before navHint gate).
+    // Prioritize exits with unknown/unvisited destinations over those leading to visited rooms.
+    const candidates = gameState.knownExits
       .map(e => e.toLowerCase())
-      .find(e => !explored.has(e) && !blockedSet.has(e));
-    if (unexploredKnown) {
-      this.onVerbose?.("[HiddenProbe]", `Early known exit: ${unexploredKnown} from ${gameState.currentRoom}`);
-      return this.buildPlan(`go ${unexploredKnown}`, `Explore known exit: ${unexploredKnown}`, usage);
+      .filter(e => !explored.has(e) && !blockedSet.has(e));
+    if (candidates.length > 0) {
+      const visitedSet = new Set(gameState.visitedRooms);
+      const dirMap = gameState.dirGraph[gameState.currentRoom] ?? {};
+      const assumedMap = gameState.assumedDirections ?? {};
+      // Pick exit whose destination is unknown or unvisited; fall back to any candidate
+      const best = candidates.find(e => {
+        const dest = dirMap[e] ?? assumedMap[e];
+        return !dest || !visitedSet.has(dest);
+      }) ?? candidates[0]!;
+      this.onVerbose?.("[HiddenProbe]", `Early known exit: ${best} from ${gameState.currentRoom}`);
+      return this.buildPlan(`go ${best}`, `Explore known exit: ${best}`, usage);
     }
 
     // 2. Probe non-compass hidden exits (in/out/up/down).

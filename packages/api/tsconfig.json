@@ -13,6 +13,7 @@
     { "path": "../journal" },
     { "path": "../permissions" },
     { "path": "../plugins" },
+    { "path": "../memory" },
     { "path": "../metrics" },
     { "path": "../scheduler" },
     { "path": "../swarm" }

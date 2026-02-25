@@ -338,6 +338,12 @@ program.command("server").description("Start the API server")
     const { journal, registry, permissions, runtime } = await createRuntime(undefined, serverApprovalPrompt, browserDriver);
     const metricsCollector = new MetricsCollector();
 
+    let activeMemory: ActiveMemory | undefined;
+    if (opts.memory !== false) {
+      activeMemory = new ActiveMemory(MEMORY_PATH);
+      await activeMemory.load();
+    }
+
     // Bootstrap scheduler before plugins so the scheduler-tool plugin can access it
     const planner = createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic });
     const scheduleStore = new ScheduleStore(SCHEDULER_PATH);
@@ -356,6 +362,7 @@ program.command("server").description("Start the API server")
         limits: { max_steps: 20, max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000 },
         policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true },
         agentic: sessionOpts?.agentic ?? opts.agentic ?? false,
+        activeMemory,
         preGrantedScopes: pluginRegistry.getPluginPermissions(),
       });
       const session = await kernel.createSession(task);
@@ -503,6 +510,7 @@ program.command("server").description("Start the API server")
       pluginRegistry,
       planner,
       agentic: opts.agentic ?? false,
+      activeMemory,
       metricsCollector,
       scheduler,
       swarm: meshManager,

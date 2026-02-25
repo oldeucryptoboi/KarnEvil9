@@ -7,6 +7,7 @@ import type { Journal } from "@karnevil9/journal";
 import type { PermissionEngine } from "@karnevil9/permissions";
 import type { Planner, Task, ApprovalDecision, ExecutionMode, SessionLimits, PolicyProfile, JournalEvent } from "@karnevil9/schemas";
 import type { PluginRegistry } from "@karnevil9/plugins";
+import type { ActiveMemory } from "@karnevil9/memory";
 import type { MetricsCollector } from "@karnevil9/metrics";
 import { createMetricsRouter } from "@karnevil9/metrics";
 import type { Scheduler } from "@karnevil9/scheduler";
@@ -207,6 +208,7 @@ export interface ApiServerConfig {
   approvalTimeoutMs?: number;
   corsOrigins?: string | string[];
   swarm?: MeshManager;
+  activeMemory?: ActiveMemory;
   /** IP addresses of trusted reverse proxies; enables X-Forwarded-For parsing. */
   trustedProxies?: string[];
 }
@@ -273,6 +275,7 @@ export class ApiServer {
   private metricsCollector?: MetricsCollector;
   private scheduler?: Scheduler;
   private swarm?: MeshManager;
+  private activeMemory?: ActiveMemory;
   private approvalTimeoutMs: number;
   private corsOrigins?: string | string[];
   private trustedProxies?: string[];
@@ -331,6 +334,7 @@ export class ApiServer {
       this.metricsCollector = config.metricsCollector;
       this.scheduler = config.scheduler;
       this.swarm = config.swarm;
+      this.activeMemory = config.activeMemory;
       this.approvalTimeoutMs = config.approvalTimeoutMs ?? 300000; // 5 minutes
       this.corsOrigins = config.corsOrigins;
       this.trustedProxies = config.trustedProxies;
@@ -609,11 +613,14 @@ export class ApiServer {
       toolRuntime: this.toolRuntime,
       toolRegistry: this.toolRegistry,
       permissions: this.permissions,
+      pluginRegistry: this.pluginRegistry,
       planner: this.planner,
       mode,
       limits: this.defaultLimits,
       policy: this.defaultPolicy,
       agentic: this.agentic,
+      activeMemory: this.activeMemory,
+      preGrantedScopes: this.pluginRegistry?.getPluginPermissions(),
       plannerTimeoutMs: PLANNER_TIMEOUT_MS,
     });
 
@@ -838,11 +845,14 @@ export class ApiServer {
             toolRuntime: this.toolRuntime,
             toolRegistry: this.toolRegistry,
             permissions: this.permissions,
+            pluginRegistry: this.pluginRegistry,
             planner: this.planner,
             mode: mode ?? this.defaultMode,
             limits: effectiveLimits,
             policy: this.defaultPolicy,
             agentic: this.agentic,
+            activeMemory: this.activeMemory,
+            preGrantedScopes: this.pluginRegistry?.getPluginPermissions(),
             plannerTimeoutMs: PLANNER_TIMEOUT_MS,
           };
           const kernel = new KernelClass(kernelConfig);

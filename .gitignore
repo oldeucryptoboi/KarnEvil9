@@ -5,7 +5,7 @@ dist/
 .env
 .env.*
 !.env.example
-/journal/
+**/journal/
 sessions/
 .openvger/
 *.log

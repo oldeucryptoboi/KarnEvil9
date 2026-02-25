@@ -448,7 +448,9 @@ export class IFPlanner implements Planner {
     usage?: UsageMetrics,
   ): PlanResult | undefined {
     const stalled = gameState.turnsStalled ?? 0;
-    if (stalled < 2) return undefined;
+    // Threshold 3 (not 2): gives the LLM one turn at stalled=2 for combat
+    // initiation before probes start consuming turns on unexplored exits.
+    if (stalled < 3) return undefined;
 
     const explored = new Set(Object.keys(gameState.roomDirections ?? {}));
     const blockedSet = new Set(
@@ -517,7 +519,7 @@ export class IFPlanner implements Planner {
     usage?: UsageMetrics,
   ): PlanResult | undefined {
     // Only kick in when truly stalled with no BFS path
-    if ((gameState.turnsStalled ?? 0) < 2) return undefined;
+    if ((gameState.turnsStalled ?? 0) < 3) return undefined;
 
     const explored = new Set(Object.keys(gameState.roomDirections ?? {}));
     const blockedHere = this.getBlockedDirsForRoom(gameState.blockedExits, gameState.currentRoom);
@@ -749,8 +751,9 @@ export class IFPlanner implements Planner {
 
     const softBlocked = [...(gs.weightLimitDirs ?? [])];
     const weightLimitBlock = softBlocked.length > 0
-      ? `\n\u26a0 WEIGHT LIMIT: Direction(s) [${softBlocked.join(", ")}] failed due to carry weight from "${gs.currentRoomName ?? gs.currentRoom}".\n` +
-        `  Consider dropping non-essential items from your inventory, then retry.\n` +
+      ? `\n\u26a0 WEIGHT LIMIT: Direction(s) [${softBlocked.join(", ")}] blocked by carry weight.\n` +
+        `  CRITICAL: Drop ALL items FIRST (keep only your light source), then retry the direction.\n` +
+        `  Do NOT retry the direction between drops — drop everything, THEN go.\n` +
         `  Current inventory: ${gs.inventory.join(", ") || "unknown"}\n`
       : "";
 

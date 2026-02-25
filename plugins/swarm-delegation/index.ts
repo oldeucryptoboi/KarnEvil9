@@ -561,6 +561,18 @@ export async function register(api: PluginApi): Promise<void> {
               cartState.roomExits[newRoom] = [...dstExits, REVERSE_DIR[dir]!];
             }
           }
+
+          // Puzzle progress: reset stall timer when a previously-blocked or
+          // weight-limited direction succeeds. This gives the LLM fresh turns
+          // to explore from the post-puzzle position.
+          const wasBlocked = cartState.blockedExits[prevRoom]?.has(dir);
+          const wasWeightLimited = cartState.weightLimitExits[prevRoom]?.has(dir);
+          if (wasBlocked || wasWeightLimited) {
+            lastNewRoomTurn = turn;
+            if (wasBlocked) cartState.blockedExits[prevRoom]!.delete(dir);
+            if (wasWeightLimited) cartState.weightLimitExits[prevRoom]!.delete(dir);
+            log(`[PuzzleProgress] Overcame ${wasBlocked ? "blocked" : "weight-limited"} "${dir}" from ${prevRoom} → stall reset`);
+          }
         }
         if (!gameMemory.visitedRooms.includes(newRoom)) {
           gameMemory.visitedRooms.push(newRoom);
@@ -781,11 +793,41 @@ export async function register(api: PluginApi): Promise<void> {
       if (roomName && roomName !== "Unknown" && exits && exits.length > 0) {
         const blocked = cartState.blockedExits[roomName] ?? new Set<string>();
         const filtered = exits.filter(e => !blocked.has(e.toLowerCase()));
+        // Merge: add Cartographer exits not already cached (preserves reverse-edge exits)
         const cached = cartState.roomExits[roomName] ?? [];
-        if (filtered.length > cached.length) {
-          cartState.roomExits[roomName] = filtered;
+        const cachedLower = new Set(cached.map(e => e.toLowerCase()));
+        for (const exit of filtered) {
+          if (!cachedLower.has(exit.toLowerCase())) {
+            cached.push(exit);
+          }
         }
+        cartState.roomExits[roomName] = cached;
       }
+      // Heuristic non-compass exit inference from room text keywords.
+      // The Cartographer (Haiku) often misses "in"/"up"/"down" exits described as
+      // doors, passages, archways, or stairs. Add them to roomExits; NavPrune
+      // auto-corrects false positives when the direction fails.
+      if (roomName && roomName !== "Unknown") {
+        const screen = cartState.lastFullScreen.toLowerCase();
+        const curExits = cartState.roomExits[roomName] ?? [];
+        const curExitsLower = new Set(curExits.map(e => e.toLowerCase()));
+        const blockedHere = cartState.blockedExits[roomName] ?? new Set<string>();
+
+        const INFER_RULES: Array<{ pattern: RegExp; dir: string }> = [
+          { pattern: /\b(?:door(?:way)?|passage(?:way)?|arch(?:way)?|entrance|entry|opening)\b/, dir: "in" },
+          { pattern: /\b(?:stair(?:s|case)?|ladder)\b.*?\bup\b|\bup\b.*?\b(?:stair|ladder)\b|\bclimb(?:ing)?\s+up\b/, dir: "up" },
+          { pattern: /\b(?:stair(?:s|case)?|ladder)\b.*?\bdown\b|\bdown\b.*?\b(?:stair|ladder)\b|\bdescend/, dir: "down" },
+        ];
+
+        for (const { pattern, dir } of INFER_RULES) {
+          if (pattern.test(screen) && !curExitsLower.has(dir) && !blockedHere.has(dir)) {
+            curExits.push(dir);
+            log(`[ExitInfer] Added "${dir}" to ${roomName} exits (keyword match)`);
+          }
+        }
+        cartState.roomExits[roomName] = curExits;
+      }
+
       // Store Cartographer-detected items (subtract already-held inventory)
       const items = result.items as string[] | undefined;
       if (roomName && roomName !== "Unknown" && items && items.length > 0) {

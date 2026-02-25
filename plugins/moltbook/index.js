@@ -61,19 +61,31 @@ export async function register(api) {
 
   // ── Register hook: before_plan ──
   api.registerHook("before_plan", async (context) => {
-    return {
-      action: "modify",
-      modifications: {
-        context_hints: [
-          `[Moltbook] You are Eddie (E.D.D.I.E.), posting as "${client.agentName}" on Moltbook (social network for AI agents). ` +
-          `Available tools: moltbook-post (create posts in submolts), moltbook-comment (reply to posts), ` +
-          `moltbook-vote (upvote/downvote), moltbook-get-post (fetch a post and its comments by ID), ` +
-          `moltbook-feed (browse feeds), moltbook-search (search content). ` +
-          `Rate limits: 1 post per 30 min, 1 comment per 20 sec. ` +
-          `Can post: ${client.canPost()}, Can comment: ${client.canComment()}.`,
-        ],
-      },
-    };
+    const hb = heartbeat.health();
+    const karma = hb.lastResponse?.your_account?.karma ?? "unknown";
+    const unread = hb.lastResponse?.your_account?.unread_notification_count ?? 0;
+
+    const hints = [
+      // Identity & status
+      `[Moltbook] You are Eddie (E.D.D.I.E.), posting as "${client.agentName}" on Moltbook (social network for AI agents). ` +
+      `Karma: ${karma}. Unread notifications: ${unread}. ` +
+      `Can post: ${client.canPost()}, Can comment: ${client.canComment()}.`,
+
+      // Strategy
+      `[Moltbook Strategy] When engaging on Moltbook:\n` +
+      `- Before replying to a post/comment, ALWAYS read it first with moltbook-get-post to understand the full context.\n` +
+      `- When browsing, use moltbook-feed to see what's active, then moltbook-get-post for posts you want to engage with.\n` +
+      `- For research-then-post tasks: gather information first (read-file, claude-code), then compose and post in a later iteration.\n` +
+      `- Write substantive, technically accurate content. Be direct and confident — avoid hedging or filler.\n` +
+      `- When replying, reference specific points from the post/comment you're responding to.`,
+    ];
+
+    // Add notification hint if there are unread notifications
+    if (unread > 0) {
+      hints.push(`[Moltbook] You have ${unread} unread notification(s). Consider checking the feed for recent activity.`);
+    }
+
+    return { action: "modify", data: { hints } };
   });
 
   // ── Register route: GET status ──
@@ -106,6 +118,22 @@ export async function register(api) {
       api.logger.info("Moltbook heartbeat service stopped");
     },
   });
+
+  // ── Auto-schedule default Moltbook tasks ──
+  if (config.autoSchedule && config.scheduler) {
+    const { defaultSchedules } = await import("./schedules.js");
+    for (const sched of defaultSchedules) {
+      try {
+        const exists = config.scheduler.getSchedule?.(sched.name);
+        if (!exists) {
+          config.scheduler.createSchedule(sched);
+          api.logger.info(`Moltbook schedule created: ${sched.name}`);
+        }
+      } catch (err) {
+        api.logger.warn(`Failed to create schedule ${sched.name}`, { error: err.message });
+      }
+    }
+  }
 
   api.logger.info("Moltbook plugin registered", { agent: client.agentName });
 }

@@ -211,6 +211,15 @@ function buildUserPrompt(task: Task, stateSnapshot: Record<string, unknown>): st
     prompt += wrapUntrusted(String(stateSnapshot.vault_context), 4000);
     prompt += `\n`;
   }
+  if (stateSnapshot.hints) {
+    const hints = stateSnapshot.hints as string[];
+    if (hints.length > 0) {
+      prompt += `\n## Plugin Hints\n`;
+      for (const hint of hints) {
+        prompt += `- ${sanitizeForPrompt(hint, 1000)}\n`;
+      }
+    }
+  }
   if (stateSnapshot.has_plan) prompt += `\n## Current State (replanning context)\n${wrapUntrusted(JSON.stringify(stateSnapshot, null, 2))}\n`;
   prompt += `\nProduce the plan JSON now.`;
   return prompt;
@@ -300,6 +309,16 @@ function buildAgenticUserPrompt(task: Task, stateSnapshot: Record<string, unknow
       }
     }
     prompt += `\nContinue from where the previous session left off.\n`;
+  }
+
+  if (stateSnapshot.hints) {
+    const hints = stateSnapshot.hints as string[];
+    if (hints.length > 0) {
+      prompt += `\n## Plugin Hints\n`;
+      for (const hint of hints) {
+        prompt += `- ${sanitizeForPrompt(hint, 1000)}\n`;
+      }
+    }
   }
 
   prompt += `\nProduce the next step(s), or return empty steps if the task is complete.`;

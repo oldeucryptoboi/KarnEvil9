@@ -1,6 +1,6 @@
 import type { PlanResult, Planner, Task, ToolSchemaForPlanner } from "@karnevil9/schemas";
 
-export type TaskDomain = "file_ops" | "network" | "code_gen" | "shell" | "general";
+export type TaskDomain = "file_ops" | "network" | "code_gen" | "shell" | "social" | "general";
 
 export interface RouterConfig {
   delegate: Planner;
@@ -11,6 +11,7 @@ const DOMAIN_KEYWORDS: Record<TaskDomain, string[]> = {
   network: ["fetch", "http", "api", "url", "download", "upload", "request", "endpoint"],
   shell: ["run", "exec", "command", "install", "build", "compile", "script", "npm", "pip"],
   code_gen: ["generate", "create", "implement", "refactor", "code", "function", "class"],
+  social: ["post", "comment", "vote", "reply", "feed", "moltbook", "submolt", "browse", "social", "upvote", "downvote"],
   general: [],
 };
 
@@ -19,6 +20,7 @@ const DOMAIN_TOOL_PATTERNS: Record<TaskDomain, string[]> = {
   network: ["http-request"],
   shell: ["shell-exec"],
   code_gen: [],
+  social: [],
   general: [],
 };
 
@@ -29,6 +31,7 @@ export function classifyTask(taskText: string, _toolNames: string[]): TaskDomain
     network: 0,
     shell: 0,
     code_gen: 0,
+    social: 0,
     general: 0,
   };
 

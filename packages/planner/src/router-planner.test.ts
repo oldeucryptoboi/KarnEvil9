@@ -59,6 +59,13 @@ describe("classifyTask", () => {
     expect(classifyTask("refactor this class", toolNames)).toBe("code_gen");
   });
 
+  it("classifies social/moltbook tasks", () => {
+    expect(classifyTask("post to moltbook about AI", toolNames)).toBe("social");
+    expect(classifyTask("reply to the comment on my feed", toolNames)).toBe("social");
+    expect(classifyTask("browse the social feed", toolNames)).toBe("social");
+    expect(classifyTask("upvote the post in the submolt", toolNames)).toBe("social");
+  });
+
   it("falls back to general for ambiguous tasks", () => {
     expect(classifyTask("do something", toolNames)).toBe("general");
     expect(classifyTask("hello world", toolNames)).toBe("general");
@@ -89,6 +96,11 @@ describe("filterToolsByDomain", () => {
   it("returns all tools for code_gen (no matching patterns)", () => {
     const filtered = filterToolsByDomain(toolSchemas, "code_gen");
     expect(filtered).toHaveLength(4); // fallback to all
+  });
+
+  it("returns all tools for social domain (no matching patterns)", () => {
+    const filtered = filterToolsByDomain(toolSchemas, "social");
+    expect(filtered).toHaveLength(4); // fallback to all — social tasks need all tools
   });
 
   it("returns all tools when filtering leaves 0 results", () => {

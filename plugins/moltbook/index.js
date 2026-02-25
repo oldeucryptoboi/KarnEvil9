@@ -170,7 +170,7 @@ export async function register(api) {
       try {
         const exists = config.scheduler.getSchedule?.(sched.name);
         if (!exists) {
-          config.scheduler.createSchedule(sched);
+          await config.scheduler.createSchedule(sched);
           api.logger.info(`Moltbook schedule created: ${sched.name}`);
         }
       } catch (err) {

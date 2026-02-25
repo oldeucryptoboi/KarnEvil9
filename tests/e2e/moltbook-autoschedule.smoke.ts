@@ -91,12 +91,6 @@ describe("Moltbook autoSchedule Smoke", () => {
   });
 
   it("autoSchedule creates the 3 default Moltbook schedules", async () => {
-    // The plugin calls createSchedule without await, so 3 concurrent store.save()
-    // calls race on the same temp file. Catch the expected ENOENT rejections.
-    const rejections: unknown[] = [];
-    const catcher = (reason: unknown) => { rejections.push(reason); };
-    process.on("unhandledRejection", catcher);
-
     const store = new ScheduleStore(join(testDir, "schedules.jsonl"));
     const sessionFactory: SessionFactory = async () => ({
       session_id: `mock-${uuid()}`,
@@ -123,9 +117,6 @@ describe("Moltbook autoSchedule Smoke", () => {
     });
     await pluginRegistry.discoverAndLoadAll();
 
-    // Give fire-and-forget createSchedule saves time to flush
-    await new Promise((r) => setTimeout(r, 200));
-
     const schedules = scheduler.listSchedules();
     const names = schedules.map((s) => s.name);
 
@@ -146,7 +137,5 @@ describe("Moltbook autoSchedule Smoke", () => {
     const dms = schedules.find((s) => s.name === "moltbook-check-dms")!;
     expect(dms.status).toBe("active");
     expect(dms.trigger).toEqual({ type: "every", interval: "15m" });
-
-    process.removeListener("unhandledRejection", catcher);
   });
 });

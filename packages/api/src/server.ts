@@ -1,6 +1,6 @@
 import express from "express";
 import { v4 as uuid } from "uuid";
-import type { Kernel } from "@karnevil9/kernel";
+import type { Kernel, ContextBudgetConfig } from "@karnevil9/kernel";
 import { Kernel as KernelClass } from "@karnevil9/kernel";
 import type { ToolRegistry, ToolRuntime } from "@karnevil9/tools";
 import type { Journal } from "@karnevil9/journal";
@@ -209,6 +209,8 @@ export interface ApiServerConfig {
   corsOrigins?: string | string[];
   swarm?: MeshManager;
   activeMemory?: ActiveMemory;
+  contextBudgetConfig?: ContextBudgetConfig;
+  checkpointDir?: string;
   /** IP addresses of trusted reverse proxies; enables X-Forwarded-For parsing. */
   trustedProxies?: string[];
 }
@@ -276,6 +278,8 @@ export class ApiServer {
   private scheduler?: Scheduler;
   private swarm?: MeshManager;
   private activeMemory?: ActiveMemory;
+  private contextBudgetConfig?: ContextBudgetConfig;
+  private checkpointDir?: string;
   private approvalTimeoutMs: number;
   private corsOrigins?: string | string[];
   private trustedProxies?: string[];
@@ -335,6 +339,8 @@ export class ApiServer {
       this.scheduler = config.scheduler;
       this.swarm = config.swarm;
       this.activeMemory = config.activeMemory;
+      this.contextBudgetConfig = config.contextBudgetConfig;
+      this.checkpointDir = config.checkpointDir;
       this.approvalTimeoutMs = config.approvalTimeoutMs ?? 300000; // 5 minutes
       this.corsOrigins = config.corsOrigins;
       this.trustedProxies = config.trustedProxies;
@@ -621,6 +627,8 @@ export class ApiServer {
       agentic: this.agentic,
       activeMemory: this.activeMemory,
       preGrantedScopes: this.pluginRegistry?.getPluginPermissions(),
+      ...(this.agentic && this.contextBudgetConfig ? { contextBudgetConfig: this.contextBudgetConfig } : {}),
+      ...(this.checkpointDir ? { checkpointDir: this.checkpointDir } : {}),
       plannerTimeoutMs: PLANNER_TIMEOUT_MS,
     });
 
@@ -853,6 +861,8 @@ export class ApiServer {
             agentic: this.agentic,
             activeMemory: this.activeMemory,
             preGrantedScopes: this.pluginRegistry?.getPluginPermissions(),
+            ...(this.agentic && this.contextBudgetConfig ? { contextBudgetConfig: this.contextBudgetConfig } : {}),
+            ...(this.checkpointDir ? { checkpointDir: this.checkpointDir } : {}),
             plannerTimeoutMs: PLANNER_TIMEOUT_MS,
           };
           const kernel = new KernelClass(kernelConfig);

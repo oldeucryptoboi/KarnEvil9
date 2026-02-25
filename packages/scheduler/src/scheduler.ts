@@ -36,6 +36,7 @@ export class Scheduler {
   private missedGracePeriodMs: number;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private activeJobs = 0;
+  private activeJobPromises = new Set<Promise<void>>();
   private running = false;
 
   constructor(config: SchedulerConfig) {
@@ -67,7 +68,11 @@ export class Scheduler {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
     }
-    await this.store.save();
+    // Await in-flight jobs before persisting final state
+    if (this.activeJobPromises.size > 0) {
+      await Promise.allSettled([...this.activeJobPromises]);
+    }
+    await this.safeSave("stop");
     await this.journal.emit(this.sessionId, "scheduler.stopped", {});
   }
 
@@ -100,7 +105,7 @@ export class Scheduler {
       updated_at: now,
     };
     this.store.set(schedule);
-    await this.store.save();
+    await this.safeSave("createSchedule");
     await this.journal.emit(this.sessionId, "scheduler.schedule_created", {
       schedule_id: schedule.schedule_id,
       name: schedule.name,
@@ -125,7 +130,7 @@ export class Scheduler {
     if (updates.options !== undefined) schedule.options = { ...schedule.options, ...updates.options };
     schedule.updated_at = new Date().toISOString();
     this.store.set(schedule);
-    await this.store.save();
+    await this.safeSave("updateSchedule");
     await this.journal.emit(this.sessionId, "scheduler.schedule_updated", {
       schedule_id: id,
       updates: Object.keys(updates),
@@ -136,7 +141,7 @@ export class Scheduler {
   async deleteSchedule(id: string): Promise<void> {
     if (!this.store.has(id)) throw new Error(`Schedule not found: ${id}`);
     this.store.delete(id);
-    await this.store.save();
+    await this.safeSave("deleteSchedule");
     await this.journal.emit(this.sessionId, "scheduler.schedule_deleted", { schedule_id: id });
   }
 
@@ -146,7 +151,7 @@ export class Scheduler {
     schedule.status = "paused";
     schedule.updated_at = new Date().toISOString();
     this.store.set(schedule);
-    await this.store.save();
+    await this.safeSave("pauseSchedule");
     await this.journal.emit(this.sessionId, "scheduler.schedule_paused", { schedule_id: id });
     return schedule;
   }
@@ -158,7 +163,7 @@ export class Scheduler {
     schedule.next_run_at = this.computeNextRun(schedule.trigger, schedule.last_run_at);
     schedule.updated_at = new Date().toISOString();
     this.store.set(schedule);
-    await this.store.save();
+    await this.safeSave("resumeSchedule");
     await this.journal.emit(this.sessionId, "scheduler.schedule_updated", {
       schedule_id: id,
       resumed: true,
@@ -187,7 +192,11 @@ export class Scheduler {
       const nextRunMs = new Date(schedule.next_run_at).getTime();
       if (now >= nextRunMs && this.activeJobs < this.maxConcurrentJobs) {
         this.activeJobs++;
-        void this.executeJob(schedule).finally(() => { this.activeJobs--; });
+        const jobPromise = this.executeJob(schedule).finally(() => {
+          this.activeJobs--;
+          this.activeJobPromises.delete(jobPromise);
+        });
+        this.activeJobPromises.add(jobPromise);
       }
     }
   }
@@ -238,7 +247,7 @@ export class Scheduler {
 
       schedule.updated_at = new Date().toISOString();
       this.store.set(schedule);
-      await this.store.save();
+      await this.safeSave("job_completed");
 
       await this.journal.emit(this.sessionId, "scheduler.job_completed", {
         schedule_id: schedule.schedule_id,
@@ -260,7 +269,7 @@ export class Scheduler {
 
       schedule.updated_at = new Date().toISOString();
       this.store.set(schedule);
-      await this.store.save();
+      await this.safeSave("job_failed");
 
       await this.journal.emit(this.sessionId, "scheduler.job_failed", {
         schedule_id: schedule.schedule_id,
@@ -326,7 +335,19 @@ export class Scheduler {
       }
     }
 
-    await this.store.save();
+    await this.safeSave("handleMissedSchedules");
+  }
+
+  /** Persist store state, emitting a journal warning on failure. */
+  private async safeSave(context: string): Promise<void> {
+    try {
+      await this.store.save();
+    } catch (err) {
+      await this.journal.emit(this.sessionId, "scheduler.save_failed", {
+        context,
+        error: err instanceof Error ? err.message : String(err),
+      }).catch(() => {});
+    }
   }
 
   private computeNextRun(trigger: ScheduleTrigger, lastRunAt: string | null): string | null {

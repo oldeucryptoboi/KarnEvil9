@@ -1239,8 +1239,14 @@ export class Kernel {
         await fh.close();
       }
       await rename(tmpPath, checkpointPath);
-    } catch {
-      // Checkpoint write failure is non-fatal
+    } catch (err) {
+      // Checkpoint write failure is non-fatal but should be observable
+      await this.config.journal.tryEmit(this.session.session_id, "context.checkpoint_failed", {
+        checkpoint_id: checkpoint.checkpoint_id,
+        checkpoint_path: checkpointPath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
     }
 
     await this.config.journal.tryEmit(this.session.session_id, "context.checkpoint_saved", {

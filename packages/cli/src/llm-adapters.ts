@@ -37,7 +37,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 const PROVIDER_DEFAULTS: Record<string, string> = {
-  claude: "claude-sonnet-4-5-20250929",
+  claude: "claude-sonnet-4-6-20250514",
   openai: "gpt-4o",
 };
 

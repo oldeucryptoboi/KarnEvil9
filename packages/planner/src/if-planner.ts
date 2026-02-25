@@ -491,9 +491,10 @@ export class IFPlanner implements Planner {
 
     // 2. Probe non-compass hidden exits (in/out/up/down).
     // These are commonly missed by the Cartographer and high-value in IF games.
-    // Only fire at fallbackThreshold when all known exits lead to visited rooms,
-    // giving the LLM time for combat/puzzles before blind probing.
-    if (candidates.length === 0 || stalled >= fallbackThreshold) {
+    // Skip when the room has blocked exits — failed directions indicate a puzzle
+    // room where the LLM should reason creatively (using the STALLED/DEAD END
+    // prompts) instead of wasting turns on blind directional probes.
+    if (blockedSet.size === 0 && (candidates.length === 0 || stalled >= fallbackThreshold)) {
       const knownSet = new Set(gameState.knownExits.map(e => e.toLowerCase()));
       const probe = IFPlanner.NON_COMPASS_PROBES.find(d =>
         !explored.has(d) && !blockedSet.has(d) && !knownSet.has(d)

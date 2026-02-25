@@ -447,7 +447,8 @@ export class IFPlanner implements Planner {
     gameState: IFGameState,
     usage?: UsageMetrics,
   ): PlanResult | undefined {
-    if ((gameState.turnsStalled ?? 0) < 2) return undefined;
+    const stalled = gameState.turnsStalled ?? 0;
+    if (stalled < 2) return undefined;
 
     const explored = new Set(Object.keys(gameState.roomDirections ?? {}));
     const blockedSet = new Set(
@@ -467,20 +468,33 @@ export class IFPlanner implements Planner {
       const best = candidates.find(e => {
         const dest = dirMap[e] ?? assumedMap[e];
         return !dest || !visitedSet.has(dest);
-      }) ?? candidates[0]!;
-      this.onVerbose?.("[HiddenProbe]", `Early known exit: ${best} from ${gameState.currentRoom}`);
-      return this.buildPlan(`go ${best}`, `Explore known exit: ${best}`, usage);
+      });
+      if (best) {
+        this.onVerbose?.("[HiddenProbe]", `Early known exit: ${best} from ${gameState.currentRoom}`);
+        return this.buildPlan(`go ${best}`, `Explore known exit: ${best}`, usage);
+      }
+      // All candidates lead to visited rooms — require higher stall threshold
+      // to give the LLM time to interact (combat, puzzles) before overriding.
+      if (stalled >= 4) {
+        const fallback = candidates[0]!;
+        this.onVerbose?.("[HiddenProbe]", `Early known exit (fallback): ${fallback} from ${gameState.currentRoom}`);
+        return this.buildPlan(`go ${fallback}`, `Explore known exit: ${fallback}`, usage);
+      }
     }
 
     // 2. Probe non-compass hidden exits (in/out/up/down).
     // These are commonly missed by the Cartographer and high-value in IF games.
-    const knownSet = new Set(gameState.knownExits.map(e => e.toLowerCase()));
-    const probe = IFPlanner.NON_COMPASS_PROBES.find(d =>
-      !explored.has(d) && !blockedSet.has(d) && !knownSet.has(d)
-    );
-    if (probe) {
-      this.onVerbose?.("[HiddenProbe]", `Early non-compass probe: ${probe} from ${gameState.currentRoom}`);
-      return this.buildPlan(`go ${probe}`, `Probe hidden exit: ${probe}`, usage);
+    // Only fire at stalled >= 4 when all known exits lead to visited rooms,
+    // giving the LLM time for combat/puzzles before blind probing.
+    if (candidates.length === 0 || stalled >= 4) {
+      const knownSet = new Set(gameState.knownExits.map(e => e.toLowerCase()));
+      const probe = IFPlanner.NON_COMPASS_PROBES.find(d =>
+        !explored.has(d) && !blockedSet.has(d) && !knownSet.has(d)
+      );
+      if (probe) {
+        this.onVerbose?.("[HiddenProbe]", `Early non-compass probe: ${probe} from ${gameState.currentRoom}`);
+        return this.buildPlan(`go ${probe}`, `Probe hidden exit: ${probe}`, usage);
+      }
     }
     return undefined;
   }

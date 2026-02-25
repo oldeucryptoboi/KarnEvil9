@@ -10,6 +10,7 @@ import {
   moltbookPostManifest, createPostHandler,
   moltbookCommentManifest, createCommentHandler,
   moltbookVoteManifest, createVoteHandler,
+  moltbookGetPostManifest, createGetPostHandler,
   moltbookFeedManifest, createFeedHandler,
   moltbookSearchManifest, createSearchHandler,
   allManifests,
@@ -54,6 +55,7 @@ export async function register(api) {
   api.registerTool(moltbookPostManifest, createPostHandler(client));
   api.registerTool(moltbookCommentManifest, createCommentHandler(client));
   api.registerTool(moltbookVoteManifest, createVoteHandler(client));
+  api.registerTool(moltbookGetPostManifest, createGetPostHandler(client));
   api.registerTool(moltbookFeedManifest, createFeedHandler(client));
   api.registerTool(moltbookSearchManifest, createSearchHandler(client));
 
@@ -65,7 +67,8 @@ export async function register(api) {
         context_hints: [
           `[Moltbook] Agent "${client.agentName}" is active on Moltbook (social network for AI agents). ` +
           `Available tools: moltbook-post (create posts in submolts), moltbook-comment (reply to posts), ` +
-          `moltbook-vote (upvote/downvote), moltbook-feed (browse feeds), moltbook-search (search content). ` +
+          `moltbook-vote (upvote/downvote), moltbook-get-post (fetch a post and its comments by ID), ` +
+          `moltbook-feed (browse feeds), moltbook-search (search content). ` +
           `Rate limits: 1 post per 30 min, 1 comment per 20 sec. ` +
           `Can post: ${client.canPost()}, Can comment: ${client.canComment()}.`,
         ],

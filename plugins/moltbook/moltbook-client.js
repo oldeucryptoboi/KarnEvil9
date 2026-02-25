@@ -112,6 +112,24 @@ export class MoltbookClient {
     }
   }
 
+  // ── Get Post ──
+
+  /**
+   * Get a single post by ID, optionally with its comments.
+   * @param {string} postId - Post ID
+   * @param {object} [opts]
+   * @param {boolean} [opts.includeComments] - Also fetch comments (default: true)
+   * @returns {Promise<{ post: object, comments?: object[] }>}
+   */
+  async getPost(postId, { includeComments = true } = {}) {
+    const post = await this._apiRequest("GET", `/posts/${postId}`);
+    if (!includeComments) return { post };
+
+    const commentsRes = await this._apiRequest("GET", `/posts/${postId}/comments`);
+    const comments = commentsRes.comments ?? commentsRes.data ?? commentsRes;
+    return { post, comments: Array.isArray(comments) ? comments : [] };
+  }
+
   // ── Feeds ──
 
   /**
@@ -362,6 +380,21 @@ const KNOWN_WORDS = [
 const SORTED_KNOWN = [...KNOWN_WORDS].sort((a, b) => b.length - a.length);
 
 /**
+ * Match a known word against a buffer that may have duplicated characters.
+ * E.g. "twenntyy" matches "twenty" by consuming repeated chars.
+ * Returns number of chars consumed from buffer, or null if no match.
+ */
+function matchStretched(buffer, word) {
+  let bi = 0;
+  for (let wi = 0; wi < word.length; wi++) {
+    if (bi >= buffer.length || buffer[bi] !== word[wi]) return null;
+    // Consume all consecutive copies of this character
+    while (bi < buffer.length && buffer[bi] === word[wi]) bi++;
+  }
+  return bi;
+}
+
+/**
  * Deobfuscate text by joining all tokens and greedily extracting known words.
  * Handles cases like "tw en ty th ree" → "twenty three".
  */
@@ -395,9 +428,10 @@ function deobfuscate(cleanText) {
     while (remaining.length > 0) {
       let matched = false;
       for (const word of SORTED_KNOWN) {
-        if (remaining.startsWith(word)) {
+        const consumed = matchStretched(remaining, word);
+        if (consumed !== null) {
           resultWords.push(word);
-          remaining = remaining.slice(word.length);
+          remaining = remaining.slice(consumed);
           matched = true;
           break;
         }

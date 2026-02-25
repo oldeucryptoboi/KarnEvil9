@@ -94,6 +94,34 @@ export const moltbookVoteManifest = {
 };
 
 /** @type {import("@karnevil9/schemas").ToolManifest} */
+export const moltbookGetPostManifest = {
+  name: "moltbook-get-post",
+  version: "1.0.0",
+  description: "Get a single Moltbook post and its comments by ID",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      post_id: { type: "string", description: "ID of the post to fetch" },
+      include_comments: { type: "boolean", description: "Also fetch comments (default: true)" },
+    },
+    required: ["post_id"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+      post: { type: "object" },
+      comments: { type: "array" },
+    },
+  },
+  permissions: ["moltbook:read:posts"],
+  timeout_ms: 15000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [{ ok: true, post: { id: "mock", title: "Mock Post", content: "Mock content" }, comments: [] }],
+};
+
+/** @type {import("@karnevil9/schemas").ToolManifest} */
 export const moltbookFeedManifest = {
   name: "moltbook-feed",
   version: "1.0.0",
@@ -160,6 +188,7 @@ export const allManifests = [
   moltbookPostManifest,
   moltbookCommentManifest,
   moltbookVoteManifest,
+  moltbookGetPostManifest,
   moltbookFeedManifest,
   moltbookSearchManifest,
 ];
@@ -243,6 +272,31 @@ export function createVoteHandler(client) {
     });
 
     return { ok: true };
+  };
+}
+
+/**
+ * @param {import("./moltbook-client.js").MoltbookClient} client
+ * @returns {import("@karnevil9/schemas").ToolHandler}
+ */
+export function createGetPostHandler(client) {
+  return async (input, mode) => {
+    if (mode === "mock") {
+      return { ok: true, post: { id: input.post_id, title: "Mock Post", content: "Mock content" }, comments: [] };
+    }
+    if (mode === "dry_run") {
+      return { ok: true, post: null, comments: [], dry_run: true, post_id: input.post_id };
+    }
+
+    const res = await client.getPost(input.post_id, {
+      includeComments: input.include_comments !== false,
+    });
+
+    return {
+      ok: true,
+      post: res.post,
+      comments: res.comments ?? [],
+    };
   };
 }
 

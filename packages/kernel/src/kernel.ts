@@ -719,6 +719,18 @@ export class Kernel {
 
         // Empty steps = planner says task is complete
         if (plan.steps.length === 0) {
+          // Guard: reject empty plan on first iteration — no work has been done yet
+          if (iteration === 0) {
+            await this.config.journal.tryEmit(this.session.session_id, "planner.plan_rejected", {
+              reason: "Planner returned empty steps on first iteration with no work done",
+              tool_count: this.config.toolRegistry.list().length,
+            });
+            await this.transition("failed");
+            await this.config.journal.tryEmit(this.session.session_id, "session.failed", {
+              reason: "Planner returned empty plan on first iteration — no steps generated",
+            });
+            return;
+          }
           done = true;
           // Transition to running so run() can complete normally
           if (this.session.status === "planning") {

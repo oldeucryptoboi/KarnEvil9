@@ -249,11 +249,16 @@ export class TwitterClient {
    * Schedule the next DM poll.
    */
   _schedulePoll() {
-    if (this._stopping) return;
+    if (this._stopping || this._dmDisabled) return;
     this._pollTimer = setTimeout(async () => {
       try {
         await this._pollDMs();
       } catch (err) {
+        if (err.message && /\b403\b/.test(err.message)) {
+          this.logger?.warn("Twitter DM polling disabled — app lacks DM permissions (403). Tweet tools still available.");
+          this._dmDisabled = true;
+          return;
+        }
         this.logger?.error("Twitter DM poll error", { error: err.message });
       }
       this._schedulePoll();

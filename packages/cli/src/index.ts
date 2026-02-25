@@ -102,7 +102,8 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
   .option("--checkpoint-dir <dir>", "Directory for checkpoint files", "sessions/checkpoints")
   .option("--no-memory", "Disable cross-session active memory")
   .option("--browser <mode>", "Browser driver: managed, stealth, or extension", "managed")
-  .action(async (taskText: string, opts: { mode: string; maxSteps: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; contextBudget?: boolean; checkpointDir?: string; memory?: boolean; browser: string }) => {
+  .option("--auto-approve", "Auto-approve all permission requests for the session")
+  .action(async (taskText: string, opts: { mode: string; maxSteps: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; contextBudget?: boolean; checkpointDir?: string; memory?: boolean; browser: string; autoApprove?: boolean }) => {
     const policy = { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
     let browserDriver: BrowserDriverLike | undefined;
     if (opts.browser === "managed") {
@@ -112,7 +113,10 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
       const { ManagedDriver } = await import("@karnevil9/browser-relay");
       browserDriver = new ManagedDriver({ headless: false, channel: "chrome", userDataDir: resolve("sessions/browser-profile") });
     }
-    const { journal, registry, permissions, runtime } = await createRuntime(policy, undefined, browserDriver);
+    const approvalFn = opts.autoApprove
+      ? async (_request: PermissionRequest): Promise<ApprovalDecision> => "allow_session"
+      : undefined;
+    const { journal, registry, permissions, runtime } = await createRuntime(policy, approvalFn, browserDriver);
     const removeShutdownHandler = journal.registerShutdownHandler();
     const task: Task = { task_id: uuid(), text: taskText, created_at: new Date().toISOString() };
 
@@ -307,15 +311,18 @@ program.command("server").description("Start the API server")
   .option("--swarm-name <name>", "Display name for this swarm node")
   .option("--swarm-mdns", "Enable mDNS discovery (default: true)")
   .option("--swarm-gossip", "Enable gossip protocol (default: true)")
-  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean; browser: string; swarm?: boolean; swarmToken?: string; swarmSeeds?: string; swarmName?: string; swarmMdns?: boolean; swarmGossip?: boolean }) => {
+  .option("--auto-approve", "Auto-approve all permission requests for the session")
+  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean; browser: string; swarm?: boolean; swarmToken?: string; swarmSeeds?: string; swarmName?: string; swarmMdns?: boolean; swarmGossip?: boolean; autoApprove?: boolean }) => {
     // Late-binding ref: set after ApiServer is constructed
     let apiServerRef: ApiServer | null = null;
-    const serverApprovalPrompt = async (request: PermissionRequest): Promise<ApprovalDecision> => {
-      if (!apiServerRef) return "deny";
-      return new Promise<ApprovalDecision>((resolve) => {
-        apiServerRef!.registerApproval(request.request_id, request, resolve);
-      });
-    };
+    const serverApprovalPrompt = opts.autoApprove
+      ? async (_request: PermissionRequest): Promise<ApprovalDecision> => "allow_session"
+      : async (request: PermissionRequest): Promise<ApprovalDecision> => {
+          if (!apiServerRef) return "deny";
+          return new Promise<ApprovalDecision>((resolve) => {
+            apiServerRef!.registerApproval(request.request_id, request, resolve);
+          });
+        };
     let browserDriver: BrowserDriverLike | undefined;
     if (opts.browser === "managed") {
       const { ManagedDriver } = await import("@karnevil9/browser-relay");

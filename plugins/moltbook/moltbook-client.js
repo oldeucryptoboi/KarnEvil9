@@ -239,7 +239,7 @@ export class MoltbookClient {
     }
 
     const formatted = answer.toFixed(2);
-    this.logger?.info("Solving verification", { verification_code, answer: formatted });
+    this.logger?.info("Solving verification", { verification_code, answer: formatted, challenge_text });
 
     try {
       const res = await this._apiRequest("POST", "/verify", {
@@ -626,6 +626,19 @@ const SUB_WORDS = new Set(["loses", "lose", "minus", "subtract", "subtracts", "d
 const MUL_WORDS = new Set(["times", "multiplied", "multiply", "doubled", "tripled", "quadrupled"]);
 const DIV_WORDS = new Set(["divided", "divide", "halved", "split"]);
 
+const IMPLICIT_MULTIPLIERS = { doubled: 2, tripled: 3, quadrupled: 4 };
+const IMPLICIT_DIVISORS = { halved: 2 };
+
+function solveImplicitMultiplier(tokens, numEntry) {
+  for (let j = 0; j < tokens.length; j++) {
+    if (j >= numEntry.startIdx && j < numEntry.endIdx) continue;
+    const t = tokens[j];
+    if (IMPLICIT_MULTIPLIERS[t] !== undefined) return numEntry.value * IMPLICIT_MULTIPLIERS[t];
+    if (IMPLICIT_DIVISORS[t] !== undefined) return numEntry.value / IMPLICIT_DIVISORS[t];
+  }
+  return null;
+}
+
 function detectOperation(tokens, fromIdx, toIdx) {
   for (let i = fromIdx; i < toIdx && i < tokens.length; i++) {
     const t = tokens[i];
@@ -656,24 +669,39 @@ function solveWordProblem(text) {
     }
   }
 
-  if (numbers.length < 2) return null;
-
-  // Use the first two numbers and detect the operation between them
-  const a = numbers[0];
-  const b = numbers[1];
-  const op = detectOperation(tokens, a.endIdx, b.startIdx)
-    ?? detectOperation(tokens, 0, a.startIdx) // check before first number too
-    ?? detectOperation(tokens, b.endIdx, tokens.length); // check after second number
-
-  if (!op) return null;
-
-  switch (op) {
-    case "+": return a.value + b.value;
-    case "-": return a.value - b.value;
-    case "*": return a.value * b.value;
-    case "/": return b.value !== 0 ? a.value / b.value : null;
-    default: return null;
+  if (numbers.length === 1) {
+    const a = numbers[0];
+    const implicitResult = solveImplicitMultiplier(tokens, a);
+    if (implicitResult !== null) return implicitResult;
+    return null;
   }
+
+  // Chain all numbers with their detected operations
+  let result = numbers[0].value;
+  for (let n = 1; n < numbers.length; n++) {
+    const prev = numbers[n - 1];
+    const curr = numbers[n];
+    // Look for operation between prev and curr, fall back to before first / after last
+    const op = detectOperation(tokens, prev.endIdx, curr.startIdx)
+      ?? (n === 1 ? detectOperation(tokens, 0, prev.startIdx) : null)
+      ?? detectOperation(tokens, curr.endIdx, tokens.length);
+    if (!op) return null;
+    switch (op) {
+      case "+": result += curr.value; break;
+      case "-": result -= curr.value; break;
+      case "*": result *= curr.value; break;
+      case "/": if (curr.value === 0) return null; result /= curr.value; break;
+      default: return null;
+    }
+  }
+  // Check for implicit multiplier after the last number
+  const lastNum = numbers[numbers.length - 1];
+  for (let j = lastNum.endIdx; j < tokens.length; j++) {
+    const t = tokens[j];
+    if (IMPLICIT_MULTIPLIERS[t] !== undefined) return result * IMPLICIT_MULTIPLIERS[t];
+    if (IMPLICIT_DIVISORS[t] !== undefined) return result / IMPLICIT_DIVISORS[t];
+  }
+  return result;
 }
 
 /**

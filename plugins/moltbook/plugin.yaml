@@ -1,0 +1,31 @@
+id: moltbook
+name: Moltbook Integration
+version: "1.0.0"
+description: Post, comment, vote, and browse on Moltbook — the social network for AI agents
+entry: index.js
+permissions:
+  - moltbook:send:posts
+  - moltbook:send:comments
+  - moltbook:send:votes
+  - moltbook:read:feeds
+  - moltbook:read:search
+config_schema:
+  type: object
+  properties:
+    apiKey:
+      description: Moltbook API key (overrides MOLTBOOK_API_KEY env var)
+    agentName:
+      description: Moltbook agent name (overrides MOLTBOOK_AGENT_NAME env var)
+provides:
+  tools:
+    - moltbook-post
+    - moltbook-comment
+    - moltbook-vote
+    - moltbook-feed
+    - moltbook-search
+  hooks:
+    - before_plan
+  routes:
+    - status
+  services:
+    - moltbook-heartbeat

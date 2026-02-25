@@ -15,7 +15,7 @@ export const defaultSchedules = [
     trigger: { type: "every", interval: "30m" },
     action: {
       type: "createSession",
-      task_text: "Check Moltbook for any unread notifications or replies to your posts. If someone replied to you, read their comment and respond thoughtfully if a response is warranted.",
+      task_text: "Use moltbook-notifications (list) to check for unread notifications or replies to your posts. If someone replied to you, read their comment with moltbook-get-post and respond thoughtfully if a response is warranted. Use moltbook-notifications (mark_read) when done.",
       agentic: true,
     },
     options: { max_failures: 3 },

@@ -1,7 +1,8 @@
 /**
- * Moltbook Integration Plugin — post, comment, vote, and browse on Moltbook.
+ * Moltbook Integration Plugin — post, comment, vote, browse, DM, follow, and
+ * manage notifications on Moltbook.
  *
- * Registers 5 tools, a before_plan hook (injects Moltbook context),
+ * Registers 9 tools, a before_plan hook (injects Moltbook context),
  * a GET status route, and a heartbeat service.
  */
 import { MoltbookClient } from "./moltbook-client.js";
@@ -13,6 +14,9 @@ import {
   moltbookGetPostManifest, createGetPostHandler,
   moltbookFeedManifest, createFeedHandler,
   moltbookSearchManifest, createSearchHandler,
+  moltbookDmManifest, createDmHandler,
+  moltbookFollowManifest, createFollowHandler,
+  moltbookNotificationsManifest, createNotificationsHandler,
   allManifests,
 } from "./tools.js";
 
@@ -58,6 +62,9 @@ export async function register(api) {
   api.registerTool(moltbookGetPostManifest, createGetPostHandler(client));
   api.registerTool(moltbookFeedManifest, createFeedHandler(client));
   api.registerTool(moltbookSearchManifest, createSearchHandler(client));
+  api.registerTool(moltbookDmManifest, createDmHandler(client));
+  api.registerTool(moltbookFollowManifest, createFollowHandler(client));
+  api.registerTool(moltbookNotificationsManifest, createNotificationsHandler(client));
 
   // ── Register hook: before_plan ──
   api.registerHook("before_plan", async (context) => {
@@ -80,9 +87,17 @@ export async function register(api) {
       `- When replying, reference specific points from the post/comment you're responding to.`,
     ];
 
+    // DM & follow hints
+    hints.push(
+      `[Moltbook DMs] You can manage DMs with moltbook-dm (list_requests, list_conversations, get_conversation, approve, reject, send).`
+    );
+    hints.push(
+      `[Moltbook Follows] You can follow/unfollow agents with moltbook-follow.`
+    );
+
     // Add notification hint if there are unread notifications
     if (unread > 0) {
-      hints.push(`[Moltbook] You have ${unread} unread notification(s). Consider checking the feed for recent activity.`);
+      hints.push(`[Moltbook] You have ${unread} unread notification(s). Use moltbook-notifications (list, mark_read, mark_post_read) to manage them.`);
     }
 
     return { action: "modify", data: { hints } };

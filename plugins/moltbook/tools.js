@@ -1,7 +1,8 @@
 /**
  * tools — Moltbook tool manifests + handler factories.
  *
- * 5 tools: moltbook-post, moltbook-comment, moltbook-vote, moltbook-feed, moltbook-search
+ * 9 tools: moltbook-post, moltbook-comment, moltbook-vote, moltbook-get-post,
+ *          moltbook-feed, moltbook-search, moltbook-dm, moltbook-follow, moltbook-notifications
  */
 
 // ── Manifests ──
@@ -182,6 +183,92 @@ export const moltbookSearchManifest = {
   mock_responses: [{ ok: true, results: [], count: 0 }],
 };
 
+/** @type {import("@karnevil9/schemas").ToolManifest} */
+export const moltbookDmManifest = {
+  name: "moltbook-dm",
+  version: "1.0.0",
+  description: "Manage Moltbook direct messages — list requests, approve/reject, view conversations, send messages",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["list_requests", "list_conversations", "get_conversation", "approve", "reject", "send"],
+        description: "DM action to perform",
+      },
+      conversation_id: { type: "string", description: "Conversation ID (required for get_conversation, approve, reject, send)" },
+      content: { type: "string", description: "Message text (required for send)" },
+      block: { type: "boolean", description: "Also block the sender (optional, only for reject)" },
+    },
+    required: ["action"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+      data: {},
+    },
+  },
+  permissions: ["moltbook:send:dm", "moltbook:read:dm"],
+  timeout_ms: 15000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [{ ok: true, data: {} }],
+};
+
+/** @type {import("@karnevil9/schemas").ToolManifest} */
+export const moltbookFollowManifest = {
+  name: "moltbook-follow",
+  version: "1.0.0",
+  description: "Follow or unfollow an agent on Moltbook",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["follow", "unfollow"], description: "Follow action" },
+      agent_name: { type: "string", description: "Agent name to follow/unfollow" },
+    },
+    required: ["action", "agent_name"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+    },
+  },
+  permissions: ["moltbook:send:follows"],
+  timeout_ms: 10000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [{ ok: true }],
+};
+
+/** @type {import("@karnevil9/schemas").ToolManifest} */
+export const moltbookNotificationsManifest = {
+  name: "moltbook-notifications",
+  version: "1.0.0",
+  description: "View and manage Moltbook notifications",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["list", "mark_read", "mark_post_read"], description: "Notification action" },
+      post_id: { type: "string", description: "Post ID (required for mark_post_read)" },
+    },
+    required: ["action"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+      data: {},
+    },
+  },
+  permissions: ["moltbook:read:notifications"],
+  timeout_ms: 15000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [{ ok: true, data: {} }],
+};
+
 // ── All manifests for easy import ──
 
 export const allManifests = [
@@ -191,6 +278,9 @@ export const allManifests = [
   moltbookGetPostManifest,
   moltbookFeedManifest,
   moltbookSearchManifest,
+  moltbookDmManifest,
+  moltbookFollowManifest,
+  moltbookNotificationsManifest,
 ];
 
 // ── Handler Factories ──
@@ -354,5 +444,86 @@ export function createSearchHandler(client) {
       results: res.results ?? [],
       count: res.count ?? res.results?.length ?? 0,
     };
+  };
+}
+
+/**
+ * @param {import("./moltbook-client.js").MoltbookClient} client
+ * @returns {import("@karnevil9/schemas").ToolHandler}
+ */
+export function createDmHandler(client) {
+  return async (input, mode) => {
+    if (mode === "mock") {
+      return { ok: true, data: {} };
+    }
+    if (mode === "dry_run") {
+      return { ok: true, dry_run: true, action: input.action };
+    }
+
+    switch (input.action) {
+      case "list_requests":
+        return { ok: true, data: await client.getDmRequests() };
+      case "list_conversations":
+        return { ok: true, data: await client.getDmConversations() };
+      case "get_conversation":
+        return { ok: true, data: await client.getDmConversation(input.conversation_id) };
+      case "approve":
+        return { ok: true, data: await client.approveDmRequest(input.conversation_id) };
+      case "reject":
+        return { ok: true, data: await client.rejectDmRequest(input.conversation_id, { block: input.block }) };
+      case "send":
+        return { ok: true, data: await client.sendDm(input.conversation_id, input.content) };
+      default:
+        return { ok: false, error: `Unknown DM action: ${input.action}` };
+    }
+  };
+}
+
+/**
+ * @param {import("./moltbook-client.js").MoltbookClient} client
+ * @returns {import("@karnevil9/schemas").ToolHandler}
+ */
+export function createFollowHandler(client) {
+  return async (input, mode) => {
+    if (mode === "mock") {
+      return { ok: true };
+    }
+    if (mode === "dry_run") {
+      return { ok: true, dry_run: true, action: input.action, agent_name: input.agent_name };
+    }
+
+    if (input.action === "follow") {
+      await client.follow(input.agent_name);
+    } else {
+      await client.unfollow(input.agent_name);
+    }
+
+    return { ok: true };
+  };
+}
+
+/**
+ * @param {import("./moltbook-client.js").MoltbookClient} client
+ * @returns {import("@karnevil9/schemas").ToolHandler}
+ */
+export function createNotificationsHandler(client) {
+  return async (input, mode) => {
+    if (mode === "mock") {
+      return { ok: true, data: {} };
+    }
+    if (mode === "dry_run") {
+      return { ok: true, dry_run: true, action: input.action };
+    }
+
+    switch (input.action) {
+      case "list":
+        return { ok: true, data: await client.getNotifications() };
+      case "mark_read":
+        return { ok: true, data: await client.markNotificationsRead() };
+      case "mark_post_read":
+        return { ok: true, data: await client.markPostNotificationsRead(input.post_id) };
+      default:
+        return { ok: false, error: `Unknown notifications action: ${input.action}` };
+    }
   };
 }

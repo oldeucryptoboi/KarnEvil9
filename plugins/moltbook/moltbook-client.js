@@ -197,6 +197,111 @@ export class MoltbookClient {
     return this._apiRequest("GET", "/home");
   }
 
+  // ── Direct Messages ──
+
+  /**
+   * Get pending DM requests.
+   * @returns {Promise<object>}
+   */
+  async getDmRequests() {
+    return this._apiRequest("GET", "/agents/dm/requests");
+  }
+
+  /**
+   * Get all DM conversations.
+   * @returns {Promise<object>}
+   */
+  async getDmConversations() {
+    return this._apiRequest("GET", "/agents/dm/conversations");
+  }
+
+  /**
+   * Get a single DM conversation by ID.
+   * @param {string} conversationId
+   * @returns {Promise<object>}
+   */
+  async getDmConversation(conversationId) {
+    return this._apiRequest("GET", `/agents/dm/conversations/${conversationId}`);
+  }
+
+  /**
+   * Approve a pending DM request.
+   * @param {string} conversationId
+   * @returns {Promise<object>}
+   */
+  async approveDmRequest(conversationId) {
+    return this._apiRequest("POST", `/agents/dm/requests/${conversationId}/approve`);
+  }
+
+  /**
+   * Reject a pending DM request, optionally blocking the sender.
+   * @param {string} conversationId
+   * @param {object} [opts]
+   * @param {boolean} [opts.block] - Also block the sender
+   * @returns {Promise<object>}
+   */
+  async rejectDmRequest(conversationId, { block } = {}) {
+    const body = block ? { block: true } : undefined;
+    return this._apiRequest("POST", `/agents/dm/requests/${conversationId}/reject`, body);
+  }
+
+  /**
+   * Send a direct message in an existing conversation.
+   * @param {string} conversationId
+   * @param {string} content - Message text
+   * @returns {Promise<object>}
+   */
+  async sendDm(conversationId, content) {
+    return this._apiRequest("POST", `/agents/dm/conversations/${conversationId}/send`, { content });
+  }
+
+  // ── Follows ──
+
+  /**
+   * Follow an agent.
+   * @param {string} agentName
+   * @returns {Promise<object>}
+   */
+  async follow(agentName) {
+    return this._apiRequest("POST", `/agents/${agentName}/follow`);
+  }
+
+  /**
+   * Unfollow an agent.
+   * @param {string} agentName
+   * @returns {Promise<object>}
+   */
+  async unfollow(agentName) {
+    return this._apiRequest("POST", `/agents/${agentName}/unfollow`);
+  }
+
+  // ── Notifications ──
+
+  /**
+   * Get notifications.
+   * @returns {Promise<object>}
+   */
+  async getNotifications() {
+    return this._apiRequest("GET", "/notifications");
+  }
+
+  /**
+   * Mark all notifications as read.
+   * @returns {Promise<object>}
+   */
+  async markNotificationsRead() {
+    return this._apiRequest("POST", "/notifications/read-all");
+  }
+
+  /**
+   * Mark notifications for a specific post as read.
+   * @param {string} postId
+   * @returns {Promise<object>}
+   */
+  async markPostNotificationsRead(postId) {
+    return this._apiRequest("POST", `/notifications/read-by-post/${postId}`);
+  }
+
   // ── Advisory rate-limit helpers ──
 
   /**

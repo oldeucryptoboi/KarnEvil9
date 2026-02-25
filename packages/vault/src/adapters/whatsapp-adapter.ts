@@ -137,7 +137,8 @@ export class WhatsAppAdapter extends BaseAdapter {
     if (!isNaN(date.getTime())) return date.toISOString();
 
     // Manual parsing for DD/MM/YYYY format (always present in WhatsApp timestamps)
-    const match = ts.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/)!;
+    const match = ts.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (!match) return new Date(0).toISOString();
     let year = parseInt(match[3]!, 10);
     if (year < 100) year += 2000;
     return new Date(year, parseInt(match[2]!, 10) - 1, parseInt(match[1]!, 10)).toISOString();

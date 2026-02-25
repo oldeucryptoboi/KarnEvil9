@@ -187,9 +187,12 @@ export class Journal {
 
       if (this.fsync) {
         const fh = await open(this.filePath, "a");
-        await fh.write(line + "\n", undefined, "utf-8");
-        await fh.sync();
-        await fh.close();
+        try {
+          await fh.write(line + "\n", undefined, "utf-8");
+          await fh.sync();
+        } finally {
+          await fh.close();
+        }
       } else {
         await appendFile(this.filePath, line + "\n", "utf-8");
       }
@@ -313,9 +316,12 @@ export class Journal {
 
       if (this.fsync) {
         const fh = await open(tmpPath, "w");
-        await fh.write(lines.length > 0 ? lines.join("\n") + "\n" : "", undefined, "utf-8");
-        await fh.sync();
-        await fh.close();
+        try {
+          await fh.write(lines.length > 0 ? lines.join("\n") + "\n" : "", undefined, "utf-8");
+          await fh.sync();
+        } finally {
+          await fh.close();
+        }
       } else {
         await writeFile(tmpPath, lines.length > 0 ? lines.join("\n") + "\n" : "", "utf-8");
       }
@@ -461,8 +467,11 @@ export class Journal {
   private async acquireLock(): Promise<void> {
     try {
       const fh = await open(this.lockPath, "wx");
-      await fh.write(String(process.pid), undefined, "utf-8");
-      await fh.close();
+      try {
+        await fh.write(String(process.pid), undefined, "utf-8");
+      } finally {
+        await fh.close();
+      }
       this.locked = true;
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === "EEXIST") {

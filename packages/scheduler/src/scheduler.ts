@@ -53,7 +53,16 @@ export class Scheduler {
     await this.store.load();
     await this.handleMissedSchedules();
     this.running = true;
-    this.tickTimer = setInterval(() => { void this.tick(); }, this.tickIntervalMs);
+    this.tickTimer = setInterval(() => {
+      this.tick().catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        void this.journal.emit(this.sessionId, "scheduler.tick_failed", {
+          error: msg,
+        }).catch(() => {
+          process.stderr.write(`[scheduler] tick failed (journal unavailable): ${msg}\n`);
+        });
+      });
+    }, this.tickIntervalMs);
     this.tickTimer.unref();
     await this.journal.emit(this.sessionId, "scheduler.started", {
       tick_interval_ms: this.tickIntervalMs,

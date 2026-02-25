@@ -427,7 +427,7 @@ export class ApiServer {
       if (client.paused) {
         client.missedEvents++;
         if (client.missedEvents > 1000) {
-          client.res.end();
+          try { client.res.end(); } catch { /* response already destroyed */ }
           toRemove.push(client);
         }
         continue;
@@ -579,8 +579,11 @@ export class ApiServer {
   }
 
   private wsSend(ws: WebSocket, data: unknown): void {
-    if (ws.readyState === WebSocket.OPEN) {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    try {
       ws.send(JSON.stringify(data));
+    } catch {
+      // Socket closed between readyState check and send — ignore
     }
   }
 
@@ -701,10 +704,14 @@ export class ApiServer {
 
   async discoverRecoverableSessions(): Promise<string[]> {
     const sessions = new Map<string, Set<string>>();
-    for await (const event of this.journal.readAllStream()) {
-      const types = sessions.get(event.session_id) ?? new Set();
-      types.add(event.type);
-      sessions.set(event.session_id, types);
+    try {
+      for await (const event of this.journal.readAllStream()) {
+        const types = sessions.get(event.session_id) ?? new Set();
+        types.add(event.type);
+        sessions.set(event.session_id, types);
+      }
+    } catch {
+      // Return partial results if the journal stream errors mid-read
     }
     const terminalTypes = new Set(["session.completed", "session.failed", "session.aborted"]);
     const recoverable: string[] = [];
@@ -914,9 +921,10 @@ export class ApiServer {
       // Replay catch-up from Last-Event-ID or after_seq query param
       const lastEventId = req.headers["last-event-id"] as string | undefined;
       const afterSeqParam = req.query.after_seq as string | undefined;
-      const afterSeq = lastEventId !== undefined ? parseInt(lastEventId, 10) : afterSeqParam !== undefined ? parseInt(afterSeqParam, 10) : undefined;
+      const rawAfterSeq = lastEventId !== undefined ? parseInt(lastEventId, 10) : afterSeqParam !== undefined ? parseInt(afterSeqParam, 10) : NaN;
+      const afterSeq = Number.isNaN(rawAfterSeq) ? undefined : rawAfterSeq;
 
-      if (afterSeq !== undefined && !Number.isNaN(afterSeq)) {
+      if (afterSeq !== undefined) {
         const events = await this.journal.readSession(sessionId);
         let replayCount = 0;
         const MAX_REPLAY = 500;

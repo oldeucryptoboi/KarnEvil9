@@ -31,6 +31,8 @@ describe("Daemon Lifecycle Smoke", () => {
       await new Promise<void>((resolve) => httpServer!.close(() => resolve()));
       httpServer = null;
     }
+    // Close journal before cleanup to release file handles (prevents ENOTEMPTY)
+    await journal.close();
     await rm(testDir, { recursive: true, force: true });
   });
 

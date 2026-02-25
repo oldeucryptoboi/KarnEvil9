@@ -67,15 +67,16 @@ export class PluginLoader {
     }
 
     try {
+      let timer: ReturnType<typeof setTimeout>;
       await Promise.race([
         registerFn(api),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`Plugin "${manifest.id}" register() timed out after ${this.registerTimeoutMs}ms`)),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`Plugin "${manifest.id}" (${manifest.name}) register() timed out after ${this.registerTimeoutMs}ms`)),
             this.registerTimeoutMs
-          )
-        ),
-      ]);
+          );
+        }),
+      ]).finally(() => clearTimeout(timer!));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.journal.tryEmit(manifest.id, "plugin.failed", {

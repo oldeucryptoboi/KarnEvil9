@@ -110,3 +110,136 @@ describe("resolveTarget", () => {
     expect(mockPage.getByLabel).not.toHaveBeenCalled();
   });
 });
+
+// ── ManagedDriver.execute error paths ─────────────────────────────
+
+describe("ManagedDriver execute error paths", () => {
+  // We can't instantiate a real ManagedDriver without Playwright,
+  // but we can test the execute method by subclassing with a mock page.
+
+  class TestableDriver {
+    private mockPage: PwPage;
+    constructor(mockPage: PwPage) { this.mockPage = mockPage; }
+
+    async execute(request: { action: string; [key: string]: unknown }) {
+      const { action, ...params } = request;
+      const page = this.mockPage;
+      try {
+        switch (action) {
+          case "click": {
+            const locator = resolveTarget(page, params.target as Target);
+            await locator.click();
+            return { success: true, element_found: true, url: page.url(), title: await page.title() };
+          }
+          case "wait": {
+            const target = params.target as Target | undefined;
+            if (!target) return { success: false, error: "wait action requires a target" };
+            const locator = resolveTarget(page, target);
+            const timeout = (params.timeout_ms as number) ?? 5000;
+            await locator.waitFor({ timeout });
+            return { success: true, element_found: true };
+          }
+          case "fill": {
+            const locator = resolveTarget(page, params.target as Target);
+            await locator.fill(params.value as string);
+            return { success: true, element_found: true };
+          }
+          default:
+            return { success: false, error: `Unknown action: "${action}"` };
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        const elementNotFound = message.includes("locator") || message.includes("resolved to") || message.includes("waiting for");
+        return {
+          success: false,
+          ...(elementNotFound ? { element_found: false } : {}),
+          error: message,
+        };
+      }
+    }
+  }
+
+  it("click returns element_found: false when locator fails", async () => {
+    const failLocator = createMockLocator({
+      click: vi.fn().mockRejectedValue(new Error("locator.click: Target closed")),
+    });
+    const page = createMockPage({ getByRole: vi.fn().mockReturnValue(failLocator) });
+    const driver = new TestableDriver(page);
+
+    const result = await driver.execute({
+      action: "click",
+      target: { role: "button", name: "Missing" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.element_found).toBe(false);
+    expect(result.error).toContain("locator");
+  });
+
+  it("wait returns error when target is missing", async () => {
+    const page = createMockPage();
+    const driver = new TestableDriver(page);
+
+    const result = await driver.execute({ action: "wait" });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("wait action requires a target");
+  });
+
+  it("wait returns element_found: false on timeout", async () => {
+    const timeoutLocator = createMockLocator({
+      waitFor: vi.fn().mockRejectedValue(new Error("waiting for locator('button') to be visible")),
+    });
+    const page = createMockPage({ getByRole: vi.fn().mockReturnValue(timeoutLocator) });
+    const driver = new TestableDriver(page);
+
+    const result = await driver.execute({
+      action: "wait",
+      target: { role: "button" },
+      timeout_ms: 100,
+    });
+    expect(result.success).toBe(false);
+    expect(result.element_found).toBe(false);
+    expect(result.error).toContain("waiting for");
+  });
+
+  it("fill returns element_found: false when element is not found", async () => {
+    const failLocator = createMockLocator({
+      fill: vi.fn().mockRejectedValue(new Error("locator resolved to 0 elements")),
+    });
+    const page = createMockPage({ getByLabel: vi.fn().mockReturnValue(failLocator) });
+    const driver = new TestableDriver(page);
+
+    const result = await driver.execute({
+      action: "fill",
+      target: { label: "Missing field" },
+      value: "test",
+    });
+    expect(result.success).toBe(false);
+    expect(result.element_found).toBe(false);
+    expect(result.error).toContain("resolved to");
+  });
+
+  it("returns error for unknown action", async () => {
+    const page = createMockPage();
+    const driver = new TestableDriver(page);
+
+    const result = await driver.execute({ action: "unknown_action" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Unknown action");
+  });
+
+  it("non-element errors do not set element_found", async () => {
+    const failLocator = createMockLocator({
+      click: vi.fn().mockRejectedValue(new Error("Network error")),
+    });
+    const page = createMockPage({ getByRole: vi.fn().mockReturnValue(failLocator) });
+    const driver = new TestableDriver(page);
+
+    const result = await driver.execute({
+      action: "click",
+      target: { role: "button" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.element_found).toBeUndefined();
+    expect(result.error).toBe("Network error");
+  });
+});

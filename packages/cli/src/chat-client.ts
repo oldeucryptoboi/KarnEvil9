@@ -94,12 +94,16 @@ export class ChatClient {
 
   connect(): void {
     this._reconnectScheduled = false;
+    // Clear any existing ping interval from a previous connection
+    if (this._pingInterval) {
+      clearInterval(this._pingInterval);
+      this._pingInterval = null;
+    }
     const ws = this._wsFactory(this._wsUrl);
     this._ws = ws;
 
     ws.on("open", () => this.handleWsOpen());
     ws.on("message", (...args: unknown[]) => this.handleWsMessage(args[0] as Buffer | string));
-    ws.on("close", () => this.handleWsClose());
     ws.on("error", (...args: unknown[]) => this.handleWsError(args[0] as Error));
 
     // Keepalive ping
@@ -109,11 +113,13 @@ export class ChatClient {
       }
     }, this._pingIntervalMs);
 
+    // Single close handler: clean up ping interval and delegate to handleWsClose
     ws.on("close", () => {
       if (this._pingInterval) {
         clearInterval(this._pingInterval);
         this._pingInterval = null;
       }
+      this.handleWsClose();
     });
   }
 

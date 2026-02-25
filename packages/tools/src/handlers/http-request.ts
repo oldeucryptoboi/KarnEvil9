@@ -43,11 +43,18 @@ export const httpRequestHandler: ToolHandler = async (
     const location = response.headers.get("location");
     if (location) {
       // Validate redirect target against SSRF and endpoint policy
-      const redirectUrl = new URL(location, url).href;
-      await assertEndpointAllowedAsync(redirectUrl, policy.allowed_endpoints);
-      const redirectTimer = setTimeout(() => controller.abort(), fetchTimeout);
+      let redirectUrl: string;
       try {
-        response = await fetch(redirectUrl, { ...fetchOpts, redirect: "manual" });
+        redirectUrl = new URL(location, url).href;
+      } catch {
+        return { status: response.status, body: "", headers: {}, error: `Malformed redirect URL: ${location}` };
+      }
+      await assertEndpointAllowedAsync(redirectUrl, policy.allowed_endpoints);
+      // Fresh AbortController for redirect — the original may be in an indeterminate state
+      const redirectController = new AbortController();
+      const redirectTimer = setTimeout(() => redirectController.abort(), fetchTimeout);
+      try {
+        response = await fetch(redirectUrl, { ...fetchOpts, signal: redirectController.signal, redirect: "manual" });
       } finally {
         clearTimeout(redirectTimer);
       }

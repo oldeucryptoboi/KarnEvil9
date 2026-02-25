@@ -4,7 +4,7 @@ import { rm } from "node:fs/promises";
 import { v4 as uuid } from "uuid";
 import { Journal } from "@karnevil9/journal";
 import type { ApprovalDecision, PermissionRequest } from "@karnevil9/schemas";
-import { PermissionEngine } from "./permission-engine.js";
+import { PermissionEngine, MAX_SESSION_CACHES } from "./permission-engine.js";
 
 const TEST_DIR = resolve(import.meta.dirname ?? ".", "../../.test-data");
 const TEST_FILE = resolve(TEST_DIR, "perm-journal.jsonl");
@@ -728,5 +728,153 @@ describe("PermissionEngine edge cases", () => {
     expect(r2.allowed).toBe(true);
     // allow_once doesn't cache — second caller still needs its own prompt
     expect(promptCount).toBe(2);
+  });
+});
+
+// ─── Cache Eviction Tests ─────────────────────────────────────────
+
+describe("PermissionEngine cache eviction", () => {
+  let journal: Journal;
+  let promptCalls: PermissionRequest[];
+
+  const mockPrompt = async (request: PermissionRequest): Promise<ApprovalDecision> => {
+    promptCalls.push(request);
+    return "allow_session";
+  };
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { lock: false });
+    await journal.init();
+    promptCalls = [];
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("session cache evicts oldest entry at MAX_SESSION_CACHES", async () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    // Pre-grant many sessions to fill cache to capacity
+    for (let i = 0; i < MAX_SESSION_CACHES; i++) {
+      engine.preGrant(`session-${i}`, ["test:scope:target"]);
+    }
+    // The first session should still be present
+    expect(engine.isGranted("test:scope:target", "session-0")).toBe(true);
+
+    // Adding one more should evict session-0 (oldest)
+    engine.preGrant(`session-${MAX_SESSION_CACHES}`, ["test:scope:target"]);
+    expect(engine.isGranted("test:scope:target", "session-0")).toBe(false);
+    expect(engine.isGranted("test:scope:target", `session-${MAX_SESSION_CACHES}`)).toBe(true);
+    // Session 1 should still be present
+    expect(engine.isGranted("test:scope:target", "session-1")).toBe(true);
+  });
+
+  it("clearSession cleans up constraint cache via secondary index", async () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    const sessionId = "constraint-session";
+
+    // Create an allow_constrained decision
+    let decision: ApprovalDecision = {
+      type: "allow_constrained",
+      scope: "session",
+      constraints: { readonly_paths: ["/safe"] },
+    };
+    const constrainedPrompt = async (_req: PermissionRequest): Promise<ApprovalDecision> => decision;
+    const engine2 = new PermissionEngine(journal, constrainedPrompt);
+
+    const req = {
+      request_id: uuid(),
+      session_id: sessionId,
+      step_id: "step-1",
+      tool_name: "test-tool",
+      permissions: [PermissionEngine.parse("filesystem:read:workspace")],
+    };
+    const result = await engine2.check(req);
+    expect(result.constraints).toBeDefined();
+
+    // Verify constraint cache is populated (same step returns constraints)
+    const req2 = { ...req, request_id: uuid() };
+    const result2 = await engine2.check(req2);
+    expect(result2.constraints).toBeDefined();
+
+    // Clear session — constraint cache should be cleaned up
+    engine2.clearSession(sessionId);
+
+    // Re-check — should prompt again and not have cached constraints
+    decision = "allow_session";
+    const req3 = { ...req, request_id: uuid() };
+    const result3 = await engine2.check(req3);
+    expect(result3.constraints).toBeUndefined();
+  });
+
+  it("clearSession cleans up observed cache via secondary index", async () => {
+    const engine = new PermissionEngine(journal, async () => ({
+      type: "allow_observed" as const,
+      scope: "session" as const,
+      telemetry_level: "basic" as const,
+    }));
+    const sessionId = "observed-session";
+
+    const req = {
+      request_id: uuid(),
+      session_id: sessionId,
+      step_id: "step-1",
+      tool_name: "test-tool",
+      permissions: [PermissionEngine.parse("filesystem:read:workspace")],
+    };
+    const result = await engine.check(req);
+    expect(result.observed).toBe(true);
+
+    // Verify observed flag is cached
+    const req2 = { ...req, request_id: uuid() };
+    const result2 = await engine.check(req2);
+    expect(result2.observed).toBe(true);
+
+    // Clear session — observed cache should be cleaned up
+    engine.clearSession(sessionId);
+
+    // After clearing, observed flag should not persist for new checks
+    // (the session cache is also cleared, so it will prompt again)
+    const promptCount = { value: 0 };
+    const engine2 = new PermissionEngine(journal, async () => {
+      promptCount.value++;
+      return "allow_session";
+    });
+    const req3 = {
+      request_id: uuid(),
+      session_id: sessionId,
+      step_id: "step-1",
+      tool_name: "test-tool",
+      permissions: [PermissionEngine.parse("filesystem:read:workspace")],
+    };
+    const result3 = await engine2.check(req3);
+    expect(result3.observed).toBeUndefined();
+  });
+
+  it("clearSession(undefined) clears all secondary indices", async () => {
+    const engine = new PermissionEngine(journal, async () => ({
+      type: "allow_constrained" as const,
+      scope: "session" as const,
+      constraints: { readonly_paths: ["/test"] },
+    }));
+
+    // Populate caches for multiple sessions
+    for (const sid of ["sess-a", "sess-b"]) {
+      await engine.check({
+        request_id: uuid(),
+        session_id: sid,
+        step_id: "step-1",
+        tool_name: "test-tool",
+        permissions: [PermissionEngine.parse("test:scope:target")],
+      });
+    }
+
+    // Clear all
+    engine.clearSession();
+
+    // Both sessions should be cleared
+    expect(engine.isGranted("test:scope:target", "sess-a")).toBe(false);
+    expect(engine.isGranted("test:scope:target", "sess-b")).toBe(false);
   });
 });

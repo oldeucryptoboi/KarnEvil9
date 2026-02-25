@@ -1123,4 +1123,70 @@ describe("Journal", () => {
     const event = await journal.emit("sess-1", "session.created", {});
     expect(event.type).toBe("session.created");
   });
+
+  // ─── Redaction Tests ──────────────────────────────────────────────
+
+  it("redact: true redacts sensitive keys in payload", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false, redact: true });
+    await journal.init();
+
+    await journal.emit("sess-1", "session.created", {
+      api_key: "sk-ant-secret123",
+      authorization: "Bearer token123",
+      safe_field: "visible",
+    });
+
+    const events = await journal.readAll();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.payload.api_key).toBe("[REDACTED]");
+    expect(events[0]!.payload.authorization).toBe("[REDACTED]");
+    expect(events[0]!.payload.safe_field).toBe("visible");
+  });
+
+  it("redact: true redacts sensitive value patterns in payload", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false, redact: true });
+    await journal.init();
+
+    await journal.emit("sess-1", "session.created", {
+      config: "Bearer my-secret-token",
+      key_data: "sk-proj-abcdef12345",
+      normal: "hello world",
+    });
+
+    const events = await journal.readAll();
+    expect(events[0]!.payload.config).toBe("[REDACTED]");
+    expect(events[0]!.payload.key_data).toBe("[REDACTED]");
+    expect(events[0]!.payload.normal).toBe("hello world");
+  });
+
+  it("redact: false preserves all payload values", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false, redact: false });
+    await journal.init();
+
+    await journal.emit("sess-1", "session.created", {
+      api_key: "sk-ant-secret123",
+      authorization: "Bearer token123",
+    });
+
+    const events = await journal.readAll();
+    expect(events[0]!.payload.api_key).toBe("sk-ant-secret123");
+    expect(events[0]!.payload.authorization).toBe("Bearer token123");
+  });
+
+  it("redact: true handles nested objects", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false, redact: true });
+    await journal.init();
+
+    await journal.emit("sess-1", "session.created", {
+      outer: {
+        password: "secret",
+        name: "visible",
+      },
+    });
+
+    const events = await journal.readAll();
+    const outer = events[0]!.payload.outer as Record<string, unknown>;
+    expect(outer.password).toBe("[REDACTED]");
+    expect(outer.name).toBe("visible");
+  });
 });

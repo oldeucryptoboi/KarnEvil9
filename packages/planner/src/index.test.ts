@@ -5,6 +5,8 @@ import {
   RouterPlanner,
   classifyTask,
   filterToolsByDomain,
+  IFPlanner,
+  bfsPath,
 } from "./index.js";
 
 describe("planner barrel exports", () => {
@@ -14,5 +16,15 @@ describe("planner barrel exports", () => {
     expect(RouterPlanner).toBeTypeOf("function");
     expect(classifyTask).toBeTypeOf("function");
     expect(filterToolsByDomain).toBeTypeOf("function");
+    expect(IFPlanner).toBeTypeOf("function");
+    expect(bfsPath).toBeTypeOf("function");
+  });
+
+  it("IFPlanner can be instantiated with a mock callModel", () => {
+    const planner = new IFPlanner({
+      callModel: async () => ({ text: "look" }),
+    });
+    expect(planner).toBeDefined();
+    expect(planner.generatePlan).toBeTypeOf("function");
   });
 });

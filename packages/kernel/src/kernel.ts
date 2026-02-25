@@ -27,6 +27,7 @@ import type { ActiveMemory } from "@karnevil9/memory";
 import type { PluginRegistry } from "@karnevil9/plugins";
 import { mkdir, rename, open } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { randomInt } from "node:crypto";
 import { runCritics } from "./critics.js";
 import { FutilityMonitor } from "./futility.js";
 import type { FutilityConfig } from "./futility.js";
@@ -64,7 +65,7 @@ function sleep(ms: number): Promise<void> {
 
 function backoff(attempt: number, baseMs = 500, maxMs = 15000): number {
   const delay = Math.min(baseMs * Math.pow(2, attempt - 1), maxMs);
-  const jitter = Math.random() * 500;
+  const jitter = randomInt(500);
   return delay + jitter;
 }
 

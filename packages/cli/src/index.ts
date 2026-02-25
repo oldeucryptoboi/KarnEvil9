@@ -45,9 +45,10 @@ async function cliApprovalPrompt(request: PermissionRequest): Promise<ApprovalDe
   console.log(`Step: ${request.step_id}`);
   console.log(`Scopes: ${scopes}`);
   console.log(`Options: [a]llow once, [s]ession, [g]lobal, [d]eny, [c]onstrained, [o]bserved`);
-  return new Promise<ApprovalDecision>((resolve) => {
+  return new Promise<ApprovalDecision>((resolve, reject) => {
+    let answered = false;
     rl.question("Decision: ", (answer) => {
-      rl.close();
+      answered = true;
       switch (answer.trim().toLowerCase()) {
         case "a": resolve("allow_once"); break;
         case "s": resolve("allow_session"); break;
@@ -64,7 +65,10 @@ async function cliApprovalPrompt(request: PermissionRequest): Promise<ApprovalDe
         }); break;
         default: resolve("deny"); break;
       }
+      rl.close();
     });
+    rl.on("error", (err) => { rl.close(); reject(err); });
+    rl.on("close", () => { if (!answered) resolve("deny"); });
   });
 }
 

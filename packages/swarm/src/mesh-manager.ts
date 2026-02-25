@@ -83,16 +83,19 @@ export class MeshManager {
     await this.discovery.start();
 
     this.heartbeatTimer = setInterval(() => {
-      void this.sendHeartbeats();
+      if (!this.running) return;
+      void this.sendHeartbeats().catch(() => {});
     }, this.config.heartbeat_interval_ms);
     this.heartbeatTimer.unref();
 
     this.sweepTimer = setInterval(() => {
+      if (!this.running) return;
       this.runSweep();
     }, this.config.sweep_interval_ms);
     this.sweepTimer.unref();
 
     this.nonceCleanupTimer = setInterval(() => {
+      if (!this.running) return;
       this.cleanupNonces();
     }, 60000);
     this.nonceCleanupTimer.unref();

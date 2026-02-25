@@ -351,6 +351,7 @@ export type JournalEventType =
   | "scheduler.schedule_deleted"
   | "scheduler.schedule_paused"
   | "scheduler.save_failed"
+  | "scheduler.tick_failed"
   | "swarm.started"
   | "swarm.stopped"
   | "swarm.peer_joined"

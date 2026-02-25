@@ -80,7 +80,7 @@ export class GmailAdapter extends BaseAdapter {
       source_id: msg.id,
       title: subject,
       content: `From: ${from}\nTo: ${to}\n\n${body}`,
-      created_at: date ? new Date(date).toISOString() : new Date(parseInt(msg.internalDate, 10)).toISOString(),
+      created_at: this.parseDate(date, msg.internalDate),
       metadata: {
         object_type: "Document",
         thread_id: msg.threadId,
@@ -112,5 +112,17 @@ export class GmailAdapter extends BaseAdapter {
     }
 
     return msg.snippet || null;
+  }
+
+  private parseDate(headerDate: string | undefined, internalDate: string): string {
+    if (headerDate) {
+      const d = new Date(headerDate);
+      if (!isNaN(d.getTime())) return d.toISOString();
+    }
+    // Strict numeric check: parseInt("2023abc") returns 2023, which is wrong
+    if (/^\d+$/.test(internalDate)) {
+      return new Date(parseInt(internalDate, 10)).toISOString();
+    }
+    return new Date(0).toISOString();
   }
 }

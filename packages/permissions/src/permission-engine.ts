@@ -12,12 +12,16 @@ export type ApprovalPromptFn = (
   request: PermissionRequest
 ) => Promise<ApprovalDecision>;
 
-const MAX_SESSION_CACHES = 10_000;
+export const MAX_SESSION_CACHES = 10_000;
+export const MAX_CONSTRAINT_CACHE = 50_000;
+export const MAX_OBSERVED_CACHE = 50_000;
 
 export class PermissionEngine {
   private sessionCaches = new Map<string, Map<string, PermissionGrant>>();
   private constraintCache = new Map<string, PermissionConstraints>();
+  private constraintCacheBySession = new Map<string, Set<string>>();
   private observedCache = new Set<string>();
+  private observedCacheBySession = new Map<string, Set<string>>();
   private promptLocks = new Map<string, Promise<void>>();
   private journal: Journal;
   private promptFn: ApprovalPromptFn;
@@ -177,7 +181,7 @@ export class PermissionEngine {
         }
         // Cache constraints at step-level only (session-scoped, cleaned up with clearSession)
         const stepCacheKey = `${sessionId}:${request.tool_name}:${request.step_id}`;
-        this.constraintCache.set(stepCacheKey, decision.constraints);
+        this.addConstraintCacheEntry(sessionId, stepCacheKey, decision.constraints);
 
         await this.journal.emit(sessionId, "permission.granted", {
           request_id: request.request_id,
@@ -209,7 +213,7 @@ export class PermissionEngine {
         }
         // Cache at step-level only (session-scoped, cleaned up with clearSession)
         const stepCacheKey = `${sessionId}:${request.tool_name}:${request.step_id}`;
-        this.observedCache.add(stepCacheKey);
+        this.addObservedCacheEntry(sessionId, stepCacheKey);
 
         await this.journal.emit(sessionId, "permission.granted", {
           request_id: request.request_id,
@@ -258,6 +262,42 @@ export class PermissionEngine {
     }
   }
 
+  private addConstraintCacheEntry(sessionId: string, key: string, constraints: PermissionConstraints): void {
+    if (this.constraintCache.size >= MAX_CONSTRAINT_CACHE) {
+      const oldest = this.constraintCache.keys().next().value;
+      if (oldest !== undefined) {
+        this.constraintCache.delete(oldest);
+        const oldSession = oldest.split(":")[0]!;
+        this.constraintCacheBySession.get(oldSession)?.delete(oldest);
+      }
+    }
+    this.constraintCache.set(key, constraints);
+    let sessionKeys = this.constraintCacheBySession.get(sessionId);
+    if (!sessionKeys) {
+      sessionKeys = new Set();
+      this.constraintCacheBySession.set(sessionId, sessionKeys);
+    }
+    sessionKeys.add(key);
+  }
+
+  private addObservedCacheEntry(sessionId: string, key: string): void {
+    if (this.observedCache.size >= MAX_OBSERVED_CACHE) {
+      const oldest = this.observedCache.values().next().value;
+      if (oldest !== undefined) {
+        this.observedCache.delete(oldest);
+        const oldSession = oldest.split(":")[0]!;
+        this.observedCacheBySession.get(oldSession)?.delete(oldest);
+      }
+    }
+    this.observedCache.add(key);
+    let sessionKeys = this.observedCacheBySession.get(sessionId);
+    if (!sessionKeys) {
+      sessionKeys = new Set();
+      this.observedCacheBySession.set(sessionId, sessionKeys);
+    }
+    sessionKeys.add(key);
+  }
+
   isGranted(scope: string, sessionId?: string): boolean {
     if (sessionId) {
       const sessionCache = this.sessionCaches.get(sessionId);
@@ -270,16 +310,24 @@ export class PermissionEngine {
     if (sessionId) {
       this.sessionCaches.delete(sessionId);
       this.promptLocks.delete(sessionId);
-      // Clear session-specific constraint/observed caches (collect keys first to avoid mutating during iteration)
-      const constraintKeys = [...this.constraintCache.keys()].filter(k => k.startsWith(`${sessionId}:`));
-      for (const key of constraintKeys) this.constraintCache.delete(key);
-      const observedKeys = [...this.observedCache].filter(k => k.startsWith(`${sessionId}:`));
-      for (const key of observedKeys) this.observedCache.delete(key);
+      // O(1) cleanup using secondary indices
+      const constraintKeys = this.constraintCacheBySession.get(sessionId);
+      if (constraintKeys) {
+        for (const key of constraintKeys) this.constraintCache.delete(key);
+        this.constraintCacheBySession.delete(sessionId);
+      }
+      const observedKeys = this.observedCacheBySession.get(sessionId);
+      if (observedKeys) {
+        for (const key of observedKeys) this.observedCache.delete(key);
+        this.observedCacheBySession.delete(sessionId);
+      }
     } else {
       this.sessionCaches.clear();
       this.promptLocks.clear();
       this.constraintCache.clear();
+      this.constraintCacheBySession.clear();
       this.observedCache.clear();
+      this.observedCacheBySession.clear();
     }
   }
 

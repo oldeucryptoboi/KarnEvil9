@@ -112,7 +112,12 @@ export class CDPClient {
   /** Attach message and close handlers to a WebSocket. */
   private attachHandlers(ws: WebSocket): void {
     ws.on("message", (data: WebSocket.RawData) => {
-      const msg = JSON.parse(data.toString()) as CDPResponse | CDPEvent;
+      let msg: CDPResponse | CDPEvent;
+      try {
+        msg = JSON.parse(data.toString()) as CDPResponse | CDPEvent;
+      } catch {
+        return; // skip malformed messages
+      }
       if ("id" in msg) {
         const pending = this.pending.get(msg.id);
         if (pending) {
@@ -162,7 +167,12 @@ export class CDPClient {
         resolve: resolve as (result: unknown) => void,
         reject,
       });
-      this.ws!.send(JSON.stringify(request));
+      try {
+        this.ws!.send(JSON.stringify(request));
+      } catch (err) {
+        this.pending.delete(id);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 

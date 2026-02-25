@@ -1,17 +1,20 @@
-import { describe, it, expect } from "vitest";
-import { resolve } from "node:path";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { resolve, join } from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
+import { v4 as uuid } from "uuid";
 
 const execFileAsync = promisify(execFile);
 
 function spawnWithStdin(
   cmd: string,
   args: string[],
-  opts: { cwd?: string; timeout?: number; stdinData?: string },
+  opts: { cwd?: string; timeout?: number; stdinData?: string; env?: NodeJS.ProcessEnv },
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => { stdout += d.toString(); });
@@ -35,6 +38,26 @@ const CLI_BIN = resolve(ROOT, "packages/cli/dist/index.js");
 const NODE = process.execPath;
 
 describe("CLI Binary Smoke", () => {
+  let testDir: string;
+  let testEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    testDir = join(tmpdir(), `karnevil9-cli-smoke-${uuid()}`);
+    testEnv = {
+      ...process.env,
+      KARNEVIL9_JOURNAL_PATH: join(testDir, "journal.jsonl"),
+      // Strip external API keys so plugins load in stub mode (no real network I/O)
+      TWITTER_API_KEY: "", TWITTER_API_SECRET: "", TWITTER_ACCESS_TOKEN: "", TWITTER_ACCESS_SECRET: "",
+      MOLTBOOK_API_KEY: "", SLACK_BOT_TOKEN: "", SIGNAL_PHONE_NUMBER: "",
+      GMAIL_CLIENT_ID: "", GMAIL_CLIENT_SECRET: "", GMAIL_REFRESH_TOKEN: "",
+      WHATSAPP_ENABLED: "", XAI_API_KEY: "", XAI_KEY: "",
+    };
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
   it("--help prints usage and exits 0", async () => {
     const { stdout, stderr } = await execFileAsync(NODE, [CLI_BIN, "--help"]);
     expect(stdout).toContain("karnevil9");
@@ -55,7 +78,7 @@ describe("CLI Binary Smoke", () => {
 
   it("tools list runs without error", async () => {
     const { stdout } = await execFileAsync(NODE, [CLI_BIN, "tools", "list"], {
-      cwd: ROOT,
+      cwd: ROOT, env: testEnv,
     });
     expect(stdout).toContain("read-file");
     expect(stdout).toContain("write-file");
@@ -65,7 +88,7 @@ describe("CLI Binary Smoke", () => {
 
   it("plan command generates a mock plan", async () => {
     const { stdout } = await execFileAsync(NODE, [CLI_BIN, "plan", "test task"], {
-      cwd: ROOT,
+      cwd: ROOT, env: testEnv,
     });
     const plan = JSON.parse(stdout);
     expect(plan.plan_id).toBeDefined();
@@ -76,7 +99,7 @@ describe("CLI Binary Smoke", () => {
 
   it("plugins list runs without error", async () => {
     const { stdout } = await execFileAsync(NODE, [CLI_BIN, "plugins", "list", "--plugins-dir", resolve(ROOT, "plugins")], {
-      cwd: ROOT,
+      cwd: ROOT, env: testEnv,
     });
     expect(stdout).toContain("example-logger");
   });
@@ -102,7 +125,7 @@ describe("CLI Binary Smoke", () => {
   it("run --planner with unknown type exits with error", async () => {
     try {
       await execFileAsync(NODE, [CLI_BIN, "run", "test task", "--planner", "gemini"], {
-        cwd: ROOT,
+        cwd: ROOT, env: testEnv,
       });
       expect.unreachable("Should have thrown");
     } catch (err: unknown) {
@@ -127,7 +150,7 @@ describe("CLI Binary Smoke", () => {
     const { stdout, code } = await spawnWithStdin(
       NODE,
       [CLI_BIN, "run", "agentic smoke test", "--mode", "mock", "--max-steps", "5", "--agentic"],
-      { cwd: ROOT, timeout: 25000, stdinData },
+      { cwd: ROOT, timeout: 25000, stdinData, env: testEnv },
     );
     expect(code).toBe(0);
     expect(stdout).toContain("KarnEvil9 session starting");
@@ -140,7 +163,7 @@ describe("CLI Binary Smoke", () => {
     const { stdout, code } = await spawnWithStdin(
       NODE,
       [CLI_BIN, "run", "agentic iterations test", "--mode", "mock", "--max-steps", "10", "--agentic"],
-      { cwd: ROOT, timeout: 25000, stdinData },
+      { cwd: ROOT, timeout: 25000, stdinData, env: testEnv },
     );
     expect(code).toBe(0);
     // Agentic mock planner: iteration 1 produces a step, iteration 2 sees success and returns empty.
@@ -159,7 +182,7 @@ describe("CLI Binary Smoke", () => {
     const { stdout, code } = await spawnWithStdin(
       NODE,
       [CLI_BIN, "run", "non-agentic backward compat", "--mode", "mock", "--max-steps", "5"],
-      { cwd: ROOT, timeout: 25000, stdinData },
+      { cwd: ROOT, timeout: 25000, stdinData, env: testEnv },
     );
     expect(code).toBe(0);
     // Single-shot: exactly one planner.requested event
@@ -171,7 +194,7 @@ describe("CLI Binary Smoke", () => {
   it("run --agentic --planner unknown exits with error", async () => {
     try {
       await execFileAsync(NODE, [CLI_BIN, "run", "test", "--agentic", "--planner", "gemini"], {
-        cwd: ROOT,
+        cwd: ROOT, env: testEnv,
       });
       expect.unreachable("Should have thrown");
     } catch (err: unknown) {
@@ -183,8 +206,7 @@ describe("CLI Binary Smoke", () => {
   it("run --agentic --planner claude without API key exits with error", async () => {
     try {
       await execFileAsync(NODE, [CLI_BIN, "run", "test", "--agentic", "--planner", "claude"], {
-        cwd: ROOT,
-        env: { ...process.env, ANTHROPIC_API_KEY: "" },
+        cwd: ROOT, env: { ...testEnv, ANTHROPIC_API_KEY: "" },
       });
       expect.unreachable("Should have thrown");
     } catch (err: unknown) {
@@ -196,8 +218,7 @@ describe("CLI Binary Smoke", () => {
   it("run --planner claude without ANTHROPIC_API_KEY exits with error", async () => {
     try {
       await execFileAsync(NODE, [CLI_BIN, "run", "test task", "--planner", "claude"], {
-        cwd: ROOT,
-        env: { ...process.env, ANTHROPIC_API_KEY: "" },
+        cwd: ROOT, env: { ...testEnv, ANTHROPIC_API_KEY: "" },
       });
       expect.unreachable("Should have thrown");
     } catch (err: unknown) {
@@ -213,7 +234,7 @@ describe("CLI Binary Smoke", () => {
     const { stdout, code } = await spawnWithStdin(
       NODE,
       [CLI_BIN, "run", "smoke test task", "--mode", "mock", "--max-steps", "5"],
-      { cwd: ROOT, timeout: 25000, stdinData },
+      { cwd: ROOT, timeout: 25000, stdinData, env: testEnv },
     );
     expect(code).toBe(0);
     expect(stdout).toContain("KarnEvil9 session starting");

@@ -441,6 +441,7 @@ program.command("server").description("Start the API server")
       pluginsDir,
       pluginConfigs: {
         "scheduler-tool": { scheduler },
+        "moltbook": { scheduler, autoSchedule: true },
         "slack": {
           sessionFactory: sharedSessionFactory,
           journal,

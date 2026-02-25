@@ -144,7 +144,7 @@ export const moltbookFeedManifest = {
       ok: { type: "boolean" },
       posts: { type: "array" },
       has_more: { type: "boolean" },
-      next_cursor: { type: "string" },
+      next_cursor: { type: ["string", "null"] },
     },
   },
   permissions: ["moltbook:read:feeds"],

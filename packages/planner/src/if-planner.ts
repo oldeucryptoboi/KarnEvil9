@@ -455,6 +455,13 @@ export class IFPlanner implements Planner {
       this.getBlockedDirsForRoom(gameState.blockedExits, gameState.currentRoom),
     );
 
+    // Detect recent combat: the combat handler pushes "attack ..." N times into
+    // commandHistory. If the last ~30 entries contain an attack, give the LLM
+    // extra grace before fallback probes fire (combat is progress, not stalling).
+    const recentCmds = gameState.commandHistory.slice(-30);
+    const hadRecentCombat = recentCmds.some(c => /^attack\s/i.test(c));
+    const fallbackThreshold = hadRecentCombat ? 7 : 4;
+
     // 1. Try unexplored known exits (mirrors Phase 1 but fires before navHint gate).
     // Prioritize exits with unknown/unvisited destinations over those leading to visited rooms.
     const candidates = gameState.knownExits
@@ -475,7 +482,7 @@ export class IFPlanner implements Planner {
       }
       // All candidates lead to visited rooms — require higher stall threshold
       // to give the LLM time to interact (combat, puzzles) before overriding.
-      if (stalled >= 4) {
+      if (stalled >= fallbackThreshold) {
         const fallback = candidates[0]!;
         this.onVerbose?.("[HiddenProbe]", `Early known exit (fallback): ${fallback} from ${gameState.currentRoom}`);
         return this.buildPlan(`go ${fallback}`, `Explore known exit: ${fallback}`, usage);
@@ -484,9 +491,9 @@ export class IFPlanner implements Planner {
 
     // 2. Probe non-compass hidden exits (in/out/up/down).
     // These are commonly missed by the Cartographer and high-value in IF games.
-    // Only fire at stalled >= 4 when all known exits lead to visited rooms,
+    // Only fire at fallbackThreshold when all known exits lead to visited rooms,
     // giving the LLM time for combat/puzzles before blind probing.
-    if (candidates.length === 0 || stalled >= 4) {
+    if (candidates.length === 0 || stalled >= fallbackThreshold) {
       const knownSet = new Set(gameState.knownExits.map(e => e.toLowerCase()));
       const probe = IFPlanner.NON_COMPASS_PROBES.find(d =>
         !explored.has(d) && !blockedSet.has(d) && !knownSet.has(d)

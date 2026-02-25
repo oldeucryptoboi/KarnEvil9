@@ -186,6 +186,16 @@ export class PluginRegistry {
     return this.allCommands;
   }
 
+  getPluginPermissions(): string[] {
+    const scopes = new Set<string>();
+    for (const state of this.plugins.values()) {
+      if (state.status === "active") {
+        for (const scope of state.manifest.permissions) scopes.add(scope);
+      }
+    }
+    return [...scopes];
+  }
+
   private async loadDiscovered(discovered: DiscoveredPlugin): Promise<PluginState> {
     const { manifest } = discovered;
     const pluginConfig = this.config.pluginConfigs?.[manifest.id] ?? {};

@@ -243,6 +243,21 @@ export class PermissionEngine {
     }
   }
 
+  preGrant(sessionId: string, scopes: string[], grantedBy = "plugin"): void {
+    const now = new Date().toISOString();
+    const sessionCache = this.getSessionCache(sessionId);
+    for (const scope of scopes) {
+      const grant: PermissionGrant = {
+        scope,
+        decision: "allow_session",
+        granted_by: grantedBy,
+        granted_at: now,
+        ttl: "session",
+      };
+      sessionCache.set(scope, grant);
+    }
+  }
+
   isGranted(scope: string, sessionId?: string): boolean {
     if (sessionId) {
       const sessionCache = this.sessionCaches.get(sessionId);

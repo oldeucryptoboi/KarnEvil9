@@ -55,6 +55,7 @@ export interface KernelConfig {
   modelPricing?: ModelPricing;
   contextBudgetConfig?: ContextBudgetConfig;
   checkpointDir?: string;
+  preGrantedScopes?: string[];
 }
 
 function sleep(ms: number): Promise<void> {
@@ -142,6 +143,10 @@ export class Kernel {
       if ("mode" in data) session.mode = data.mode as ExecutionMode;
       if ("limits" in data) session.limits = data.limits as SessionLimits;
       if ("policy" in data) session.policy = data.policy as PolicyProfile;
+    }
+
+    if (this.config.preGrantedScopes?.length && this.config.permissions) {
+      this.config.permissions.preGrant(session.session_id, this.config.preGrantedScopes);
     }
 
     await this.config.journal.emit(session.session_id, "session.created", {

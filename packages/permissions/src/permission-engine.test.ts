@@ -401,6 +401,89 @@ describe("PermissionEngine graduated decisions", () => {
   });
 });
 
+// ─── Pre-Grant Tests ─────────────────────────────────────────────
+
+describe("PermissionEngine.preGrant", () => {
+  let journal: Journal;
+  let promptCalls: PermissionRequest[];
+
+  const mockPrompt = async (request: PermissionRequest): Promise<ApprovalDecision> => {
+    promptCalls.push(request);
+    return "allow_session";
+  };
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { lock: false });
+    await journal.init();
+    promptCalls = [];
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  function makeRequest(scopes: string[], sessionId: string): PermissionRequest {
+    return {
+      request_id: uuid(),
+      session_id: sessionId,
+      step_id: uuid(),
+      tool_name: "test-tool",
+      permissions: scopes.map((s) => PermissionEngine.parse(s)),
+    };
+  }
+
+  it("pre-granted scopes bypass the prompt", async () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    const sessionId = "pre-grant-session";
+    engine.preGrant(sessionId, ["moltbook:send:posts", "moltbook:read:dm"]);
+
+    const req = makeRequest(["moltbook:send:posts", "moltbook:read:dm"], sessionId);
+    const result = await engine.check(req);
+    expect(result.allowed).toBe(true);
+    expect(promptCalls).toHaveLength(0);
+  });
+
+  it("non-pre-granted scopes still prompt", async () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    const sessionId = "pre-grant-session-2";
+    engine.preGrant(sessionId, ["moltbook:send:posts"]);
+
+    const req = makeRequest(["filesystem:read:workspace"], sessionId);
+    await engine.check(req);
+    expect(promptCalls).toHaveLength(1);
+  });
+
+  it("clearSession removes pre-grants", async () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    const sessionId = "pre-grant-session-3";
+    engine.preGrant(sessionId, ["moltbook:send:posts"]);
+
+    engine.clearSession(sessionId);
+
+    const req = makeRequest(["moltbook:send:posts"], sessionId);
+    await engine.check(req);
+    expect(promptCalls).toHaveLength(1);
+  });
+
+  it("listGrants includes pre-grants with granted_by: plugin", () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    const sessionId = "pre-grant-session-4";
+    engine.preGrant(sessionId, ["moltbook:send:posts", "moltbook:read:dm"]);
+
+    const grants = engine.listGrants(sessionId);
+    expect(grants).toHaveLength(2);
+    const scopes = grants.map((g) => g.scope);
+    expect(scopes).toContain("moltbook:send:posts");
+    expect(scopes).toContain("moltbook:read:dm");
+    for (const grant of grants) {
+      expect(grant.granted_by).toBe("plugin");
+      expect(grant.decision).toBe("allow_session");
+      expect(grant.ttl).toBe("session");
+    }
+  });
+});
+
 // ─── Permission Edge Case Tests ──────────────────────────────────
 
 describe("PermissionEngine edge cases", () => {

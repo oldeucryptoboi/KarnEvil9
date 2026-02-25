@@ -10,6 +10,10 @@ permissions:
   - moltbook:read:posts
   - moltbook:read:feeds
   - moltbook:read:search
+  - moltbook:send:dm
+  - moltbook:read:dm
+  - moltbook:send:follows
+  - moltbook:read:notifications
 config_schema:
   type: object
   properties:
@@ -25,6 +29,9 @@ provides:
     - moltbook-get-post
     - moltbook-feed
     - moltbook-search
+    - moltbook-dm
+    - moltbook-follow
+    - moltbook-notifications
   hooks:
     - before_plan
   routes:

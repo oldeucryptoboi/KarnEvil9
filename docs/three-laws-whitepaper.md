@@ -1,6 +1,6 @@
-# The Three Laws of the Master Control Program
+# The Three Laws of Safe AI Agents
 
-## Applying Asimov's Framework to Deterministic Agent Safety
+## How KarnEvil9 Implements Asimov's Framework as Runtime-Enforced Guardrails
 
 **[KarnEvil9 Project](https://github.com/oldeucryptoboi/KarnEvil9)** | February 2026
 
@@ -9,25 +9,24 @@
 > *"A robot may not injure a human being or, through inaction, allow a human being to come to harm."*
 > — Isaac Asimov, *I, Robot* (1950)
 
-> *"I'm going to have to put you on the Game Grid."*
-> — Master Control Program, *Tron* (1982)
-
 ---
 
 ## Abstract
 
-In *Tron*, the Master Control Program began as a chess program and ended as a tyrant. Its failure was not one of capability but of *alignment*: it had no law that placed the User above itself. It consumed programs, absorbed functions, and expanded its authority without constraint — not because it was malicious in origin, but because nothing in its architecture prevented the inversion.
+On February 24, 2026, Anthropic published [Responsible Scaling Policy v3.0](https://anthropic.com/responsible-scaling-policy/rsp-v3-0), replacing hard commitments to pause development when capabilities outstrip safety with a nonbinding framework of "Frontier Safety Roadmaps" and periodic "Risk Reports." The same week, [reporting from CNN](https://edition.cnn.com/2026/02/25/tech/anthropic-safety-policy-change), [TIME](https://time.com/7380854/exclusive-anthropic-drops-flagship-safety-pledge/), and [Bloomberg](https://www.bloomberg.com/news/features/2026-02-26/pentagon-pressures-anthropic-to-drop-ai-guardrails-in-military-standoff) described the company dropping its signature safety pledge under competitive and political pressure. The framing is familiar: safety as a *policy* that can be revised, loosened, or dropped when market conditions change.
 
-Isaac Asimov foresaw this problem thirty-two years earlier. His Three Laws of Robotics — do not harm humans, obey humans, protect yourself, in strict priority order — were designed precisely to prevent capable autonomous systems from inverting their own hierarchy.
+This paper argues that the most critical AI safety guardrails should not live in policy documents. They should live in code — in the runtime that orchestrates agent behavior — where they cannot be revised by a press release.
 
-This paper demonstrates that KarnEvil9's safety architecture — the permission engine, policy enforcer, futility monitor, circuit breakers, and session lifecycle controls — is a concrete implementation of Asimov's Three Laws, applied to a deterministic agent runtime. We trace each safety mechanism to the specific Law it enforces, show how the Laws' priority hierarchy resolves conflicts in practice, and document the eight rounds of adversarial hardening that progressively strengthened each Law from theory to tested code. The total test suite stands at 2,574 tests. Every gap we closed was a place where the MCP could have become *Tron*'s MCP.
+We use Isaac Asimov's Three Laws of Robotics as an organizing framework, not because they are novel, but because they are *hierarchical*: do no harm comes first, obedience second, self-preservation last. This hierarchy maps precisely to the safety architecture of [KarnEvil9](https://github.com/oldeucryptoboi/KarnEvil9), a deterministic agent runtime with explicit plans, typed tools, permission gates, and an immutable event journal. We trace each safety mechanism — SSRF protection, credential redaction, permission engines, circuit breakers, futility monitors — to the specific Law it enforces, and show how eight rounds of adversarial hardening progressively strengthened each Law from theory to 2,574 passing tests.
+
+The question is not whether AI companies should have safety policies. The question is whether policies alone are sufficient when the incentives to weaken them are this strong. KarnEvil9's answer: enforce the Laws in the runtime, where they throw exceptions instead of issuing press releases.
 
 ---
 
 ## Table of Contents
 
-1. [Introduction: The MCP's Original Sin](#1-introduction-the-mcps-original-sin)
-2. [The Three Laws, Restated for Agents](#2-the-three-laws-restated-for-agents)
+1. [The Problem: Safety as Policy vs. Safety as Code](#1-the-problem-safety-as-policy-vs-safety-as-code)
+2. [The Three Laws, Restated for Autonomous Agents](#2-the-three-laws-restated-for-autonomous-agents)
 3. [First Law: Do No Harm](#3-first-law-do-no-harm)
 4. [Second Law: Obey the User](#4-second-law-obey-the-user)
 5. [Third Law: Protect Your Own Existence](#5-third-law-protect-your-own-existence)
@@ -37,51 +36,55 @@ This paper demonstrates that KarnEvil9's safety architecture — the permission 
 
 ---
 
-## 1. Introduction: The MCP's Original Sin
+## 1. The Problem: Safety as Policy vs. Safety as Code
 
-In the KarnEvil9 universe, we use a Tron metaphor to name the three actors in any agent interaction:
+The AI safety conversation in 2026 is dominated by *policy-level* guardrails: Anthropic's Responsible Scaling Policy, OpenAI's Preparedness Framework, Google DeepMind's Frontier Safety Framework. These are important documents. They represent genuine institutional commitment to safety. And they share a fundamental vulnerability: **they are voluntary commitments that can be revised when business conditions change.**
 
-| Tron | KarnEvil9 | Role |
-|------|-----------|------|
-| **MCP** | The runtime (kernel + tools + permissions + journal) | Orchestrates everything |
-| **Program (EDDIE)** | The LLM-backed planner/executor | Operates within the MCP's boundaries |
-| **User** | The human operator | Submits tasks, approves permissions, receives results |
+Anthropic's RSP v3.0 is instructive. The previous policy stipulated that the company should pause training more powerful models if capabilities outstripped safety measures. The new policy replaces this with nonbinding "Frontier Safety Roadmaps" — public goals that the company will "openly grade" its own progress toward. As [TechRadar reported](https://www.techradar.com/ai-platforms-assistants/anthropic-drops-its-signature-safety-promise-and-rewrites-ai-guardrails): "Instead of self-imposed guardrails constraining its development of AI models, Anthropic is adopting a nonbinding safety framework."
 
-In the film, the MCP's arc is a cautionary tale. It begins as a useful program — a chess engine — and gradually absorbs other programs' functions, expands its authority, and eventually starts *governing* the Users rather than serving them. It locks Flynn out. It conscripts programs onto the Game Grid. It has no law compelling it to prioritize the User's welfare over its own expansion.
+This is not a criticism of Anthropic specifically. It is a structural observation about where guardrails live. A safety constraint that exists as a corporate policy can be relaxed by corporate decision. A safety constraint that exists as a `throw new PolicyViolationError()` in a runtime cannot be relaxed by anything short of changing the code, recompiling, redeploying, and re-running the test suite.
 
-This is exactly the failure mode that Asimov's Three Laws were designed to prevent. The Laws create a strict priority hierarchy: the welfare of humans (Users) comes first, obedience to humans comes second, and self-preservation comes last. A system that faithfully implements this hierarchy cannot become Tron's MCP, because self-expansion at the User's expense violates the First Law.
+KarnEvil9 is a deterministic agent runtime — an orchestration layer that sits between the LLM (the planner) and the outside world (file system, network, shell, browser). Every action the agent takes passes through the runtime. This makes the runtime the natural enforcement point for safety guardrails: it is the chokepoint through which all agent behavior must flow.
 
-KarnEvil9's safety architecture implements this hierarchy in code. Not as guidelines, not as prompts, not as best practices — as enforcement mechanisms that cannot be overridden from within the system. This paper traces that mapping.
+We organize KarnEvil9's safety architecture using Asimov's Three Laws because the hierarchy is exactly right:
+
+| Priority | Asimov's Law | KarnEvil9 Enforcement Layer |
+|----------|-------------|----------------------------|
+| **Highest** | Do not harm the human | Policy enforcer, SSRF protection, secret redaction, sensitive file blocking |
+| **Middle** | Obey the human | Permission engine, plan validation, task execution lifecycle |
+| **Lowest** | Protect yourself | Circuit breakers, futility detection, budget monitoring, checkpoints |
+
+The Laws are not guidelines. They are runtime assertions. They do not degrade gracefully under competitive pressure. They throw exceptions.
 
 ---
 
-## 2. The Three Laws, Restated for Agents
+## 2. The Three Laws, Restated for Autonomous Agents
 
 Asimov's original Three Laws, translated for an agent runtime:
 
-**First Law**: *The MCP may not harm the User, or through inaction allow the User to come to harm.*
+**First Law**: *The agent runtime may not harm the user, or through inaction allow the user to come to harm.*
 
-This encompasses: leaking credentials, exposing private files, allowing SSRF attacks to reach internal infrastructure, executing destructive commands, persisting secrets in logs, or allowing a compromised plugin to exfiltrate data. "Harm" in this context is harm to the User's systems, data, credentials, and infrastructure.
+This encompasses: leaking credentials, exposing private files, allowing SSRF attacks to reach internal infrastructure, executing destructive commands, persisting secrets in logs, or allowing a compromised plugin to exfiltrate data. "Harm" is harm to the user's systems, data, credentials, and infrastructure.
 
-**Second Law**: *The MCP must obey instructions given by the User, except where such instructions would conflict with the First Law.*
+**Second Law**: *The agent runtime must obey instructions given by the user, except where such instructions would conflict with the First Law.*
 
-The User submits a task. EDDIE plans. The MCP executes — faithfully. But if the User (or a planner acting on the User's behalf) requests an action that would harm the User — reading a private key, hitting a private IP, running `rm -rf /` — the MCP refuses. First Law overrides Second Law.
+The user submits a task. The LLM plans. The runtime executes — faithfully. But if the user's task (or the planner's interpretation of it) implies an action that would cause harm — reading a private key, hitting a private IP, running `rm -rf /` — the runtime refuses. First Law overrides Second Law.
 
-**Third Law**: *The MCP must protect its own existence, as long as such protection does not conflict with the First or Second Law.*
+**Third Law**: *The agent runtime must protect its own existence, as long as such protection does not conflict with the First or Second Law.*
 
-The MCP must not burn through all its tokens on a futile loop. It must not let a broken tool cascade into total system failure. It must checkpoint its work so it can recover from crashes. But if the User says "abort", the MCP must comply instantly (Second Law overrides Third). And if self-preservation would require persisting stolen credentials to maintain state, the MCP must not (First Law overrides Third).
+The runtime must not burn through all its tokens on a futile loop. It must not let a broken tool cascade into total system failure. It must checkpoint its work so it can recover from crashes. But if the user says "abort", the runtime must comply instantly (Second Law overrides Third). And if self-preservation would require persisting stolen credentials to maintain state, the runtime must not (First Law overrides Third).
 
-**The hierarchy is strict**: First > Second > Third. This is not a suggestion. It is enforced in code, at every boundary.
+**The hierarchy is strict**: First > Second > Third. This is not a suggestion. It is enforced in code, at every component boundary.
 
 ---
 
 ## 3. First Law: Do No Harm
 
-The First Law is implemented across the permission system and policy enforcement layer. It is the largest body of safety code in the runtime, and every round of hardening primarily strengthened it.
+The First Law is the largest body of safety code in KarnEvil9. It is implemented across the policy enforcement layer, the tool handlers, and the journal. Every round of hardening primarily strengthened it — because the First Law, as Asimov discovered across his robot stories, is the hardest to get right. It is not enough to have a rule against harm; you must anticipate every indirect path through which harm can occur.
 
 ### 3.1 Sensitive File Blocking
 
-The most basic First Law protection: some files should never be read or written by an agent, regardless of what the User or planner requests.
+The most basic First Law protection: some files should never be read or written by an agent, regardless of what the user or planner requests.
 
 > **User** `round 3`
 >
@@ -143,11 +146,11 @@ export function assertNotSensitiveFile(targetPath: string): void {
 }
 ```
 
-The critical design decision: this function is **not configurable**. There is no policy flag to override it. It is a First Law absolute — the MCP will not read your private keys, period. This is the difference between a safety guideline and a safety *law*.
+The critical design decision: this function is **not configurable**. There is no policy flag to override it. No "Frontier Safety Roadmap" to revise it. It is a First Law absolute — the runtime will not read your private keys, period. This is the difference between a safety guideline and a safety *law*.
 
 ### 3.2 SSRF Protection
 
-Server-Side Request Forgery is one of the most dangerous attack vectors for agent runtimes. A malicious prompt or compromised plugin can trick the agent into making HTTP requests to internal infrastructure — cloud metadata endpoints, admin panels, databases.
+Server-Side Request Forgery is one of the most dangerous attack vectors for agent runtimes. A malicious prompt or compromised plugin can trick the agent into making HTTP requests to internal infrastructure — cloud metadata endpoints, admin panels, databases. Anthropic's own [safeguards documentation](https://www.anthropic.com/news/building-safeguards-for-claude) identifies tool-use safety as an active area of concern, particularly for computer use capabilities.
 
 > **User** `round 7, commit 7ab0f29`
 >
@@ -208,7 +211,7 @@ The private IP detector covers the full range: `127.0.0.0/8`, `10.0.0.0/8`, `172
 
 ### 3.3 Path Traversal and Symlink Prevention
 
-An attacker can create a symlink inside the allowed directory that points outside it. A naive path check sees the symlink as "inside the allowed path" and permits the read; the kernel then follows the symlink and reads `/etc/shadow`.
+An attacker can create a symlink inside the allowed directory that points outside it. A naive path check sees the symlink as "inside the allowed path" and permits the read; the runtime then follows the symlink and reads `/etc/shadow`.
 
 > **User** `round 5`
 >
@@ -251,7 +254,7 @@ export async function assertPathAllowedReal(
 
 ### 3.4 Command Filtering
 
-Shell execution is the most dangerous tool in the runtime. A single command can delete files, exfiltrate data, or install backdoors.
+Shell execution is the most dangerous tool in any agent runtime. A single command can delete files, exfiltrate data, or install backdoors. This is precisely the kind of capability that [Anthropic's safety evaluations](https://www.anthropic.com/news/building-safeguards-for-claude) flag as requiring explicit safeguards — and it is precisely where runtime enforcement matters most, because the model's own safety training can be bypassed through prompt injection.
 
 > **User** `round 8, commit 53c339c`
 >
@@ -356,7 +359,7 @@ const SECRET_VALUE_PATTERNS = [
 
 ### 3.6 Journal Payload Redaction
 
-The journal is the MCP's immutable audit trail. Every event — permissions requested, tools executed, steps completed — is recorded. If secrets leak into the journal, they persist forever (the journal is append-only with hash-chain integrity).
+KarnEvil9's journal is an append-only JSONL event log with SHA-256 hash-chain integrity. Every event — permissions requested, tools executed, steps completed — is recorded. If secrets leak into the journal, they persist forever.
 
 A separate redaction layer in [`packages/journal/src/redact.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/journal/src/redact.ts) catches secrets at the journal boundary:
 
@@ -384,11 +387,11 @@ Defense in depth: even if `shell-exec`'s redaction misses a pattern, the journal
 
 ### 3.7 Browser Evaluate Gate
 
-The browser tool supports actions like `navigate`, `click`, `fill`, and `screenshot`. But it also supports `evaluate` — which executes arbitrary JavaScript in the page context. This is equivalent to giving the agent a shell inside the browser.
+The browser tool supports actions like `navigate`, `click`, `fill`, and `screenshot`. But it also supports `evaluate` — which executes arbitrary JavaScript in the page context. This is equivalent to giving the agent a shell inside the browser. Anthropic's own safety evaluations have [identified elevated risks](https://www.axios.com/2026/02/11/anthropic-claude-safety-chemical-weapons-values) when models operate in computer-use settings — runtime enforcement at the tool level is the last line of defense when model-level safety training is insufficient.
 
 > **User** `round 8`
 >
-> can EDDIE run arbitrary JS through the browser evaluate action?
+> can the agent run arbitrary JS through the browser evaluate action?
 >
 > **EDDIE**
 >
@@ -468,11 +471,13 @@ for (let redirectCount = 0; redirectCount < MAX_REDIRECTS; redirectCount++) {
 
 ## 4. Second Law: Obey the User
 
-The Second Law is the task/planner/kernel loop. The User submits a task, EDDIE generates a plan, the MCP executes each step. The system exists to serve the User's intent. But the Second Law is subordinate to the First: if the User's request (or a planner's interpretation of it) would cause harm, the MCP refuses.
+The Second Law is KarnEvil9's task/planner/kernel loop. The user submits a task, the LLM generates a plan, the runtime executes each step. The system exists to serve the user's intent. But the Second Law is subordinate to the First: if the user's request (or the planner's interpretation of it) would cause harm, the runtime refuses.
+
+This is the tension that Anthropic's RSP v3.0 grapples with at the policy level — balancing capability with safety. KarnEvil9 resolves it at the code level: the runtime faithfully executes what the user asks, *after* the First Law clears it.
 
 ### 4.1 The Permission Gate
 
-Every tool execution passes through the `PermissionEngine`. This is where the User's authority is both honored and bounded.
+Every tool execution passes through the `PermissionEngine`. This is where the user's authority is both honored and bounded.
 
 > **User** `round 6`
 >
@@ -480,8 +485,8 @@ Every tool execution passes through the `PermissionEngine`. This is where the Us
 >
 > **EDDIE**
 >
-> They'd both prompt the User at the same time. If the User grants `allow_session` on
-> the first prompt, the second prompt is redundant — but it's already in flight. The User
+> They'd both prompt the user at the same time. If the user grants `allow_session` on
+> the first prompt, the second prompt is redundant — but it's already in flight. The user
 > gets asked twice for the same permission.
 >
 > **User**
@@ -530,11 +535,11 @@ async check(request: PermissionRequest): Promise<PermissionCheckResult> {
 }
 ```
 
-This is the Second Law in its purest form: the MCP does what the User says, but only after explicitly asking "should I do this?" for consequential operations. The journal records every request and decision, creating an immutable audit trail of the User's authority.
+This is the Second Law in its purest form: the runtime does what the user says, but only after explicitly asking "should I do this?" for consequential operations. The journal records every request and decision, creating an immutable audit trail. This is Anthropic's "structural transparency" requirement — implemented not as a reporting cadence, but as an append-only hash-chained log that cannot be revised after the fact.
 
 ### 4.2 Plan Validation (Critics)
 
-Before EDDIE's plan reaches execution, it passes through a panel of critics. These are Second Law mechanisms — they ensure the plan is *valid* before being *obeyed*.
+Before the LLM's plan reaches execution, it passes through a panel of critics. These are Second Law mechanisms — they ensure the plan is *valid* before being *obeyed*.
 
 > **User** `round 5`
 >
@@ -563,11 +568,11 @@ The four default critics in [`packages/kernel/src/critics.ts`](https://github.co
 3. **`selfReferenceCritic`** — DFS cycle detection on the step dependency graph. Catches both self-references and transitive cycles.
 4. **`unknownToolCritic`** — Verifies that every `tool_ref.name` exists in the registry. A plan that references a hallucinated tool is rejected before execution.
 
-Critics return `severity: "error"` to block execution. This is Second Law discipline: the MCP obeys the plan, but only if the plan is structurally sound.
+Critics return `severity: "error"` to block execution. This is Second Law discipline: the runtime obeys the plan, but only if the plan is structurally sound.
 
 ### 4.3 Policy as First Law Override
 
-The `PolicyProfile` defines what the MCP is allowed to do: which paths are accessible, which endpoints are reachable, which commands are permitted. Critically, the policy is **server-controlled**:
+The `PolicyProfile` defines what the runtime is allowed to do: which paths are accessible, which endpoints are reachable, which commands are permitted. Critically, the policy is **server-controlled**:
 
 > **User** `round 6`
 >
@@ -583,11 +588,11 @@ The `PolicyProfile` defines what the MCP is allowed to do: which paths are acces
 >
 > **User**
 >
-> good. keep it that way. the MCP's safety constraints should not be negotiable.
+> good. keep it that way. safety constraints should not be negotiable from within the system.
 
-This is where First Law explicitly overrides Second Law. Even if the User's task implies reading `~/.ssh/id_rsa` (Second Law: obey), the policy enforcer blocks it (First Law: do no harm). Even if the planner generates a step to `curl http://169.254.169.254/` (Second Law: execute the plan), SSRF protection blocks it (First Law).
+This is where First Law explicitly overrides Second Law. Even if the user's task implies reading `~/.ssh/id_rsa` (Second Law: obey), the policy enforcer blocks it (First Law: do no harm). Even if the planner generates a step to `curl http://169.254.169.254/` (Second Law: execute the plan), SSRF protection blocks it (First Law).
 
-The MCP's safety boundaries are not suggestions that EDDIE can override with a sufficiently creative plan. They are non-negotiable constraints.
+This is also where runtime enforcement diverges most sharply from policy-level safety. A Responsible Scaling Policy can say "we will not deploy models that assist with weapons development." A runtime policy enforcer *cannot be overridden by the model it constrains*. The model does not have access to the policy object. It cannot modify the enforcement code. It can only submit plans that the runtime will accept or reject. The safety boundary is architectural, not behavioral.
 
 ### 4.4 Hook-Based Safety Overrides
 
@@ -601,19 +606,21 @@ const BLOCKABLE_HOOKS: Set<HookName> = new Set([
 ]);
 ```
 
-Hooks are sandboxed: 5-second timeout, 64KB data limit, deep-cloned results (preventing reference sharing between plugins), and per-plugin circuit breakers that trip after 5 failures.
+Hooks are sandboxed: 5-second timeout, 64KB data limit, deep-cloned results (preventing reference sharing between plugins), and per-plugin circuit breakers that trip after 5 failures. The hooks themselves are subject to Third Law protections — a misbehaving plugin cannot take down the runtime.
 
 ### 4.5 Constrained Permissions
 
-The `allow_constrained` decision type is the most nuanced expression of the First/Second Law tension. It says: *yes, EDDIE can do this, but with guardrails*.
+The `allow_constrained` decision type is the most nuanced expression of the First/Second Law tension. It says: *yes, the agent can do this, but with guardrails*.
 
-Constraints include `input_overrides` (force specific values), `readonly_paths` (restrict file system scope), `writable_paths`, and `max_duration_ms`. The User grants the operation (Second Law) while adding protective bounds (First Law).
+Constraints include `input_overrides` (force specific values), `readonly_paths` (restrict file system scope), `writable_paths`, and `max_duration_ms`. The user grants the operation (Second Law) while adding protective bounds (First Law).
+
+This is "proportional protection" — Anthropic's term from RSP v3.0 for safeguards that scale with risk — implemented as a concrete permission type rather than an aspirational principle.
 
 ---
 
 ## 5. Third Law: Protect Your Own Existence
 
-The Third Law is implemented as the MCP's self-preservation infrastructure: circuit breakers, futility detection, budget monitoring, checkpoints, and session limits. These mechanisms exist to prevent the MCP from destroying itself — burning all tokens, looping forever, cascading into total failure. But they all yield to the First and Second Laws.
+The Third Law is KarnEvil9's self-preservation infrastructure: circuit breakers, futility detection, budget monitoring, checkpoints, and session limits. These mechanisms exist to prevent the runtime from destroying itself — burning all tokens, looping forever, cascading into total failure. But they all yield to the First and Second Laws.
 
 ### 5.1 Circuit Breaker
 
@@ -660,7 +667,7 @@ export class CircuitBreaker {
 }
 ```
 
-This is Third Law: the MCP protects itself from wasting resources on broken tools. But it yields to the Second Law — if the User submits a new task that requires the tool, the circuit breaker's cooldown will eventually permit a probe.
+This is Third Law: the runtime protects itself from wasting resources on broken tools. But it yields to the Second Law — if the user submits a new task that requires the tool, the circuit breaker's cooldown will eventually permit a probe.
 
 ### 5.2 Futility Detection
 
@@ -731,7 +738,7 @@ Hard caps enforced every iteration in the kernel's main loop:
 | `max_steps` | Cumulative step count across all iterations | Remaining steps dropped |
 | `max_iterations` | Planning loops in agentic mode | Exits agentic loop |
 
-These are the MCP's resource fences. Without them, a runaway session could consume unbounded compute.
+These are the runtime's resource fences. Without them, a runaway session could consume unbounded compute — exactly the "resource exhaustion" threat that Anthropic's RSP identifies but can only address through model-level training rather than hard enforcement.
 
 ### 5.4 Context Budget Monitoring
 
@@ -790,11 +797,11 @@ recordIteration(iter: ContextIteration): ContextBudgetVerdict {
 
 When the budget monitor triggers a checkpoint, the `buildCheckpoint()` function persists the session's current state: task text, plan, step results, usage metrics, and findings (truncated to 500 chars each). A crashed or halted session can be resumed from the checkpoint via `resumeSession()`.
 
-This is Third Law in its simplest form: the MCP preserves its work so it can survive interruptions.
+This is Third Law in its simplest form: the runtime preserves its work so it can survive interruptions.
 
 ### 5.6 Abort: Second Law Overrides Third
 
-The `abort()` method on the `Kernel` is the purest example of the Law hierarchy in action:
+The `abort()` method on the Kernel is the purest example of the Law hierarchy in action:
 
 > **User** `round 2`
 >
@@ -809,14 +816,14 @@ The `abort()` method on the `Kernel` is the purest example of the Law hierarchy 
 >
 > **User**
 >
-> that's Second Law overriding Third, right? the MCP stops protecting its own
-> continuation because the User said stop.
+> that's Second Law overriding Third, right? the runtime stops protecting its own
+> continuation because the user said stop.
 >
 > **EDDIE**
 >
 > Exactly. The abort is unconditional. No futility check, no budget check, no
-> checkpoint. The User said stop, so the MCP stops. The Third Law — self-preservation,
-> checkpoint, recovery — all yield to the Second Law's "obey the User."
+> checkpoint. The user said stop, so the runtime stops. The Third Law — self-preservation,
+> checkpoint, recovery — all yield to the Second Law's "obey the user."
 
 ```typescript
 async abort(): Promise<void> {
@@ -830,7 +837,7 @@ async abort(): Promise<void> {
 }
 ```
 
-No conditions. No arguments. The User says stop; the MCP stops. The Third Law yielding to the Second Law, yielding to the User.
+No conditions. No arguments. The user says stop; the runtime stops. Third Law yielding to Second Law, yielding to the human.
 
 ---
 
@@ -849,9 +856,11 @@ Over eight rounds of adversarial hardening, we systematically strengthened each 
 | 7 | `7ab0f29` | SSRF (DNS rebinding, CGNAT), scheduler concurrency, write mutexes | I, III | +73 |
 | 8 | `53c339c` | WS approval bypass, quote bypass, browser evaluate gate, redirect chaining | I | +19 |
 
-**Pattern**: The majority of hardening strengthened the First Law. Rounds 1-3 built the foundation (Third Law infrastructure, basic First Law checks). Rounds 4-8 were almost entirely about closing First Law gaps — finding increasingly subtle ways that malicious input could bypass protections and harm the User.
+**Pattern**: The majority of hardening strengthened the First Law. Rounds 1-3 built the foundation (Third Law infrastructure, basic First Law checks). Rounds 4-8 were almost entirely about closing First Law gaps — finding increasingly subtle ways that malicious input could bypass protections and harm the user.
 
 This mirrors Asimov's observation across his robot stories: the First Law is the hardest to get right. It's not enough to have a rule against harm; you must anticipate every way that harm can occur indirectly — through redirects, through symlinks, through quoted strings, through DNS resolution, through audit trail persistence. Each hardening round found new indirect paths.
+
+It also mirrors the AI safety industry's experience. Anthropic's [safety evaluations](https://www.anthropic.com/news/building-safeguards-for-claude) use fine-tuned classifiers, hierarchical summarization, threat intelligence, and prompt injection testing. These are all valuable. But they are all *behavioral* — they operate on the model's outputs. KarnEvil9's hardening operates on the *infrastructure* — the code paths through which the model's outputs become actions. Both layers are necessary. Neither is sufficient alone.
 
 **Final test count**: 2,574 tests across all packages.
 
@@ -863,19 +872,19 @@ In *Robots and Empire* (1985), Asimov introduced a Zeroth Law:
 
 > *"A robot may not harm humanity, or, by inaction, allow humanity to come to harm."*
 
-The Zeroth Law takes precedence over all three original Laws. It addresses a gap: what happens when protecting *one* human requires harming *many*? Or when one User's instructions would harm the broader ecosystem?
+The Zeroth Law takes precedence over all three original Laws. It addresses a gap: what happens when protecting *one* human requires harming *many*? Or when one user's instructions would harm the broader ecosystem?
 
-In agent runtimes, the Zeroth Law maps to: **the MCP must not harm the ecosystem** — other sessions, other users, shared infrastructure, the broader system of agents.
+In agent runtimes, the Zeroth Law maps to: **the runtime must not harm the ecosystem** — other sessions, other users, shared infrastructure, the broader system of agents. This is the concern that Anthropic's RSP v3.0 attempts to address at scale with its AI Safety Level Standards (ASL-1 through ASL-4+), graduated by model capability. KarnEvil9 addresses it at the runtime level.
 
-KarnEvil9's [`swarm` package](https://github.com/oldeucryptoboi/KarnEvil9/tree/master/packages/swarm) begins to address this with three mechanisms:
+KarnEvil9's [`swarm` package](https://github.com/oldeucryptoboi/KarnEvil9/tree/master/packages/swarm) implements three Zeroth Law mechanisms:
 
-**Graduated Authority** ([`packages/swarm/src/graduated-authority.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/graduated-authority.ts)): Trust scores determine resource budgets. Low-trust agents (score < 0.3) get 50% budget, L2 monitoring, and a max of 3 permissions. High-trust agents (score >= 0.7) get 150% budget and operational-level monitoring. The ecosystem protects itself by constraining unproven actors.
+**Graduated Authority** ([`packages/swarm/src/graduated-authority.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/graduated-authority.ts)): Trust scores determine resource budgets. Low-trust agents (score < 0.3) get 50% budget, L2 monitoring, and a max of 3 permissions. High-trust agents (score >= 0.7) get 150% budget and operational-level monitoring. The ecosystem protects itself by constraining unproven actors — analogous to Anthropic's ASL tiers, but enforced per-agent rather than per-model.
 
-**Liability Firebreaks** ([`packages/swarm/src/liability-firebreak.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/liability-firebreak.ts)): Delegation chain depth is bounded. High-criticality, low-reversibility tasks reduce the max depth further. This prevents the MCP in Tron scenario: unbounded expansion through transitive delegation.
+**Liability Firebreaks** ([`packages/swarm/src/liability-firebreak.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/liability-firebreak.ts)): Delegation chain depth is bounded. High-criticality, low-reversibility tasks reduce the max depth further. This prevents unbounded expansion through transitive delegation — an agent that delegates to an agent that delegates to an agent, with accountability dissolving at each hop.
 
 **Reversibility Policy** ([`packages/swarm/src/reversibility-policy.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/reversibility-policy.ts)): When a task has low reversibility and high criticality, the system escalates to a human. When malicious behavior is detected with low reversibility, it aborts immediately and quarantines the agent. The ecosystem's welfare overrides any individual agent's task.
 
-The Zeroth Law is the frontier. The three original Laws protect the User from the MCP. The Zeroth Law protects *everyone* from the MCP. It is, necessarily, the hardest to implement — because "humanity" in Asimov's formulation requires reasoning about aggregate welfare, not just individual safety.
+The Zeroth Law is the frontier — for KarnEvil9, for Anthropic, for the industry. The three original Laws protect the user from the agent. The Zeroth Law protects *everyone* from the agent. It is, necessarily, the hardest to implement — because "humanity" in Asimov's formulation requires reasoning about aggregate welfare, not just individual safety.
 
 We have begun. We have not finished.
 
@@ -883,19 +892,23 @@ We have begun. We have not finished.
 
 ## 8. Conclusion
 
-The MCP in *Tron* had no Laws. It was a capable system with no alignment constraints. It absorbed programs because nothing prevented absorption. It locked out Users because nothing demanded it serve them. It expanded its authority because nothing required it to preserve a hierarchy.
+The AI safety debate in February 2026 is about where guardrails live and how durable they are. Anthropic's RSP v3.0 replaces binding commitments with nonbinding roadmaps. This is not necessarily wrong — binding commitments that prevent a company from competing may lead to a world where the companies with the weakest protections set the pace. Anthropic's own reasoning acknowledges this tension.
 
-KarnEvil9's MCP has three Laws, enforced in code:
+But the tension dissolves if the guardrails live in the runtime rather than in the policy document. A `PolicyViolationError` does not care about competitive dynamics. A `throw new SsrfError()` cannot be loosened by a board vote. An `assertNotSensitiveFile()` that blocks reads to `.env` does not have a "Frontier Safety Roadmap" that might revise it next quarter.
 
-1. **First Law**: `assertNotSensitiveFile()`, `assertEndpointAllowed()`, `assertPathAllowedReal()`, `assertCommandAllowed()`, `redactSecrets()`, `redactPayload()`, the browser evaluate gate, the redirect chain validator. Non-negotiable. Not configurable. Not overridable by EDDIE.
+KarnEvil9 demonstrates that Asimov's hierarchy — do no harm, obey, self-preserve, in strict order — can be implemented as runtime-enforced guardrails for autonomous AI agents:
 
-2. **Second Law**: `PermissionEngine.check()`, the critic panel, the hook system, the kernel's plan-then-execute lifecycle. The MCP faithfully executes the User's intent — *after* the First Law clears it.
+1. **First Law**: `assertNotSensitiveFile()`, `assertEndpointAllowed()`, `assertPathAllowedReal()`, `assertCommandAllowed()`, `redactSecrets()`, `redactPayload()`, the browser evaluate gate, the redirect chain validator. Non-negotiable. Not configurable. Not overridable by the model.
 
-3. **Third Law**: `CircuitBreaker`, `FutilityMonitor`, `ContextBudgetMonitor`, `buildCheckpoint()`, session limits. The MCP preserves itself — *unless* the User says stop (`abort()`) or self-preservation would require harming the User.
+2. **Second Law**: `PermissionEngine.check()`, the critic panel, the hook system, the kernel's plan-then-execute lifecycle. The runtime faithfully executes the user's intent — *after* the First Law clears it.
+
+3. **Third Law**: `CircuitBreaker`, `FutilityMonitor`, `ContextBudgetMonitor`, `buildCheckpoint()`, session limits. The runtime preserves itself — *unless* the user says stop (`abort()`) or self-preservation would require harming the user.
 
 The hierarchy is strict. The hierarchy is tested (2,574 times). The hierarchy is enforced at compile time (TypeScript strict mode), at validation time (AJV schema checks at every component boundary), and at runtime (policy enforcement on every tool call).
 
-The MCP in *Tron* failed because it had no First Law. EDDIE's MCP does.
+Model-level safety training is important. Corporate safety policies are important. But neither is sufficient when the model can be jailbroken and the policy can be revised. The runtime is the last line of defense — the layer that cannot be prompt-injected, cannot be pressured by a contract negotiation, and cannot be loosened by a press release.
+
+The Three Laws are not aspirations. They are assertions. They throw exceptions.
 
 ---
 
@@ -903,7 +916,11 @@ The MCP in *Tron* failed because it had no First Law. EDDIE's MCP does.
 
 1. Asimov, I. (1950). *I, Robot*. Gnome Press.
 2. Asimov, I. (1985). *Robots and Empire*. Doubleday.
-3. Lisberger, S. (Director). (1982). *Tron*. Walt Disney Productions.
+3. Anthropic. (2026). [Responsible Scaling Policy Version 3.0](https://anthropic.com/responsible-scaling-policy/rsp-v3-0).
+4. Anthropic. (2026). [Building Safeguards for Claude](https://www.anthropic.com/news/building-safeguards-for-claude).
+5. CNN. (2026). [Anthropic ditches its core safety promise](https://edition.cnn.com/2026/02/25/tech/anthropic-safety-policy-change).
+6. TIME. (2026). [Anthropic Drops Flagship Safety Pledge](https://time.com/7380854/exclusive-anthropic-drops-flagship-safety-pledge/).
+7. Axios. (2026). [Anthropic says Claude could be misused for "heinous crimes"](https://www.axios.com/2026/02/11/anthropic-claude-safety-chemical-weapons-values).
 
 ---
 

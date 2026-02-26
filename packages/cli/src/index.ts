@@ -423,7 +423,7 @@ program.command("server").description("Start the API server")
           "github:read:repos",
           "github:write:issues",
         ],
-        plannerTimeoutMs: 120_000,
+        plannerTimeoutMs: Number(process.env.KARNEVIL9_PLANNER_TIMEOUT_MS) || 180_000,
       });
       const session = await kernel.createSession(task);
       // Run in background — don't block the caller

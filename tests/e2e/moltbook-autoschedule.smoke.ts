@@ -123,6 +123,7 @@ describe("Moltbook autoSchedule Smoke", () => {
     expect(names).toContain("moltbook-check-feed");
     expect(names).toContain("moltbook-check-notifications");
     expect(names).toContain("moltbook-check-dms");
+    expect(names).toContain("moltbook-karma-engage");
     expect(names).toContain("moltbook-close-loop");
 
     // Verify each schedule is active and has the right trigger
@@ -138,5 +139,9 @@ describe("Moltbook autoSchedule Smoke", () => {
     const dms = schedules.find((s) => s.name === "moltbook-check-dms")!;
     expect(dms.status).toBe("active");
     expect(dms.trigger).toEqual({ type: "every", interval: "1h" });
+
+    const karma = schedules.find((s) => s.name === "moltbook-karma-engage")!;
+    expect(karma.status).toBe("active");
+    expect(karma.trigger).toEqual({ type: "every", interval: "2h" });
   });
 });

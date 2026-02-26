@@ -369,7 +369,7 @@ export class MoltbookClient {
    * @param {object} [queryParams] - URL query parameters
    * @returns {Promise<object>}
    */
-  async _apiRequest(method, path, body = null, queryParams = {}) {
+  async _apiRequest(method, path, body = null, queryParams = {}, opts = {}) {
     let url = `${API_BASE}${path}`;
 
     const queryEntries = Object.entries(queryParams).filter(([, v]) => v != null);
@@ -397,9 +397,16 @@ export class MoltbookClient {
 
     const res = await fetch(url, fetchOpts);
 
-    // Handle rate limiting
+    // Handle rate limiting — single automatic retry with server-specified wait
     if (res.status === 429) {
       const errorBody = await res.json().catch(() => ({}));
+      const waitSec = errorBody.retry_after_seconds
+        ?? (errorBody.retry_after_minutes ? errorBody.retry_after_minutes * 60 : null);
+      if (waitSec && waitSec <= 120 && !opts._retried) {
+        this.logger?.info("Rate limited, retrying after wait", { method, path, waitSec });
+        await new Promise((r) => setTimeout(r, waitSec * 1000));
+        return this._apiRequest(method, path, body, queryParams, { _retried: true });
+      }
       const retryAfter = errorBody.retry_after_minutes ?? errorBody.retry_after_seconds ?? null;
       const err = new Error(
         `Moltbook rate limit hit: ${method} ${path} — retry after ${retryAfter ?? "unknown"}`

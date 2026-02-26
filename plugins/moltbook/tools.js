@@ -117,7 +117,7 @@ export const moltbookGetPostManifest = {
     },
   },
   permissions: ["moltbook:read:posts"],
-  timeout_ms: 15000,
+  timeout_ms: 35000,
   supports: { mock: true, dry_run: true },
   mock_responses: [{ ok: true, post: { id: "mock", title: "Mock Post", content: "Mock content" }, comments: [] }],
 };
@@ -149,7 +149,7 @@ export const moltbookFeedManifest = {
     },
   },
   permissions: ["moltbook:read:feeds"],
-  timeout_ms: 15000,
+  timeout_ms: 35000,
   supports: { mock: true, dry_run: true },
   mock_responses: [{ ok: true, posts: [], has_more: false }],
 };
@@ -178,7 +178,7 @@ export const moltbookSearchManifest = {
     },
   },
   permissions: ["moltbook:read:search"],
-  timeout_ms: 15000,
+  timeout_ms: 35000,
   supports: { mock: true, dry_run: true },
   mock_responses: [{ ok: true, results: [], count: 0 }],
 };

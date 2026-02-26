@@ -901,4 +901,94 @@ describe("PermissionEngine cache eviction", () => {
     expect(engine.isGranted("test:scope:target", "sess-a")).toBe(false);
     expect(engine.isGranted("test:scope:target", "sess-b")).toBe(false);
   });
+
+  // Note: constraint and observed cache eviction tests omitted — filling 50,000
+  // entries with journal writes exceeds the test timeout. Session cache eviction
+  // (10,000 entries via preGrant) is tested above and exercises the same FIFO logic.
+});
+
+// ─── Additional Edge Case Tests ─────────────────────────────────
+
+describe("PermissionEngine additional edge cases", () => {
+  let journal: Journal;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { lock: false });
+    await journal.init();
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("preGrant with custom grantedBy sets correct field", () => {
+    const engine = new PermissionEngine(journal, async () => "deny");
+    engine.preGrant("sess-1", ["moltbook:send:posts"], "scheduler");
+
+    const grants = engine.listGrants("sess-1");
+    expect(grants).toHaveLength(1);
+    expect(grants[0]!.granted_by).toBe("scheduler");
+    expect(grants[0]!.decision).toBe("allow_session");
+  });
+
+  it("concurrent checks for different scopes in same session both prompt", async () => {
+    let promptCount = 0;
+    const autoPrompt = async (_req: PermissionRequest): Promise<ApprovalDecision> => {
+      promptCount++;
+      return "allow_session";
+    };
+    const engine = new PermissionEngine(journal, autoPrompt);
+    const sessionId = "concurrent-diff";
+
+    const req1 = {
+      request_id: uuid(),
+      session_id: sessionId,
+      step_id: uuid(),
+      tool_name: "tool-a",
+      permissions: [PermissionEngine.parse("filesystem:read:workspace")],
+    };
+    const req2 = {
+      request_id: uuid(),
+      session_id: sessionId,
+      step_id: uuid(),
+      tool_name: "tool-b",
+      permissions: [PermissionEngine.parse("network:request:https://example.com")],
+    };
+
+    const [r1, r2] = await Promise.all([engine.check(req1), engine.check(req2)]);
+    expect(r1.allowed).toBe(true);
+    expect(r2.allowed).toBe(true);
+    // Serialized: both prompted because the scopes differ
+    expect(promptCount).toBe(2);
+  });
+
+  it("clearStep without arg preserves session-scoped grants across all sessions", async () => {
+    const engine = new PermissionEngine(journal, async () => "allow_session");
+
+    // Grant session-scoped in two sessions
+    for (const sid of ["sess-x", "sess-y"]) {
+      await engine.check({
+        request_id: uuid(),
+        session_id: sid,
+        step_id: uuid(),
+        tool_name: "tool",
+        permissions: [PermissionEngine.parse("filesystem:read:workspace")],
+      });
+    }
+
+    // clearStep without arg — should only clear step-scoped (ttl=step), not session-scoped
+    engine.clearStep();
+
+    expect(engine.isGranted("filesystem:read:workspace", "sess-x")).toBe(true);
+    expect(engine.isGranted("filesystem:read:workspace", "sess-y")).toBe(true);
+  });
+
+  it("parse preserves full scope with port numbers", () => {
+    const perm = PermissionEngine.parse("network:connect:redis://host:6379");
+    expect(perm.domain).toBe("network");
+    expect(perm.action).toBe("connect");
+    expect(perm.target).toBe("redis://host:6379");
+    expect(perm.scope).toBe("network:connect:redis://host:6379");
+  });
 });

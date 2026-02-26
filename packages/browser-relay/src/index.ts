@@ -9,7 +9,7 @@ const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].repla
 if (isMain) {
   const { ManagedDriver: Driver } = await import("./drivers/managed.js");
   const { RelayServer: Server } = await import("./server.js");
-  const port = parseInt(process.env.OPENVGER_RELAY_PORT ?? "9222", 10);
+  const port = parseInt(process.env.KARNEVIL9_RELAY_PORT ?? process.env.OPENVGER_RELAY_PORT ?? "9222", 10);
   const server = new Server({ port, driver: new Driver() });
   await server.listen();
 }

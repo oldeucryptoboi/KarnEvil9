@@ -82,6 +82,81 @@ describe("validatePlanData", () => {
     const result = validatePlanData(plan);
     expect(result.valid).toBe(false);
   });
+
+  it("rejects step with max_retries above maximum (10)", () => {
+    const plan = validPlan();
+    plan.steps[0]!.max_retries = 11;
+    const result = validatePlanData(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects step with max_retries as float", () => {
+    const plan = validPlan();
+    (plan.steps[0] as any).max_retries = 2.5;
+    const result = validatePlanData(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects step with empty success_criteria", () => {
+    const plan = validPlan();
+    (plan.steps[0] as any).success_criteria = [];
+    const result = validatePlanData(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects step with empty tool_ref.name", () => {
+    const plan = validPlan();
+    plan.steps[0]!.tool_ref.name = "";
+    const result = validatePlanData(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it("accepts step with timeout_ms at exact minimum (100)", () => {
+    const plan = validPlan();
+    plan.steps[0]!.timeout_ms = 100;
+    const result = validatePlanData(plan);
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects step with negative max_retries", () => {
+    const plan = validPlan();
+    (plan.steps[0] as any).max_retries = -1;
+    const result = validatePlanData(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it("accepts plan with depends_on array", () => {
+    const plan = validPlan();
+    const step2 = {
+      step_id: uuid(),
+      title: "Step two",
+      tool_ref: { name: "other-tool" },
+      input: { key: "value" },
+      success_criteria: ["it works"],
+      failure_policy: "abort" as const,
+      timeout_ms: 5000,
+      max_retries: 0,
+      depends_on: [plan.steps[0]!.step_id],
+    };
+    plan.steps.push(step2);
+    const result = validatePlanData(plan);
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects step with empty step_id", () => {
+    const plan = validPlan();
+    plan.steps[0]!.step_id = "";
+    const result = validatePlanData(plan);
+    expect(result.valid).toBe(false);
+  });
+
+  it("rejects plan with empty goal", () => {
+    const plan = validPlan();
+    plan.steps[0]!.title = "ok"; // keep step valid
+    (plan as any).goal = "";
+    const result = validatePlanData(plan);
+    expect(result.valid).toBe(false);
+  });
 });
 
 describe("validateToolManifestData", () => {
@@ -141,6 +216,34 @@ describe("validateToolManifestData", () => {
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
   });
+
+  it("accepts manifest with timeout_ms at exact minimum (100)", () => {
+    const m = validManifest();
+    m.timeout_ms = 100;
+    const result = validateToolManifestData(m);
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects manifest with timeout_ms below minimum", () => {
+    const m = validManifest();
+    m.timeout_ms = 99;
+    const result = validateToolManifestData(m);
+    expect(result.valid).toBe(false);
+  });
+
+  it("accepts manifest with timeout_ms at exact maximum (600000)", () => {
+    const m = validManifest();
+    m.timeout_ms = 600000;
+    const result = validateToolManifestData(m);
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts manifest with name at maxLength (64 chars)", () => {
+    const m = validManifest();
+    m.name = "a".repeat(64);
+    const result = validateToolManifestData(m);
+    expect(result.valid).toBe(true);
+  });
 });
 
 describe("validateJournalEventData", () => {
@@ -195,6 +298,30 @@ describe("validateJournalEventData", () => {
   it("accepts limit.exceeded event type", () => {
     const result = validateJournalEventData({ ...validEvent(), type: "limit.exceeded" });
     expect(result.valid).toBe(true);
+  });
+
+  it("accepts event with valid seq field", () => {
+    const result = validateJournalEventData({ ...validEvent(), seq: 0 });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects event with negative seq", () => {
+    const result = validateJournalEventData({ ...validEvent(), seq: -1 });
+    expect(result.valid).toBe(false);
+  });
+
+  it("accepts swarm event types", () => {
+    for (const type of ["swarm.peer_joined", "swarm.task_delegated", "swarm.peer_left"]) {
+      const result = validateJournalEventData({ ...validEvent(), type });
+      expect(result.valid).toBe(true);
+    }
+  });
+
+  it("accepts scheduler event types", () => {
+    for (const type of ["scheduler.job_triggered", "scheduler.job_skipped", "scheduler.schedule_created"]) {
+      const result = validateJournalEventData({ ...validEvent(), type });
+      expect(result.valid).toBe(true);
+    }
   });
 });
 
@@ -335,6 +462,40 @@ describe("validatePluginManifestData", () => {
     const m = { ...validManifest(), extra_field: true };
     const result = validatePluginManifestData(m);
     expect(result.valid).toBe(false);
+  });
+
+  it("accepts plugin id at maxLength (64 chars)", () => {
+    const m = validManifest();
+    m.id = "a".repeat(64);
+    const result = validatePluginManifestData(m);
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects plugin id exceeding maxLength", () => {
+    const m = validManifest();
+    m.id = "a".repeat(65);
+    const result = validatePluginManifestData(m);
+    expect(result.valid).toBe(false);
+  });
+
+  it("accepts plugin id with hyphens and underscores", () => {
+    const m = validManifest();
+    m.id = "my-cool_plugin-2";
+    const result = validatePluginManifestData(m);
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects plugin id with uppercase letters", () => {
+    const m = validManifest();
+    m.id = "MyPlugin";
+    const result = validatePluginManifestData(m);
+    expect(result.valid).toBe(false);
+  });
+
+  it("accepts manifest with empty provides object", () => {
+    const m = { ...validManifest(), provides: {} };
+    const result = validatePluginManifestData(m);
+    expect(result.valid).toBe(true);
   });
 });
 

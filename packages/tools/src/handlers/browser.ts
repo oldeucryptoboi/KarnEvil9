@@ -18,16 +18,16 @@ export interface BrowserDriverLike {
 }
 
 const RELAY_URL = (() => {
-  const url = process.env.OPENVGER_RELAY_URL ?? "http://localhost:9222";
+  const url = process.env.KARNEVIL9_RELAY_URL ?? process.env.OPENVGER_RELAY_URL ?? "http://localhost:9222";
   // Validate relay URL at module load to prevent SSRF via env var injection
   try {
     const parsed = new URL(url);
     if (!["http:", "https:"].includes(parsed.protocol)) {
-      console.warn(`[browser] WARNING: OPENVGER_RELAY_URL uses non-HTTP protocol "${parsed.protocol}" — falling back to default`);
+      console.warn(`[browser] WARNING: KARNEVIL9_RELAY_URL uses non-HTTP protocol "${parsed.protocol}" — falling back to default`);
       return "http://localhost:9222";
     }
   } catch {
-    console.warn(`[browser] WARNING: Invalid OPENVGER_RELAY_URL "${url}" — falling back to default`);
+    console.warn(`[browser] WARNING: Invalid KARNEVIL9_RELAY_URL "${url}" — falling back to default`);
     return "http://localhost:9222";
   }
   return url;

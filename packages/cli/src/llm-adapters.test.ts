@@ -64,14 +64,14 @@ describe("createPlanner", () => {
   const savedEnv: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    savedEnv.OPENVGER_PLANNER = process.env.OPENVGER_PLANNER;
-    savedEnv.OPENVGER_MODEL = process.env.OPENVGER_MODEL;
+    savedEnv.KARNEVIL9_PLANNER = process.env.KARNEVIL9_PLANNER;
+    savedEnv.KARNEVIL9_MODEL = process.env.KARNEVIL9_MODEL;
     savedEnv.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
     savedEnv.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     savedEnv.OPENAI_BASE_URL = process.env.OPENAI_BASE_URL;
 
-    delete process.env.OPENVGER_PLANNER;
-    delete process.env.OPENVGER_MODEL;
+    delete process.env.KARNEVIL9_PLANNER;
+    delete process.env.KARNEVIL9_MODEL;
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_BASE_URL;
@@ -94,16 +94,16 @@ describe("createPlanner", () => {
     expect(planner).toBeInstanceOf(MockPlanner);
   });
 
-  it("--planner flag overrides OPENVGER_PLANNER env", () => {
-    process.env.OPENVGER_PLANNER = "claude";
+  it("--planner flag overrides KARNEVIL9_PLANNER env", () => {
+    process.env.KARNEVIL9_PLANNER = "claude";
     process.env.ANTHROPIC_API_KEY = "sk-ant-test";
     // Flag says mock, env says claude — flag wins
     const planner = createPlanner({ planner: "mock" });
     expect(planner).toBeInstanceOf(MockPlanner);
   });
 
-  it("falls back to OPENVGER_PLANNER env when no flag", () => {
-    process.env.OPENVGER_PLANNER = "mock";
+  it("falls back to KARNEVIL9_PLANNER env when no flag", () => {
+    process.env.KARNEVIL9_PLANNER = "mock";
     const planner = createPlanner({});
     expect(planner).toBeInstanceOf(MockPlanner);
   });

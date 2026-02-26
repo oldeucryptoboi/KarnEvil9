@@ -21,6 +21,9 @@ interface OutcomeRecord {
   timestamp: number;
 }
 
+const MAX_RFQ_ENTRIES = 500;
+const MAX_REPORTS = 1000;
+
 export class CollusionDetector {
   private config: CollusionDetectorConfig;
   private bids = new Map<string, BidObject[]>(); // rfq_id -> bids
@@ -36,6 +39,12 @@ export class CollusionDetector {
       this.bids.set(bid.rfq_id, []);
     }
     this.bids.get(bid.rfq_id)!.push(bid);
+
+    // Evict oldest RFQ entries when map grows too large
+    if (this.bids.size > MAX_RFQ_ENTRIES) {
+      const firstKey = this.bids.keys().next().value;
+      if (firstKey !== undefined) this.bids.delete(firstKey);
+    }
   }
 
   recordOutcome(
@@ -93,6 +102,7 @@ export class CollusionDetector {
       }
     }
 
+    this.capReports();
     return newReports;
   }
 
@@ -156,11 +166,18 @@ export class CollusionDetector {
       }
     }
 
+    this.capReports();
     return newReports;
   }
 
   getReports(): CollusionReport[] {
     return [...this.reports];
+  }
+
+  private capReports(): void {
+    if (this.reports.length > MAX_REPORTS) {
+      this.reports = this.reports.slice(-MAX_REPORTS);
+    }
   }
 
   getReportsForNode(nodeId: string): CollusionReport[] {

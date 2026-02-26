@@ -16,6 +16,8 @@ export const DEFAULT_ANTI_GAMING_CONFIG: AntiGamingConfig = {
   complexity_weight_multiplier: { low: 0.5, medium: 1.0, high: 1.5 },
 };
 
+const MAX_RECORDS_PER_NODE = 500;
+
 export class AntiGamingDetector {
   private config: AntiGamingConfig;
   private completions = new Map<string, TaskComplexityRecord[]>();
@@ -27,20 +29,20 @@ export class AntiGamingDetector {
 
   recordTaskCompletion(nodeId: string, complexity: "low" | "medium" | "high", taskId?: string): void {
     if (!this.completions.has(nodeId)) this.completions.set(nodeId, []);
-    this.completions.get(nodeId)!.push({
-      task_id: taskId ?? `task-${Date.now()}`,
-      complexity,
-      completed_at: new Date().toISOString(),
-    });
+    const arr = this.completions.get(nodeId)!;
+    arr.push({ task_id: taskId ?? `task-${Date.now()}`, complexity, completed_at: new Date().toISOString() });
+    if (arr.length > MAX_RECORDS_PER_NODE) {
+      this.completions.set(nodeId, arr.slice(-MAX_RECORDS_PER_NODE));
+    }
   }
 
   recordTaskRejection(nodeId: string, complexity: "low" | "medium" | "high", taskId?: string): void {
     if (!this.rejections.has(nodeId)) this.rejections.set(nodeId, []);
-    this.rejections.get(nodeId)!.push({
-      task_id: taskId ?? `task-${Date.now()}`,
-      complexity,
-      completed_at: new Date().toISOString(),
-    });
+    const arr = this.rejections.get(nodeId)!;
+    arr.push({ task_id: taskId ?? `task-${Date.now()}`, complexity, completed_at: new Date().toISOString() });
+    if (arr.length > MAX_RECORDS_PER_NODE) {
+      this.rejections.set(nodeId, arr.slice(-MAX_RECORDS_PER_NODE));
+    }
   }
 
   evaluatePeer(nodeId: string): PeerTaskProfile {

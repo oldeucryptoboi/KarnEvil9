@@ -171,6 +171,13 @@ export class ConsensusVerifier {
         round.status = "expired";
         swept++;
       }
+      // Delete terminal rounds older than 2x expiry window
+      if (round.status !== "open" && round.status !== "evaluating") {
+        const age = now - new Date(round.expires_at).getTime();
+        if (age > this.config.round_expiry_ms) {
+          this.rounds.delete(roundId);
+        }
+      }
     }
     return swept;
   }

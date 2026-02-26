@@ -28,6 +28,9 @@ export interface CreateContractParams {
   task_attributes?: TaskAttribute;
 }
 
+const MAX_CONTRACTS = 5000;
+const TERMINAL_STATUSES = new Set<ContractStatus>(["completed", "cancelled", "violated"]);
+
 export class ContractStore {
   private contracts = new Map<string, DelegationContract>();
   private filePath: string;
@@ -88,6 +91,14 @@ export class ContractStore {
       task_attributes: params.task_attributes,
     };
     this.contracts.set(contract.contract_id, contract);
+
+    // Evict oldest terminal contracts when map grows too large
+    if (this.contracts.size > MAX_CONTRACTS) {
+      for (const [id, c] of this.contracts) {
+        if (TERMINAL_STATUSES.has(c.status)) { this.contracts.delete(id); break; }
+      }
+    }
+
     return contract;
   }
 

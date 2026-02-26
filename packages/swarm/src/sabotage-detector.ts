@@ -17,6 +17,9 @@ export const DEFAULT_SABOTAGE_CONFIG: SabotageDetectorConfig = {
   min_feedback_count: 3,
 };
 
+const MAX_REPORTS = 1000;
+const MAX_DISCOUNTED_PAIRS = 5000;
+
 export class SabotageDetector {
   private config: SabotageDetectorConfig;
   private feedback: FeedbackRecord[] = [];
@@ -141,6 +144,20 @@ export class SabotageDetector {
             target: targetNodeId,
           });
         }
+      }
+    }
+
+    if (this.reports.length > MAX_REPORTS) {
+      this.reports = this.reports.slice(-MAX_REPORTS);
+    }
+    if (this.discountedPairs.size > MAX_DISCOUNTED_PAIRS) {
+      // Evict oldest entries (iteration order is insertion order)
+      const excess = this.discountedPairs.size - MAX_DISCOUNTED_PAIRS;
+      let removed = 0;
+      for (const key of this.discountedPairs) {
+        if (removed >= excess) break;
+        this.discountedPairs.delete(key);
+        removed++;
       }
     }
 

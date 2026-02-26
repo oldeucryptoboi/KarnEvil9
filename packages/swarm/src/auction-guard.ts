@@ -3,6 +3,9 @@ import type { JournalEventType } from "@karnevil9/schemas";
 import type { AuctionGuardConfig, SealedBid, BidCommitment, BidObject } from "./types.js";
 import { DEFAULT_AUCTION_GUARD_CONFIG } from "./types.js";
 
+const MAX_COMMITMENTS = 5000;
+const MAX_TIMELINE_ENTRIES = 200;
+
 export class AuctionGuard {
   private config: AuctionGuardConfig;
   private commitments = new Map<string, BidCommitment>(); // bid_id -> commitment
@@ -42,12 +45,23 @@ export class AuctionGuard {
       revealed: false,
     });
 
+    // Evict oldest revealed commitments when map grows too large
+    if (this.commitments.size > MAX_COMMITMENTS) {
+      for (const [id, c] of this.commitments) {
+        if (c.revealed) { this.commitments.delete(id); break; }
+      }
+    }
+
     // Track timestamps for front-running detection
     const ts = new Date(sealedBid.timestamp).getTime();
     if (!this.nodeTimelines.has(sealedBid.bidder_node_id)) {
       this.nodeTimelines.set(sealedBid.bidder_node_id, []);
     }
-    this.nodeTimelines.get(sealedBid.bidder_node_id)!.push(ts);
+    const timeline = this.nodeTimelines.get(sealedBid.bidder_node_id)!;
+    timeline.push(ts);
+    if (timeline.length > MAX_TIMELINE_ENTRIES) {
+      this.nodeTimelines.set(sealedBid.bidder_node_id, timeline.slice(-MAX_TIMELINE_ENTRIES));
+    }
 
     this.emitEvent?.("swarm.bid_committed" as JournalEventType, {
       bid_id: sealedBid.bid_id,

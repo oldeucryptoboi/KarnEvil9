@@ -10,6 +10,8 @@ export const DEFAULT_BOND_REQUIREMENT: BondRequirement = {
   slash_pct_on_timeout: 25,
 };
 
+const MAX_TRANSACTIONS_PER_ACCOUNT = 500;
+
 export class EscrowManager {
   private accounts = new Map<string, EscrowAccount>();
   private taskBonds = new Map<string, { node_id: string; amount: number }>(); // task_id -> bond info
@@ -78,6 +80,9 @@ export class EscrowManager {
       timestamp: new Date().toISOString(),
     };
     account.transactions.push(tx);
+    if (account.transactions.length > MAX_TRANSACTIONS_PER_ACCOUNT) {
+      account.transactions = account.transactions.slice(-MAX_TRANSACTIONS_PER_ACCOUNT);
+    }
 
     return account;
   }
@@ -105,6 +110,9 @@ export class EscrowManager {
       timestamp: new Date().toISOString(),
     };
     account.transactions.push(tx);
+    if (account.transactions.length > MAX_TRANSACTIONS_PER_ACCOUNT) {
+      account.transactions = account.transactions.slice(-MAX_TRANSACTIONS_PER_ACCOUNT);
+    }
 
     this.emitEvent?.("swarm.bond_held" as JournalEventType, {
       task_id: taskId,
@@ -134,6 +142,9 @@ export class EscrowManager {
       timestamp: new Date().toISOString(),
     };
     account.transactions.push(tx);
+    if (account.transactions.length > MAX_TRANSACTIONS_PER_ACCOUNT) {
+      account.transactions = account.transactions.slice(-MAX_TRANSACTIONS_PER_ACCOUNT);
+    }
 
     this.emitEvent?.("swarm.bond_released" as JournalEventType, {
       task_id: taskId,
@@ -167,6 +178,9 @@ export class EscrowManager {
       timestamp: new Date().toISOString(),
     };
     account.transactions.push(tx);
+    if (account.transactions.length > MAX_TRANSACTIONS_PER_ACCOUNT) {
+      account.transactions = account.transactions.slice(-MAX_TRANSACTIONS_PER_ACCOUNT);
+    }
 
     this.emitEvent?.("swarm.bond_slashed" as JournalEventType, {
       task_id: taskId,

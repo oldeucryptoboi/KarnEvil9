@@ -391,6 +391,7 @@ program.command("server").description("Start the API server")
         agentic: sessionOpts?.agentic ?? opts.agentic ?? false,
         activeMemory,
         preGrantedScopes: pluginRegistry.getPluginPermissions(),
+        plannerTimeoutMs: 120_000,
       });
       const session = await kernel.createSession(task);
       // Run in background — don't block the caller

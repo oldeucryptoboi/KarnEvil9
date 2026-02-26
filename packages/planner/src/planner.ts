@@ -470,6 +470,10 @@ export class LLMPlanner implements Planner {
       throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}...`);
     }
     if (!plan.created_at) plan.created_at = new Date().toISOString();
+    // LLMs sometimes return schema_version as a number (0.1) instead of string ("0.1")
+    if (typeof plan.schema_version === "number") {
+      plan.schema_version = String(plan.schema_version);
+    }
     // Agentic "done" signals have empty steps — skip schema validation for those
     // since PlanSchema requires minItems: 1 for real executable plans
     const isAgenticDone = this.agentic && Array.isArray(plan.steps) && plan.steps.length === 0;

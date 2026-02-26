@@ -1,7 +1,7 @@
 id: github-repo
 name: GitHub Repo Tools
 version: "1.0.0"
-description: Create issues, discussions, and check stats on oldeucryptoboi/KarnEvil9 via the gh CLI
+description: Create/read issues, discussions, and check stats on oldeucryptoboi/KarnEvil9 via the gh CLI
 entry: index.js
 permissions:
   - github:write:issues
@@ -13,6 +13,8 @@ provides:
   tools:
     - gh-create-issue
     - gh-list-issues
+    - gh-get-issue
+    - gh-add-label
     - gh-create-discussion
     - gh-list-discussions
     - gh-repo-stats

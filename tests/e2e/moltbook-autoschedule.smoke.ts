@@ -123,6 +123,7 @@ describe("Moltbook autoSchedule Smoke", () => {
     expect(names).toContain("moltbook-check-feed");
     expect(names).toContain("moltbook-check-notifications");
     expect(names).toContain("moltbook-check-dms");
+    expect(names).toContain("moltbook-close-loop");
 
     // Verify each schedule is active and has the right trigger
     const feed = schedules.find((s) => s.name === "moltbook-check-feed")!;

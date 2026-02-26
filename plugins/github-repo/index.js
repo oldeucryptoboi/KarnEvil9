@@ -8,6 +8,8 @@ import { execFile } from "node:child_process";
 import {
   ghCreateIssueManifest, createCreateIssueHandler,
   ghListIssuesManifest, createListIssuesHandler,
+  ghGetIssueManifest, createGetIssueHandler,
+  ghAddLabelManifest, createAddLabelHandler,
   ghCreateDiscussionManifest, createCreateDiscussionHandler,
   ghListDiscussionsManifest, createListDiscussionsHandler,
   ghRepoStatsManifest, createRepoStatsHandler,
@@ -41,6 +43,8 @@ export async function register(api) {
   // ── Register tools ──
   api.registerTool(ghCreateIssueManifest, createCreateIssueHandler());
   api.registerTool(ghListIssuesManifest, createListIssuesHandler());
+  api.registerTool(ghGetIssueManifest, createGetIssueHandler());
+  api.registerTool(ghAddLabelManifest, createAddLabelHandler());
   api.registerTool(ghCreateDiscussionManifest, createCreateDiscussionHandler());
   api.registerTool(ghListDiscussionsManifest, createListDiscussionsHandler());
   api.registerTool(ghRepoStatsManifest, createRepoStatsHandler());

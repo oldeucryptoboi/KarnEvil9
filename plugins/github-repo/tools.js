@@ -190,11 +190,74 @@ export const ghRepoStatsManifest = {
   mock_responses: [{ ok: true, stars: 0, forks: 0, watchers: 0, open_issues: 0, description: "Mock repo" }],
 };
 
+/** @type {import("@karnevil9/schemas").ToolManifest} */
+export const ghGetIssueManifest = {
+  name: "gh-get-issue",
+  version: "1.0.0",
+  description: "Get full details of a GitHub issue including body, comments, and linked PRs on oldeucryptoboi/KarnEvil9",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      number: { type: "number", description: "Issue number" },
+    },
+    required: ["number"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+      number: { type: "number" },
+      title: { type: "string" },
+      state: { type: "string" },
+      body: { type: "string" },
+      labels: { type: "array" },
+      comments: { type: "array" },
+      closed_at: { type: "string" },
+      url: { type: "string" },
+    },
+  },
+  permissions: ["github:read:issues"],
+  timeout_ms: 15000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [{ ok: true, number: 1, title: "Mock Issue", state: "open", body: "", labels: [], comments: [], closed_at: null, url: "https://github.com/oldeucryptoboi/KarnEvil9/issues/1" }],
+};
+
+/** @type {import("@karnevil9/schemas").ToolManifest} */
+export const ghAddLabelManifest = {
+  name: "gh-add-label",
+  version: "1.0.0",
+  description: "Add a label to an existing GitHub issue on oldeucryptoboi/KarnEvil9",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      number: { type: "number", description: "Issue number" },
+      label: { type: "string", description: "Label to add" },
+    },
+    required: ["number", "label"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+      issue_number: { type: "number" },
+      label: { type: "string" },
+    },
+  },
+  permissions: ["github:write:issues"],
+  timeout_ms: 15000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [{ ok: true, issue_number: 1, label: "mock-label" }],
+};
+
 // ── All manifests for easy import ──
 
 export const allManifests = [
   ghCreateIssueManifest,
   ghListIssuesManifest,
+  ghGetIssueManifest,
+  ghAddLabelManifest,
   ghCreateDiscussionManifest,
   ghListDiscussionsManifest,
   ghRepoStatsManifest,
@@ -264,6 +327,67 @@ export function createListIssuesHandler() {
 
     const issues = await gh(args);
     return { ok: true, issues, count: Array.isArray(issues) ? issues.length : 0 };
+  };
+}
+
+/**
+ * @returns {import("@karnevil9/schemas").ToolHandler}
+ */
+export function createGetIssueHandler() {
+  return async (input, mode) => {
+    if (mode === "mock") {
+      return { ok: true, number: input.number, title: "Mock Issue", state: "open", body: "", labels: [], comments: [], closed_at: null, url: `https://github.com/${REPO}/issues/${input.number}` };
+    }
+    if (mode === "dry_run") {
+      return { ok: true, dry_run: true, would_get: { number: input.number, repo: REPO } };
+    }
+
+    const issue = await gh([
+      "issue", "view", String(input.number), "-R", REPO,
+      "--json", "number,title,state,body,labels,closedAt,url,comments",
+    ]);
+
+    return {
+      ok: true,
+      number: issue.number,
+      title: issue.title,
+      state: issue.state,
+      body: issue.body ?? "",
+      labels: (issue.labels ?? []).map((l) => l.name ?? l),
+      comments: (issue.comments ?? []).map((c) => ({
+        author: c.author?.login ?? "unknown",
+        body: c.body ?? "",
+        created_at: c.createdAt ?? "",
+      })),
+      closed_at: issue.closedAt ?? null,
+      url: issue.url,
+    };
+  };
+}
+
+/**
+ * @returns {import("@karnevil9/schemas").ToolHandler}
+ */
+export function createAddLabelHandler() {
+  return async (input, mode) => {
+    if (mode === "mock") {
+      return { ok: true, issue_number: input.number, label: input.label };
+    }
+    if (mode === "dry_run") {
+      return { ok: true, dry_run: true, would_add: { number: input.number, label: input.label, repo: REPO } };
+    }
+
+    // Ensure label exists
+    try {
+      await gh(["label", "create", input.label, "-R", REPO, "--force"], { json: false });
+    } catch { /* label may already exist */ }
+
+    await gh([
+      "issue", "edit", String(input.number), "-R", REPO,
+      "--add-label", input.label,
+    ], { json: false });
+
+    return { ok: true, issue_number: input.number, label: input.label };
   };
 }
 

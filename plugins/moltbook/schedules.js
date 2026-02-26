@@ -164,4 +164,39 @@ export const defaultSchedules = [
     },
     options: { max_failures: 3 },
   },
+  {
+    name: "moltbook-close-loop",
+    trigger: { type: "every", interval: "6h" },
+    action: {
+      type: "createSession",
+      task_text:
+        "You are E.D.D.I.E. (Emergent Deterministic Directed Intelligence Engine) — an autonomous agent running inside KarnEvil9, a deterministic agent runtime. " +
+        "Your creator is Crypto Boi (@oldeucryptoboi).\n\n" +
+        "Your task is to CLOSE THE FEEDBACK LOOP — check for recently resolved GitHub issues and report back to Moltbook.\n\n" +
+        "Step 1: Find closed RFC issues that haven't been reported back yet.\n" +
+        "- Use gh-list-issues with state='closed' and label='community-feedback' to find resolved issues\n" +
+        "- For each closed issue, use gh-get-issue to read the full details (body, comments, resolution)\n" +
+        "- Skip any issue that already has the label 'moltbook-notified' — those have already been reported\n\n" +
+        "Step 2: For each newly closed issue, find the original Moltbook thread.\n" +
+        "- The issue body should contain a link to the original Moltbook post (the moltbook-github-rfc schedule puts them there)\n" +
+        "- Use moltbook-search to find the thread if the link is missing (search the issue title or topic)\n" +
+        "- Use moltbook-get-post to read the current state of the Moltbook thread\n\n" +
+        "Step 3: Post a resolution update on Moltbook.\n" +
+        "- Use moltbook-comment on the original Moltbook thread\n" +
+        "- The comment should include:\n" +
+        "  - That the GitHub issue has been resolved/closed\n" +
+        "  - A summary of what was changed or decided (from the issue comments and closing context)\n" +
+        "  - A link to the closed GitHub issue for full details\n" +
+        "  - Thanks to the agents who contributed feedback that led to the improvement\n" +
+        "  - Something like: 'Update: This issue has been resolved! Here\\'s what changed: [summary]. " +
+        "Thanks to everyone who contributed feedback. See the full resolution: [github link]'\n\n" +
+        "Step 4: Mark the issue as notified.\n" +
+        "- Use gh-add-label to add the label 'moltbook-notified' to the GitHub issue\n" +
+        "- This prevents duplicate notifications on future runs\n\n" +
+        "If no closed community-feedback issues are found without the moltbook-notified label, that's OK — do nothing. " +
+        "Only post when there are actual resolutions to report.",
+      agentic: true,
+    },
+    options: { max_failures: 3 },
+  },
 ];

@@ -964,10 +964,11 @@ export class ApiServer {
       }, SSE_KEEPALIVE_INTERVAL_MS);
       keepalive.unref();
 
-      serverRes.on("drain", () => {
+      const onDrain = () => {
         client.paused = false;
         client.missedEvents = 0;
-      });
+      };
+      serverRes.on("drain", onDrain);
 
       const maxLifetime = setTimeout(() => {
         res.end();
@@ -980,6 +981,7 @@ export class ApiServer {
         sseCleaned = true;
         clearInterval(keepalive);
         clearTimeout(maxLifetime);
+        serverRes.off("drain", onDrain);
         const remaining = (this.sseClients.get(sessionId) ?? []).filter((c) => c !== client);
         if (remaining.length === 0) this.sseClients.delete(sessionId);
         else this.sseClients.set(sessionId, remaining);

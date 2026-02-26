@@ -24,7 +24,7 @@ export class RelayServer {
   }
 
   private setupRoutes(): void {
-    this.app.use(express.json());
+    this.app.use(express.json({ limit: "256kb" }));
 
     this.app.get("/health", (_req, res) => {
       res.json({
@@ -36,8 +36,13 @@ export class RelayServer {
     });
 
     this.app.post("/actions", async (req, res) => {
+      const body = req.body;
+      if (!body || typeof body !== "object" || typeof body.action !== "string") {
+        res.status(400).json({ success: false, error: 'Request body must be JSON with a string "action" field' });
+        return;
+      }
       try {
-        const result = await this.driver.execute(req.body);
+        const result = await this.driver.execute(body);
         const status = result.success ? 200 : 422;
         res.status(status).json(result);
       } catch (err: unknown) {

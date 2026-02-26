@@ -105,6 +105,37 @@ describe("RelayServer routes", () => {
       expect(res.body.success).toBe(false);
       expect(res.body.error).toContain("Playwright crashed");
     });
+
+    it("returns 400 when body has no action field", async () => {
+      const res = await request(app, "POST", "/actions", { url: "https://example.com" });
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain("action");
+    });
+
+    it("returns 400 when action is not a string", async () => {
+      const res = await request(app, "POST", "/actions", { action: 123 });
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+    });
+
+    it("returns 400 when body is empty", async () => {
+      const server = app.listen(0);
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/actions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        const json = await response.json();
+        expect(response.status).toBe(400);
+        expect(json.success).toBe(false);
+      } finally {
+        server.close();
+      }
+    });
   });
 
   describe("POST /close", () => {

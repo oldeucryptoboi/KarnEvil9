@@ -1214,6 +1214,53 @@ describe("Journal", () => {
     expect(events[1]!.payload.task).toBe("b");
   });
 
+  it("init() truncates at corrupted JSON line in truncate mode", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal1.init();
+    await journal1.emit("sess-1", "session.created", {});
+    await journal1.emit("sess-1", "session.started", {});
+    await journal1.emit("sess-1", "session.completed", {});
+    await journal1.close();
+
+    // Replace event 1 with invalid JSON (not just bad hash — totally unparseable)
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    lines[1] = "NOT VALID JSON AT ALL{{{";
+    await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
+
+    // Truncate mode should keep event 0 and discard 1-2
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal2.init();
+
+    const events = await journal2.readAll();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("session.created");
+
+    // Should be able to continue writing
+    const e = await journal2.emit("sess-1", "session.started", {});
+    expect(e.seq).toBe(1);
+    const integrity = await journal2.verifyIntegrity();
+    expect(integrity.valid).toBe(true);
+  });
+
+  it("init() throws on corrupted JSON line in strict mode", async () => {
+    const journal1 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal1.init();
+    await journal1.emit("sess-1", "session.created", {});
+    await journal1.emit("sess-1", "session.started", {});
+    await journal1.emit("sess-1", "session.completed", {});
+    await journal1.close();
+
+    // Replace event 1 (middle line) with invalid JSON
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    lines[1] = "GARBAGE JSON";
+    await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
+
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false, recovery: "strict" });
+    await expect(journal2.init()).rejects.toThrow("corrupted JSON");
+  });
+
   it("readAllStream skips corrupted lines and yields valid ones", async () => {
     const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
     await journal.init();

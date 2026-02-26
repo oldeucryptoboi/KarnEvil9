@@ -307,6 +307,7 @@ export class ManagedDriver implements BrowserDriver {
   protected resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => void this.close(), this.idleTimeoutMs);
+    this.idleTimer.unref();
   }
 
   protected async getPage(): Promise<PwPage> {

@@ -326,14 +326,17 @@ export class Scheduler {
         }
       } else if (policy === "catchup_all") {
         // Execute for each missed occurrence within grace period
+        const MAX_CATCHUP_ITERATIONS = 1000;
         let cursor = nextRunMs;
-        while (cursor < now && cursor >= graceLimit) {
+        let iterations = 0;
+        while (cursor < now && cursor >= graceLimit && iterations < MAX_CATCHUP_ITERATIONS) {
           await this.executeJob(schedule);
           const nextStr = this.computeNextRun(schedule.trigger, new Date(cursor).toISOString());
           if (!nextStr) break;
           const nextMs = new Date(nextStr).getTime();
           if (nextMs <= cursor) break; // prevent infinite loop
           cursor = nextMs;
+          iterations++;
         }
         // Advance to future
         if (schedule.status === "active") {

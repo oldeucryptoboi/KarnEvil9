@@ -1,4 +1,4 @@
-import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
+import { readFile, rename, mkdir, open } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import type { EmbedderFn } from "./types.js";
@@ -55,7 +55,13 @@ export class VectorStore {
       lines.push(JSON.stringify({ id, vector: Array.from(vec) }));
     }
     const tmpPath = this.filePath + ".tmp";
-    await writeFile(tmpPath, lines.join("\n") + "\n", "utf-8");
+    const fh = await open(tmpPath, "w");
+    try {
+      await fh.writeFile(lines.join("\n") + "\n", "utf-8");
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
     await rename(tmpPath, this.filePath);
   }
 

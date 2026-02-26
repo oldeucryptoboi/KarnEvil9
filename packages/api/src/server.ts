@@ -955,6 +955,7 @@ export class ApiServer {
       const keepalive = setInterval(() => {
         if (!client.paused && !serverRes.destroyed) res.write(":keepalive\n\n");
       }, SSE_KEEPALIVE_INTERVAL_MS);
+      keepalive.unref();
 
       serverRes.on("drain", () => {
         client.paused = false;

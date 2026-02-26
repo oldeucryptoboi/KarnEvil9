@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { readFile, mkdir, rename, open } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import yaml from "js-yaml";
@@ -85,7 +85,13 @@ export class Deduplicator {
 
     const content = yaml.dump(aliasMap, { lineWidth: 120, noRefs: true });
     const tmpPath = this.aliasFilePath + ".tmp";
-    await writeFile(tmpPath, content, "utf-8");
+    const fh = await open(tmpPath, "w");
+    try {
+      await fh.writeFile(content, "utf-8");
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
     await rename(tmpPath, this.aliasFilePath);
   }
 

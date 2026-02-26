@@ -154,6 +154,22 @@ describe("CDPClient", () => {
     await expect(client.send("Page.enable")).rejects.toThrow("Not connected to CDP");
   });
 
+  it("rejects pending request after requestTimeoutMs", async () => {
+    const { wss, url, ready } = createMockCDPServer();
+    servers.push(wss);
+    await ready;
+
+    // Server connects but never responds to commands
+    wss.on("connection", () => { /* silence */ });
+
+    const client = new CDPClient({ wsUrl: url, requestTimeoutMs: 200 });
+    await client.connect();
+
+    await expect(client.send("Page.enable")).rejects.toThrow("CDP request timeout");
+
+    await client.disconnect();
+  });
+
   it("times out waitForEvent", async () => {
     const { wss, url, ready } = createMockCDPServer();
     servers.push(wss);

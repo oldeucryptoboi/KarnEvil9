@@ -33,7 +33,7 @@ describe("Daemon Lifecycle Smoke", () => {
     }
     // Close journal before cleanup to release file handles (prevents ENOTEMPTY)
     await journal.close();
-    await rm(testDir, { recursive: true, force: true });
+    await rm(testDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
   });
 
   it("start → health check → create session → verify journal → stop", async () => {

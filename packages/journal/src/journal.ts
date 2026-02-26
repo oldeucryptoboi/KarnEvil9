@@ -95,7 +95,23 @@ export class Journal {
       try {
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i]!;
-          const event = JSON.parse(line) as JournalEvent;
+          let event: JournalEvent;
+          try {
+            event = JSON.parse(line) as JournalEvent;
+          } catch {
+            // Corrupted JSON line — treat like hash chain break
+            if (this.recovery === "strict") {
+              throw new Error(`Journal parse error at line ${i}: corrupted JSON`);
+            }
+            validCount = i;
+            console.error(`Journal: corrupted JSON at line ${i}, truncated ${lines.length - i} events`);
+            const validLines = lines.slice(0, i);
+            const tmpPath = `${this.filePath}.tmp`;
+            const repairContent = validLines.length > 0 ? validLines.join("\n") + "\n" : "";
+            await writeFile(tmpPath, repairContent, "utf-8");
+            await rename(tmpPath, this.filePath);
+            break;
+          }
           // Verify hash chain integrity during init
           if (i > 0 && event.hash_prev !== prevHash) {
             if (this.recovery === "strict") {

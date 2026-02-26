@@ -20,6 +20,8 @@ export interface CDPClientOptions {
   wsUrl?: string;
   /** Pre-connected WebSocket — bridge mode (extension CDP bridge) */
   ws?: WebSocket;
+  /** Per-request timeout in ms. Default: 30000 (30s). */
+  requestTimeoutMs?: number;
 }
 
 type EventCallback = (params: Record<string, unknown>) => void;
@@ -36,6 +38,7 @@ export class CDPClient {
   private readonly port: number;
   private readonly wsUrl?: string;
   private readonly bridgeMode: boolean;
+  private readonly requestTimeoutMs: number;
   private _connected = false;
 
   constructor(options?: CDPClientOptions) {
@@ -43,6 +46,7 @@ export class CDPClient {
     this.port = options?.port ?? 9223;
     this.wsUrl = options?.wsUrl;
     this.bridgeMode = !!options?.ws;
+    this.requestTimeoutMs = options?.requestTimeoutMs ?? 30_000;
     if (options?.ws) {
       this.ws = options.ws;
     }
@@ -163,13 +167,20 @@ export class CDPClient {
     };
 
     return new Promise<CDPMethodMap[M]["result"]>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) {
+          reject(new Error(`CDP request timeout after ${this.requestTimeoutMs}ms: ${method}`));
+        }
+      }, this.requestTimeoutMs);
+
       this.pending.set(id, {
-        resolve: resolve as (result: unknown) => void,
-        reject,
+        resolve: (result: unknown) => { clearTimeout(timer); resolve(result as CDPMethodMap[M]["result"]); },
+        reject: (err: Error) => { clearTimeout(timer); reject(err); },
       });
       try {
         this.ws!.send(JSON.stringify(request));
       } catch (err) {
+        clearTimeout(timer);
         this.pending.delete(id);
         reject(err instanceof Error ? err : new Error(String(err)));
       }

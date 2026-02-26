@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, rename, appendFile } from "node:fs/promises";
+import { readFile, mkdir, rename, appendFile, open } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { v4 as uuid } from "uuid";
@@ -153,7 +153,13 @@ export class LinkStore {
       .join("\n") + (this.links.size > 0 ? "\n" : "");
 
     const tmpPath = this.filePath + ".tmp";
-    await writeFile(tmpPath, content, "utf-8");
+    const fh = await open(tmpPath, "w");
+    try {
+      await fh.writeFile(content, "utf-8");
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
     await rename(tmpPath, this.filePath);
   }
 

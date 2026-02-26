@@ -9,6 +9,7 @@ export const ToolManifestSchema = {
     version: { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" },
     description: { type: "string", minLength: 1 },
     runner: { type: "string", enum: ["shell", "http", "internal", "container"] },
+    category: { type: "string", enum: ["browser", "shell", "http", "filesystem", "llm", "social"] },
     input_schema: { type: "object" },
     output_schema: { type: "object" },
     permissions: {

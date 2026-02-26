@@ -1,6 +1,7 @@
 import { v4 as uuid } from "uuid";
 import type {
   ToolManifest,
+  ToolCategory,
   ToolExecutionRequest,
   ToolExecutionResult,
   ToolHandler,
@@ -17,39 +18,108 @@ import { PolicyViolationError } from "./policy-enforcer.js";
 
 export type { ToolHandler } from "@karnevil9/schemas";
 
+export type BreakerState = "closed" | "open" | "half_open";
+
+export interface CategoryConfig {
+  threshold: number;
+  cooldownMs: number;
+}
+
+const DEFAULT_CATEGORY_CONFIGS: Record<string, CategoryConfig> = {
+  llm: { threshold: 3, cooldownMs: 60000 },
+  browser: { threshold: 5, cooldownMs: 30000 },
+  shell: { threshold: 3, cooldownMs: 15000 },
+  http: { threshold: 3, cooldownMs: 30000 },
+  social: { threshold: 2, cooldownMs: 60000 },
+  filesystem: { threshold: 5, cooldownMs: 30000 },
+};
+
+interface ToolBreakerEntry {
+  count: number;
+  trippedAt: number;
+  state: BreakerState;
+  category?: ToolCategory;
+}
+
 export class CircuitBreaker {
-  private failures = new Map<string, { count: number; trippedAt: number }>();
+  private entries = new Map<string, ToolBreakerEntry>();
   private threshold: number;
   private cooldownMs: number;
+  private categoryDefaults: Record<string, CategoryConfig>;
 
-  constructor(threshold = 5, cooldownMs = 30000) {
+  constructor(threshold = 5, cooldownMs = 30000, categoryDefaults?: Record<string, CategoryConfig>) {
     this.threshold = threshold;
     this.cooldownMs = cooldownMs;
+    this.categoryDefaults = categoryDefaults ?? DEFAULT_CATEGORY_CONFIGS;
   }
 
-  recordFailure(toolName: string): void {
-    const state = this.failures.get(toolName) ?? { count: 0, trippedAt: 0 };
-    state.count++;
-    if (state.count >= this.threshold) {
-      state.trippedAt = Date.now();
+  setCategory(toolName: string, category: ToolCategory): void {
+    const entry = this.entries.get(toolName);
+    if (entry) {
+      entry.category = category;
+    } else {
+      this.entries.set(toolName, { count: 0, trippedAt: 0, state: "closed", category });
     }
-    this.failures.set(toolName, state);
+  }
+
+  private configFor(toolName: string): { threshold: number; cooldownMs: number } {
+    const entry = this.entries.get(toolName);
+    const cat = entry?.category;
+    if (cat && this.categoryDefaults[cat]) {
+      return this.categoryDefaults[cat];
+    }
+    return { threshold: this.threshold, cooldownMs: this.cooldownMs };
+  }
+
+  recordFailure(toolName: string, retriable = true): void {
+    const entry = this.entries.get(toolName) ?? { count: 0, trippedAt: 0, state: "closed" as BreakerState };
+    if (!this.entries.has(toolName)) this.entries.set(toolName, entry);
+
+    if (!retriable) return;
+
+    const { threshold } = this.configFor(toolName);
+
+    if (entry.state === "half_open") {
+      // Probe failed — back to open
+      entry.state = "open";
+      entry.trippedAt = Date.now();
+      return;
+    }
+
+    entry.count++;
+    if (entry.count >= threshold) {
+      entry.trippedAt = Date.now();
+      entry.state = "open";
+    }
   }
 
   recordSuccess(toolName: string): void {
-    this.failures.delete(toolName);
+    this.entries.delete(toolName);
   }
 
   isOpen(toolName: string): boolean {
-    const state = this.failures.get(toolName);
-    if (!state || state.count < this.threshold) return false;
-    const elapsed = Date.now() - state.trippedAt;
-    if (elapsed >= this.cooldownMs) {
-      // Half-open: allow one attempt, reset trippedAt so next check blocks again
-      state.trippedAt = Date.now();
+    const entry = this.entries.get(toolName);
+    if (!entry || entry.state === "closed") return false;
+
+    if (entry.state === "half_open") {
+      // Already half-open, block until probe resolves
+      return true;
+    }
+
+    // state === "open"
+    const { cooldownMs } = this.configFor(toolName);
+    const elapsed = Date.now() - entry.trippedAt;
+    if (elapsed >= cooldownMs) {
+      entry.state = "half_open";
       return false;
     }
     return true;
+  }
+
+  getState(toolName: string): BreakerState {
+    const entry = this.entries.get(toolName);
+    if (!entry) return "closed";
+    return entry.state;
   }
 }
 
@@ -84,6 +154,10 @@ export class ToolRuntime {
     const manifest = this.registry.get(request.tool_name);
     if (!manifest) {
       return this.fail(request, startTime, "TOOL_NOT_FOUND", `Tool "${request.tool_name}" not registered`);
+    }
+
+    if (manifest.category) {
+      this.breaker.setCategory(request.tool_name, manifest.category);
     }
 
     if (this.breaker.isOpen(request.tool_name)) {
@@ -150,7 +224,7 @@ export class ToolRuntime {
 
       const outputValidation = validateToolOutput(output, manifest.output_schema);
       if (!outputValidation.valid) {
-        this.breaker.recordFailure(request.tool_name);
+        this.breaker.recordFailure(request.tool_name, false);
         return this.fail(request, startTime, "INVALID_OUTPUT", `Output validation failed: ${outputValidation.errors.join(", ")}`);
       }
 
@@ -182,7 +256,7 @@ export class ToolRuntime {
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.breaker.recordFailure(request.tool_name);
+      this.breaker.recordFailure(request.tool_name, !(err instanceof PolicyViolationError));
       if (err instanceof PolicyViolationError) {
         await this.journal.emit(request.session_id, "policy.violated", {
           request_id: request.request_id,

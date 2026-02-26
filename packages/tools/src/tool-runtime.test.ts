@@ -6,7 +6,7 @@ import { Journal } from "@karnevil9/journal";
 import { PermissionEngine } from "@karnevil9/permissions";
 import type { ToolManifest, ToolExecutionRequest, ApprovalDecision } from "@karnevil9/schemas";
 import { ToolRegistry } from "./tool-registry.js";
-import { ToolRuntime, CircuitBreaker } from "./tool-runtime.js";
+import { ToolRuntime, CircuitBreaker, type BreakerState, type CategoryConfig } from "./tool-runtime.js";
 
 const TEST_DIR = resolve(import.meta.dirname ?? ".", "../../.test-data");
 const TEST_FILE = resolve(TEST_DIR, "runtime-journal.jsonl");
@@ -422,18 +422,17 @@ describe("ToolRuntime circuit breaker integration", () => {
     registry = new ToolRegistry();
     registry.register(noPermTool);
 
-    // Register a tool that always fails
+    // Register a tool that always throws (retriable errors trip the breaker)
     const failTool: ToolManifest = {
       name: "fail-tool",
       version: "1.0.0",
       description: "Always fails",
       runner: "internal",
       input_schema: { type: "object", additionalProperties: false },
-      output_schema: { type: "object", required: ["result"], properties: { result: { type: "string" } }, additionalProperties: false },
+      output_schema: { type: "object", additionalProperties: false },
       permissions: [],
       timeout_ms: 5000,
       supports: { mock: true, dry_run: false },
-      mock_responses: [{}], // Missing required "result" field - will fail output validation
     };
     registry.register(failTool);
   });
@@ -444,17 +443,18 @@ describe("ToolRuntime circuit breaker integration", () => {
 
   it("returns CIRCUIT_BREAKER_OPEN after threshold failures", async () => {
     const runtime = new ToolRuntime(registry, permissions, journal);
+    runtime.registerHandler("fail-tool", async () => { throw new Error("boom"); });
 
     // Cause 5 failures (default threshold)
     for (let i = 0; i < 5; i++) {
-      const req = makeRequest("fail-tool");
+      const req = makeRequest("fail-tool", {}, "real");
       const result = await runtime.execute(req);
       expect(result.ok).toBe(false);
-      expect(result.error?.code).toBe("INVALID_OUTPUT");
+      expect(result.error?.code).toBe("EXECUTION_ERROR");
     }
 
     // 6th attempt should be blocked by circuit breaker
-    const req = makeRequest("fail-tool");
+    const req = makeRequest("fail-tool", {}, "real");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("CIRCUIT_BREAKER_OPEN");
@@ -462,10 +462,11 @@ describe("ToolRuntime circuit breaker integration", () => {
 
   it("circuit breaker does not affect other tools", async () => {
     const runtime = new ToolRuntime(registry, permissions, journal);
+    runtime.registerHandler("fail-tool", async () => { throw new Error("boom"); });
 
     // Trip circuit breaker for fail-tool
     for (let i = 0; i < 5; i++) {
-      await runtime.execute(makeRequest("fail-tool"));
+      await runtime.execute(makeRequest("fail-tool", {}, "real"));
     }
 
     // free-tool should still work
@@ -679,6 +680,258 @@ describe("ToolRuntime handler registration", () => {
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("EXECUTION_ERROR");
     expect(result.error?.message).toContain("timed out");
+  });
+});
+
+// ─── Circuit Breaker: retriable flag ─────────────────────────────
+
+describe("CircuitBreaker retriable flag", () => {
+  it("recordFailure with retriable=false does not increment trip counter", () => {
+    const breaker = new CircuitBreaker(3, 30000);
+    breaker.recordFailure("tool-a", false);
+    breaker.recordFailure("tool-a", false);
+    breaker.recordFailure("tool-a", false);
+    breaker.recordFailure("tool-a", false);
+    expect(breaker.isOpen("tool-a")).toBe(false);
+    expect(breaker.getState("tool-a")).toBe("closed");
+  });
+
+  it("mixed retriable and non-retriable only counts retriable toward threshold", () => {
+    const breaker = new CircuitBreaker(3, 30000);
+    breaker.recordFailure("tool-a", false); // no count
+    breaker.recordFailure("tool-a", true);  // count=1
+    breaker.recordFailure("tool-a", false); // no count
+    breaker.recordFailure("tool-a", true);  // count=2
+    expect(breaker.isOpen("tool-a")).toBe(false);
+    breaker.recordFailure("tool-a", true);  // count=3 → trips
+    expect(breaker.isOpen("tool-a")).toBe(true);
+  });
+
+  it("default retriable=true preserves backward compatibility", () => {
+    const breaker = new CircuitBreaker(2, 30000);
+    breaker.recordFailure("tool-a");
+    breaker.recordFailure("tool-a");
+    expect(breaker.isOpen("tool-a")).toBe(true);
+  });
+});
+
+// ─── Circuit Breaker: non-retriable integration ─────────────────
+
+describe("ToolRuntime non-retriable errors do not trip breaker", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let permissions: PermissionEngine;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    permissions = new PermissionEngine(journal, async () => "allow_session" as ApprovalDecision);
+    registry = new ToolRegistry();
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("INVALID_OUTPUT errors do not trip the breaker", async () => {
+    const badOutputTool: ToolManifest = {
+      name: "bad-output",
+      version: "1.0.0",
+      description: "Bad output",
+      runner: "internal",
+      input_schema: { type: "object", additionalProperties: false },
+      output_schema: { type: "object", required: ["result"], properties: { result: { type: "string" } }, additionalProperties: false },
+      permissions: [],
+      timeout_ms: 5000,
+      supports: { mock: true, dry_run: false },
+      mock_responses: [{}], // Missing required "result" field
+    };
+    registry.register(badOutputTool);
+    const runtime = new ToolRuntime(registry, permissions, journal);
+
+    // 10 INVALID_OUTPUT failures should not trip the breaker
+    for (let i = 0; i < 10; i++) {
+      const result = await runtime.execute(makeRequest("bad-output"));
+      expect(result.error?.code).toBe("INVALID_OUTPUT");
+    }
+
+    // Next request should NOT be blocked by circuit breaker
+    const result = await runtime.execute(makeRequest("bad-output"));
+    expect(result.error?.code).toBe("INVALID_OUTPUT"); // still fails, but not CIRCUIT_BREAKER_OPEN
+  });
+
+  it("POLICY_VIOLATION errors do not trip the breaker", async () => {
+    const { PolicyViolationError } = await import("./policy-enforcer.js");
+    const policyTool: ToolManifest = {
+      name: "policy-tool",
+      version: "1.0.0",
+      description: "Policy violation",
+      runner: "internal",
+      input_schema: { type: "object", additionalProperties: false },
+      output_schema: { type: "object", additionalProperties: false },
+      permissions: [],
+      timeout_ms: 5000,
+      supports: { mock: true, dry_run: false },
+    };
+    registry.register(policyTool);
+    const runtime = new ToolRuntime(registry, permissions, journal);
+    runtime.registerHandler("policy-tool", async () => {
+      throw new PolicyViolationError("forbidden");
+    });
+
+    // 10 policy violations should not trip the breaker
+    for (let i = 0; i < 10; i++) {
+      const result = await runtime.execute(makeRequest("policy-tool", {}, "real"));
+      expect(result.error?.code).toBe("POLICY_VIOLATION");
+    }
+
+    // Next request should NOT be blocked
+    const result = await runtime.execute(makeRequest("policy-tool", {}, "real"));
+    expect(result.error?.code).toBe("POLICY_VIOLATION");
+  });
+});
+
+// ─── Circuit Breaker: per-category config ───────────────────────
+
+describe("CircuitBreaker per-category config", () => {
+  it("per-category thresholds override global defaults", () => {
+    const breaker = new CircuitBreaker(10, 30000); // global: 10
+    breaker.setCategory("llm-tool", "llm"); // llm default threshold: 3
+
+    breaker.recordFailure("llm-tool");
+    breaker.recordFailure("llm-tool");
+    expect(breaker.isOpen("llm-tool")).toBe(false);
+    breaker.recordFailure("llm-tool"); // 3rd failure → trips (llm threshold=3)
+    expect(breaker.isOpen("llm-tool")).toBe(true);
+  });
+
+  it("per-category cooldown override", () => {
+    // social: threshold=2, cooldown=60s
+    const breaker = new CircuitBreaker(10, 5); // global cooldown=5ms
+    breaker.setCategory("social-tool", "social");
+
+    breaker.recordFailure("social-tool");
+    breaker.recordFailure("social-tool");
+    expect(breaker.isOpen("social-tool")).toBe(true);
+
+    // Wait 10ms — exceeds global cooldown (5ms) but not social cooldown (60s)
+    const start = Date.now();
+    while (Date.now() - start < 10) { /* busy wait */ }
+    expect(breaker.isOpen("social-tool")).toBe(true); // still open (60s cooldown)
+  });
+
+  it("tools without category use global defaults", () => {
+    const breaker = new CircuitBreaker(2, 30000);
+    // No setCategory call
+    breaker.recordFailure("plain-tool");
+    breaker.recordFailure("plain-tool");
+    expect(breaker.isOpen("plain-tool")).toBe(true);
+  });
+
+  it("custom categoryDefaults override built-in defaults", () => {
+    const customDefaults: Record<string, CategoryConfig> = {
+      llm: { threshold: 1, cooldownMs: 100 },
+    };
+    const breaker = new CircuitBreaker(10, 30000, customDefaults);
+    breaker.setCategory("my-llm", "llm");
+
+    breaker.recordFailure("my-llm"); // 1st failure → trips (custom threshold=1)
+    expect(breaker.isOpen("my-llm")).toBe(true);
+  });
+
+  it("category set via ToolRuntime.execute() from manifest", async () => {
+    const j = new Journal(resolve(TEST_DIR, "cat-journal.jsonl"), { fsync: false, lock: false });
+    await j.init();
+    const p = new PermissionEngine(j, async () => "allow_session" as ApprovalDecision);
+    const r = new ToolRegistry();
+    const catTool: ToolManifest = {
+      name: "shell-cmd",
+      version: "1.0.0",
+      description: "Shell tool with category",
+      runner: "internal",
+      category: "shell",
+      input_schema: { type: "object", additionalProperties: false },
+      output_schema: { type: "object", additionalProperties: false },
+      permissions: [],
+      timeout_ms: 5000,
+      supports: { mock: true, dry_run: false },
+    };
+    r.register(catTool);
+    const rt = new ToolRuntime(r, p, j);
+    rt.registerHandler("shell-cmd", async () => { throw new Error("fail"); });
+
+    // shell category: threshold=3, cooldown=15s
+    for (let i = 0; i < 3; i++) {
+      await rt.execute(makeRequest("shell-cmd", {}, "real"));
+    }
+    const result = await rt.execute(makeRequest("shell-cmd", {}, "real"));
+    expect(result.error?.code).toBe("CIRCUIT_BREAKER_OPEN");
+    await rm(TEST_DIR, { recursive: true }).catch(() => {});
+  });
+});
+
+// ─── Circuit Breaker: getState + state transitions ──────────────
+
+describe("CircuitBreaker getState and state transitions", () => {
+  it("returns closed → open → half_open → closed lifecycle", () => {
+    const breaker = new CircuitBreaker(2, 10); // 10ms cooldown
+
+    // Initial state
+    expect(breaker.getState("tool-z")).toBe("closed");
+
+    // Trip it
+    breaker.recordFailure("tool-z");
+    expect(breaker.getState("tool-z")).toBe("closed"); // not yet
+    breaker.recordFailure("tool-z");
+    expect(breaker.getState("tool-z")).toBe("open");
+
+    // Wait for cooldown
+    const start = Date.now();
+    while (Date.now() - start < 15) { /* busy wait */ }
+
+    // isOpen transitions to half_open
+    expect(breaker.isOpen("tool-z")).toBe(false);
+    expect(breaker.getState("tool-z")).toBe("half_open");
+
+    // Success closes it
+    breaker.recordSuccess("tool-z");
+    expect(breaker.getState("tool-z")).toBe("closed");
+  });
+
+  it("half_open → open on probe failure", () => {
+    const breaker = new CircuitBreaker(2, 10);
+    breaker.recordFailure("tool-z");
+    breaker.recordFailure("tool-z");
+    expect(breaker.getState("tool-z")).toBe("open");
+
+    const start = Date.now();
+    while (Date.now() - start < 15) { /* busy wait */ }
+
+    // Transition to half_open
+    expect(breaker.isOpen("tool-z")).toBe(false);
+    expect(breaker.getState("tool-z")).toBe("half_open");
+
+    // Probe fails → back to open
+    breaker.recordFailure("tool-z");
+    expect(breaker.getState("tool-z")).toBe("open");
+    expect(breaker.isOpen("tool-z")).toBe(true);
+  });
+
+  it("half_open blocks concurrent isOpen calls", () => {
+    const breaker = new CircuitBreaker(2, 10);
+    breaker.recordFailure("t");
+    breaker.recordFailure("t");
+
+    const start = Date.now();
+    while (Date.now() - start < 15) { /* busy wait */ }
+
+    // First call: transitions to half_open, returns false
+    expect(breaker.isOpen("t")).toBe(false);
+    expect(breaker.getState("t")).toBe("half_open");
+
+    // Second call: already half_open, blocks
+    expect(breaker.isOpen("t")).toBe(true);
   });
 });
 

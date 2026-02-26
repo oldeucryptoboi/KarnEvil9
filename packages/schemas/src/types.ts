@@ -140,11 +140,14 @@ export interface ModelPricing {
 
 export type ToolRunner = "shell" | "http" | "internal" | "container";
 
+export type ToolCategory = "browser" | "shell" | "http" | "filesystem" | "llm" | "social";
+
 export interface ToolManifest {
   name: string;
   version: string;
   description: string;
   runner: ToolRunner;
+  category?: ToolCategory;
   input_schema: Record<string, unknown>;
   output_schema: Record<string, unknown>;
   permissions: string[];

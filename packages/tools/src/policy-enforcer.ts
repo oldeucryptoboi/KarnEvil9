@@ -193,12 +193,54 @@ const DANGEROUS_FLAGS: Record<string, string[]> = {
   xargs: ["-I", "--replace"],
 };
 
+/** Individual short flags that are dangerous (extracted from DANGEROUS_FLAGS for combined-flag expansion). */
+const DANGEROUS_SHORT_FLAGS: Record<string, Set<string>> = {};
+for (const [cmd, flags] of Object.entries(DANGEROUS_FLAGS)) {
+  const shorts = new Set<string>();
+  for (const f of flags) {
+    // Single-char short flag like -r, -i, -R, -I
+    if (/^-[A-Za-z]$/.test(f)) shorts.add(f[1]!);
+  }
+  if (shorts.size > 0) DANGEROUS_SHORT_FLAGS[cmd] = shorts;
+}
+
+/**
+ * Quote-aware command parser matching shell-exec's parseCommand.
+ * Handles double quotes, single quotes, and backslash escaping.
+ */
+function parseCommandForPolicy(command: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let inDouble = false;
+  let inSingle = false;
+
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]!;
+    if (c === "\\" && !inSingle && i + 1 < command.length) {
+      current += command[++i];
+    } else if (c === '"' && !inSingle) {
+      inDouble = !inDouble;
+    } else if (c === "'" && !inDouble) {
+      inSingle = !inSingle;
+    } else if (c === " " && !inDouble && !inSingle) {
+      if (current.length > 0) {
+        args.push(current);
+        current = "";
+      }
+    } else {
+      current += c;
+    }
+  }
+  if (current.length > 0) args.push(current);
+  return args;
+}
+
 export function assertCommandAllowed(
   command: string,
   allowedCommands: string[]
 ): void {
   if (allowedCommands.length === 0) return;
-  const parts = command.trim().split(/\s+/);
+  const parts = parseCommandForPolicy(command.trim());
   const binary = parts[0]!;
   if (!allowedCommands.includes(binary)) {
     throw new PolicyViolationError(
@@ -208,11 +250,22 @@ export function assertCommandAllowed(
   // Check for dangerous flags on known commands
   const dangerous = DANGEROUS_FLAGS[binary];
   if (dangerous) {
+    const dangerousShorts = DANGEROUS_SHORT_FLAGS[binary];
     for (const arg of parts.slice(1)) {
       if (dangerous.includes(arg)) {
         throw new PolicyViolationError(
           `Dangerous flag "${arg}" is not allowed for command "${binary}"`
         );
+      }
+      // Expand combined short flags (e.g. -rfi → check -r, -f, -i individually)
+      if (dangerousShorts && /^-[A-Za-z]{2,}$/.test(arg)) {
+        for (const ch of arg.slice(1)) {
+          if (dangerousShorts.has(ch)) {
+            throw new PolicyViolationError(
+              `Dangerous flag "-${ch}" (in "${arg}") is not allowed for command "${binary}"`
+            );
+          }
+        }
       }
     }
   }

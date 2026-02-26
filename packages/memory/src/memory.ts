@@ -263,10 +263,10 @@ export class ActiveMemory {
   }
 }
 
-const SENSITIVE_PATTERN = /Bearer\s\S+|ghp_\S+|sk-\S+|AKIA[A-Z0-9]{16}\S*|-----BEGIN\s+PRIVATE\sKEY-----/gi;
-
 function redactSensitive(text: string): string {
-  return text.replace(SENSITIVE_PATTERN, "[REDACTED]");
+  // Regex created per-call to avoid stateful `lastIndex` from the `g` flag
+  const pattern = /Bearer\s\S+|ghp_\S+|sk-\S+|AKIA[A-Z0-9]{16}\S*|-----BEGIN\s+PRIVATE\sKEY-----/gi;
+  return text.replace(pattern, "[REDACTED]");
 }
 
 export function extractLesson(

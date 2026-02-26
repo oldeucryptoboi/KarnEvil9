@@ -134,6 +134,28 @@ describe("FutilityMonitor", () => {
     expect(v2.action).toBe("continue");
   });
 
+  it("does not trigger on non-consecutive identical goals (A→B→A)", () => {
+    const monitor = new FutilityMonitor({ maxIdenticalPlans: 2, maxRepeatedErrors: 99, maxStagnantIterations: 99 });
+
+    monitor.recordIteration(makeRecord(1, "Gather data", [makeResult()]));
+    monitor.recordIteration(makeRecord(2, "Analyze results", [makeResult(), makeResult({ step_id: "s2" })]));
+    // Revisit "Gather data" — only 1 consecutive, should NOT halt
+    const v3 = monitor.recordIteration(makeRecord(3, "Gather data", [makeResult(), makeResult({ step_id: "s2" }), makeResult({ step_id: "s3" })]));
+    expect(v3.action).toBe("continue");
+  });
+
+  it("triggers on consecutive identical goals", () => {
+    const monitor = new FutilityMonitor({ maxIdenticalPlans: 2, maxRepeatedErrors: 99, maxStagnantIterations: 99 });
+
+    monitor.recordIteration(makeRecord(1, "Gather data", [makeResult()]));
+    monitor.recordIteration(makeRecord(2, "Analyze results", [makeResult(), makeResult({ step_id: "s2" })]));
+    monitor.recordIteration(makeRecord(3, "Gather data", [makeResult(), makeResult({ step_id: "s2" }), makeResult({ step_id: "s3" })]));
+    // Now two consecutive "Gather data" → should halt
+    const v4 = monitor.recordIteration(makeRecord(4, "Gather data", [makeResult(), makeResult({ step_id: "s2" }), makeResult({ step_id: "s3" }), makeResult({ step_id: "s4" })]));
+    expect(v4.action).toBe("halt");
+    expect((v4 as { reason: string }).reason).toContain("consecutive");
+  });
+
   // ─── Priority / First Match Wins ─────────────────────────────────
 
   it("repeated error takes priority over stagnation", () => {

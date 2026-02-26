@@ -86,7 +86,7 @@ function sanitizeEnv(): Record<string, string> {
  * Parse a command string into binary + arguments, handling basic quoting.
  * Supports double quotes, single quotes, and backslash escaping.
  */
-function parseCommand(command: string): string[] {
+export function parseCommand(command: string): string[] {
   const args: string[] = [];
   let current = "";
   let inDouble = false;

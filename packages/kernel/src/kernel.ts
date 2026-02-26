@@ -816,14 +816,14 @@ export class Kernel {
   }
 
   private async runConcurrent<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
-    const results: T[] = [];
+    const results: T[] = new Array(tasks.length);
     let index = 0;
 
     async function worker(): Promise<void> {
       while (index < tasks.length) {
         const currentIndex = index++;
         const result = await tasks[currentIndex]!();
-        results.push(result);
+        results[currentIndex] = result;
       }
     }
 
@@ -1228,7 +1228,9 @@ export class Kernel {
 
     // Atomic write to checkpoint dir
     const checkpointDir = this.config.checkpointDir ?? "sessions/checkpoints";
-    const checkpointPath = join(checkpointDir, `${this.session.session_id}.json`);
+    // Guard against path traversal via session_id (defense-in-depth)
+    const safeId = this.session.session_id.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const checkpointPath = join(checkpointDir, `${safeId}.json`);
     try {
       await mkdir(dirname(checkpointPath), { recursive: true });
       const tmpPath = checkpointPath + ".tmp";

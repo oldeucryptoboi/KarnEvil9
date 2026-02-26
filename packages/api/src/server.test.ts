@@ -2061,6 +2061,64 @@ describe("ApiServer WebSocket", () => {
     }
   });
 
+  it("approve rejects invalid decision payloads via WebSocket", async () => {
+    const ws = await connectWs();
+    try {
+      let resolvedDecision: ApprovalDecision | null = null;
+      apiServer.registerApproval("ws-approve-invalid", { tool: "test" }, (decision) => {
+        resolvedDecision = decision;
+      });
+
+      // Send an invalid decision (not a valid approval type)
+      ws.send(JSON.stringify({ type: "approve", request_id: "ws-approve-invalid", decision: "grant_everything" }));
+
+      await new Promise((r) => setTimeout(r, 50));
+      // Decision should NOT have been resolved — still null
+      expect(resolvedDecision).toBeNull();
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("approve rejects missing decision via WebSocket", async () => {
+    const ws = await connectWs();
+    try {
+      let resolvedDecision: ApprovalDecision | null = null;
+      apiServer.registerApproval("ws-approve-no-decision", { tool: "test" }, (decision) => {
+        resolvedDecision = decision;
+      });
+
+      // Send without decision field
+      ws.send(JSON.stringify({ type: "approve", request_id: "ws-approve-no-decision" }));
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(resolvedDecision).toBeNull();
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("approve accepts valid object decisions via WebSocket", async () => {
+    const ws = await connectWs();
+    try {
+      let resolvedDecision: ApprovalDecision | null = null;
+      apiServer.registerApproval("ws-approve-obj", { tool: "test" }, (decision) => {
+        resolvedDecision = decision;
+      });
+
+      ws.send(JSON.stringify({
+        type: "approve",
+        request_id: "ws-approve-obj",
+        decision: { type: "allow_constrained", constraints: { max_calls: 5 } },
+      }));
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(resolvedDecision).toEqual({ type: "allow_constrained", constraints: { max_calls: 5 } });
+    } finally {
+      ws.close();
+    }
+  });
+
   it("cleans up client on close", async () => {
     const ws = await connectWs();
     const msgPromise = waitForMessage(ws);

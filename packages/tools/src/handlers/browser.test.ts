@@ -287,6 +287,46 @@ describe("createBrowserHandler — without driver (relay fallback)", () => {
   });
 });
 
+describe("browserHandler — evaluate action gate", () => {
+  it("blocks evaluate without browser_evaluate in allowed_commands", async () => {
+    mockFetch({ success: true });
+    const result = (await browserHandler(
+      { action: "evaluate", expression: "document.title" }, "real", openPolicy
+    )) as any;
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("browser_evaluate");
+    // fetch should NOT have been called
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("allows evaluate when browser_evaluate is in allowed_commands", async () => {
+    mockFetch({ success: true, result: "Example" });
+    const evalPolicy: PolicyProfile = {
+      ...openPolicy,
+      allowed_commands: ["browser_evaluate"],
+    };
+    const result = (await browserHandler(
+      { action: "evaluate", expression: "document.title" }, "real", evalPolicy
+    )) as any;
+    expect(result.success).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalled();
+  });
+
+  it("evaluate still works in mock mode without permission", async () => {
+    const result = (await browserHandler(
+      { action: "evaluate", expression: "1+1" }, "mock", openPolicy
+    )) as any;
+    expect(result.success).toBe(true);
+  });
+
+  it("evaluate still works in dry_run mode without permission", async () => {
+    const result = (await browserHandler(
+      { action: "evaluate", expression: "1+1" }, "dry_run", openPolicy
+    )) as any;
+    expect(result.success).toBe(true);
+  });
+});
+
 describe("backward-compatible browserHandler export", () => {
   it("is a function (ToolHandler)", () => {
     expect(typeof browserHandler).toBe("function");

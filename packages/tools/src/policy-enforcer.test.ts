@@ -617,6 +617,52 @@ describe("assertCommandAllowed — dangerous flags", () => {
   });
 });
 
+describe("assertCommandAllowed — quote-aware parsing", () => {
+  it("blocks quoted dangerous flags (double quotes)", () => {
+    expect(() => assertCommandAllowed('find . "-delete"', ["find"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks quoted dangerous flags (single quotes)", () => {
+    expect(() => assertCommandAllowed("find . '-delete'", ["find"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks backslash-escaped dangerous flags", () => {
+    expect(() => assertCommandAllowed("find . -\\delete", ["find"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks quoted -exec in find", () => {
+    expect(() => assertCommandAllowed('find . "-exec" rm {} ;', ["find"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks quoted -i in sed", () => {
+    expect(() => assertCommandAllowed("sed '-i' s/foo/bar/ file.txt", ["sed"])).toThrow(PolicyViolationError);
+  });
+});
+
+describe("assertCommandAllowed — combined short flags", () => {
+  it("blocks -rfi (contains -r and -f individually)", () => {
+    expect(() => assertCommandAllowed("rm -rfi /tmp/dir", ["rm"])).toThrow(PolicyViolationError);
+    expect(() => assertCommandAllowed("rm -rfi /tmp/dir", ["rm"])).toThrow("-r");
+  });
+
+  it("blocks -fr (contains both -f and -r)", () => {
+    expect(() => assertCommandAllowed("rm -fr /tmp/dir", ["rm"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks -Rv for chmod (-R is dangerous)", () => {
+    expect(() => assertCommandAllowed("chmod -Rv 755 /tmp", ["chmod"])).toThrow(PolicyViolationError);
+    expect(() => assertCommandAllowed("chmod -Rv 755 /tmp", ["chmod"])).toThrow("-R");
+  });
+
+  it("allows non-dangerous combined flags", () => {
+    expect(() => assertCommandAllowed("find . -name '*.ts' -type f", ["find"])).not.toThrow();
+  });
+
+  it("does not false-positive on long flags", () => {
+    expect(() => assertCommandAllowed("rm --verbose /tmp/file", ["rm"])).not.toThrow();
+  });
+});
+
 describe("isPrivateIP — CGNAT (RFC 6598) 100.64.0.0/10", () => {
   it("detects 100.64.0.0 as private", () => {
     expect(isPrivateIP("100.64.0.0")).toBe(true);

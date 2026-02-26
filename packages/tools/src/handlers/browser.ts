@@ -73,12 +73,19 @@ export function createBrowserHandler(driver?: BrowserDriverLike): ToolHandler {
       return dryRun(action, input);
     }
 
-    // Real mode — enforce policy for navigate
+    // Real mode — enforce policy for navigate and evaluate
     if (action === "navigate") {
       if (typeof input.url !== "string") {
         return { success: false, error: "input.url must be a string for navigate action" };
       }
       await assertEndpointAllowedAsync(input.url, policy.allowed_endpoints);
+    }
+
+    // Evaluate executes arbitrary JS — require explicit opt-in via allowed_commands
+    if (action === "evaluate") {
+      if (!policy.allowed_commands.includes("browser_evaluate")) {
+        return { success: false, error: 'browser "evaluate" action requires "browser_evaluate" in allowed_commands' };
+      }
     }
 
     // Direct: use in-process driver

@@ -38,26 +38,28 @@ export const httpRequestHandler: ToolHandler = async (
     clearTimeout(timer);
   }
 
-  // Handle redirects manually to prevent SSRF via redirect to private IPs
-  if (response.status >= 300 && response.status < 400) {
+  // Handle redirects manually to prevent SSRF via redirect to private IPs.
+  // Loop to follow chained redirects (e.g. HTTP→HTTPS→domain) up to a bounded limit.
+  const MAX_REDIRECTS = 5;
+  for (let redirectCount = 0; redirectCount < MAX_REDIRECTS; redirectCount++) {
+    if (response.status < 300 || response.status >= 400) break;
     const location = response.headers.get("location");
-    if (location) {
-      // Validate redirect target against SSRF and endpoint policy
-      let redirectUrl: string;
-      try {
-        redirectUrl = new URL(location, url).href;
-      } catch {
-        return { status: response.status, body: "", headers: {}, error: `Malformed redirect URL: ${location}` };
-      }
-      await assertEndpointAllowedAsync(redirectUrl, policy.allowed_endpoints);
-      // Fresh AbortController for redirect — the original may be in an indeterminate state
-      const redirectController = new AbortController();
-      const redirectTimer = setTimeout(() => redirectController.abort(), fetchTimeout);
-      try {
-        response = await fetch(redirectUrl, { ...fetchOpts, signal: redirectController.signal, redirect: "manual" });
-      } finally {
-        clearTimeout(redirectTimer);
-      }
+    if (!location) break;
+    // Validate redirect target against SSRF and endpoint policy
+    let redirectUrl: string;
+    try {
+      redirectUrl = new URL(location, url).href;
+    } catch {
+      return { status: response.status, body: "", headers: {}, error: `Malformed redirect URL: ${location}` };
+    }
+    await assertEndpointAllowedAsync(redirectUrl, policy.allowed_endpoints);
+    // Fresh AbortController for each redirect hop
+    const redirectController = new AbortController();
+    const redirectTimer = setTimeout(() => redirectController.abort(), fetchTimeout);
+    try {
+      response = await fetch(redirectUrl, { ...fetchOpts, signal: redirectController.signal, redirect: "manual" });
+    } finally {
+      clearTimeout(redirectTimer);
     }
   }
 

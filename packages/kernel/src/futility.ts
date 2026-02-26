@@ -93,14 +93,18 @@ export class FutilityMonitor {
       }
     }
 
-    // 3. Identical Plan Detection
+    // 3. Identical Plan Detection — count consecutive identical goals (not total)
     if (this.goalHistory.length >= this.maxIdenticalPlans) {
       const currentGoal = this.goalHistory[this.goalHistory.length - 1]!;
-      const matchCount = this.goalHistory.filter(g => g === currentGoal).length;
-      if (matchCount >= this.maxIdenticalPlans) {
+      let consecutiveCount = 0;
+      for (let i = this.goalHistory.length - 1; i >= 0; i--) {
+        if (this.goalHistory[i] === currentGoal) consecutiveCount++;
+        else break;
+      }
+      if (consecutiveCount >= this.maxIdenticalPlans) {
         return {
           action: "halt",
-          reason: `Identical plan goal repeated ${matchCount} times: "${currentGoal}"`,
+          reason: `Identical plan goal repeated ${consecutiveCount} consecutive times: "${currentGoal}"`,
         };
       }
     }

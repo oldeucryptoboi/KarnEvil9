@@ -93,6 +93,22 @@ function getClientIP(req: IncomingMessage, trustedProxies?: string[]): string {
   return directIp;
 }
 
+/** Whitelist safe headers before forwarding to plugin route handlers. */
+const SAFE_PLUGIN_HEADERS = new Set([
+  "content-type", "accept", "content-length", "user-agent",
+  "accept-language", "accept-encoding", "origin", "referer",
+]);
+
+function filterSafeHeaders(headers: Record<string, string | string[] | undefined>): Record<string, string> {
+  const filtered: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (SAFE_PLUGIN_HEADERS.has(key.toLowerCase()) && value !== undefined) {
+      filtered[key] = Array.isArray(value) ? value.join(", ") : value;
+    }
+  }
+  return filtered;
+}
+
 // ─── Input Validation ──────────────────────────────────────────────
 
 const VALID_MODES = new Set(["mock", "dry_run", "real"]);
@@ -677,8 +693,17 @@ export class ApiServer {
     if (typeof requestId !== "string") return;
     const approval = this.pendingApprovals.get(requestId);
     if (!approval) return;
+    // Validate decision payload — same validation as the REST endpoint
+    const validationError = validateApprovalInput({ decision: msg.decision });
+    if (validationError) return;
+    // Reject expired approvals
+    const age = Date.now() - approval.created_at;
+    if (age > this.approvalTimeoutMs * 2) {
+      clearTimeout(approval.timer);
+      this.pendingApprovals.delete(requestId);
+      return;
+    }
     const decision = msg.decision as ApprovalDecision;
-    if (!decision) return;
     clearTimeout(approval.timer);
     approval.resolve(decision);
     this.pendingApprovals.delete(requestId);
@@ -1157,7 +1182,7 @@ export class ApiServer {
                   params: req.params as Record<string, string>,
                   query: req.query as Record<string, string>,
                   body: req.body,
-                  headers: req.headers as Record<string, string>,
+                  headers: filterSafeHeaders(req.headers),
                 },
                 {
                   json: (data: unknown) => res.json(data),

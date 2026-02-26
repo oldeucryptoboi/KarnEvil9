@@ -47,13 +47,13 @@ export class ExtensionDriver implements BrowserDriver {
 
   /** Start the bridge WebSocket server. Must be called before execute(). */
   async startBridge(): Promise<void> {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       this.wss = new WebSocketServer({ port: this.bridgePort }, () => {
         resolve();
       });
 
-      this.wss.on("error", () => {
-        // Server-level errors (e.g. EADDRINUSE) — handled via close/reconnect
+      this.wss.on("error", (err) => {
+        reject(err);
       });
 
       this.wss.on("connection", (ws) => {

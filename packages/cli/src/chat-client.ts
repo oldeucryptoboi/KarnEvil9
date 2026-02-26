@@ -122,6 +122,7 @@ export class ChatClient {
         ws.send(JSON.stringify({ type: "ping" }));
       }
     }, this._pingIntervalMs);
+    this._pingInterval.unref();
 
     // Single close handler: clean up ping interval and delegate to handleWsClose
     ws.on("close", () => {

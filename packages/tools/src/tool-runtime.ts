@@ -223,6 +223,7 @@ export class ToolRuntime {
         handler(request.input, request.mode, effectivePolicy),
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error(`Tool "${request.tool_name}" timed out after ${timeout}ms`)), timeout);
+          timer.unref();
         }),
       ]);
     } finally {

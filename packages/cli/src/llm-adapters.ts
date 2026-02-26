@@ -132,10 +132,12 @@ function createOpenAICallFn(model: string, overrideBaseURL?: string): ModelCallF
           { role: "user", content: userPrompt },
         ],
       });
-      const content = response.choices[0]?.message?.content;
+      let content = response.choices[0]?.message?.content;
       if (!content) {
         throw new Error("OpenAI returned no content");
       }
+      // Strip Qwen3-style <think>...</think> reasoning tags
+      content = content.replace(/<think>[\s\S]*?<\/think>\s*/g, "");
       const promptTokens = response.usage?.prompt_tokens ?? 0;
       const completionTokens = response.usage?.completion_tokens ?? 0;
       return {

@@ -780,14 +780,15 @@ export class ApiServer {
       router.use((req, res, next) => {
         const auth = req.headers.authorization;
         if (!auth || !auth.startsWith("Bearer ")) {
-          console.warn(`[api] AUTH_FAIL: missing/malformed Authorization header from ${getClientIP(req, this.trustedProxies)} ${req.method} ${req.path}`);
+          console.warn(`[api] AUTH_FAIL: missing/malformed Authorization header from ${getClientIP(req, this.trustedProxies)} ${req.method} ${req.path.replace(/[\r\n]/g, "")}`);
+
           res.status(401).json({ error: "Unauthorized" });
           return;
         }
         const provided = Buffer.from(auth.slice(7));
         const expected = Buffer.from(token);
         if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-          console.warn(`[api] AUTH_FAIL: invalid token from ${getClientIP(req, this.trustedProxies)} ${req.method} ${req.path}`);
+          console.warn(`[api] AUTH_FAIL: invalid token from ${getClientIP(req, this.trustedProxies)} ${req.method} ${req.path.replace(/[\r\n]/g, "")}`);
           res.status(401).json({ error: "Unauthorized" });
           return;
         }

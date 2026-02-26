@@ -21,6 +21,23 @@ import type { SwarmConfig } from "@karnevil9/swarm";
 import type { Task, ApprovalDecision, PermissionRequest } from "@karnevil9/schemas";
 import type { ChatWebSocket } from "./chat-client.js";
 
+function parsePort(value: string, label = "port"): number {
+  const port = parseInt(value, 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid ${label}: "${value}" (must be 1–65535)`);
+  }
+  return port;
+}
+
+function parsePositiveInt(value: string, label: string, fallback?: number): number {
+  const n = parseInt(value, 10);
+  if (Number.isNaN(n) || n < 1) {
+    if (fallback !== undefined) return fallback;
+    throw new Error(`Invalid ${label}: "${value}" (must be a positive integer)`);
+  }
+  return n;
+}
+
 // Global error handlers — prevent silent crashes from unhandled rejections/exceptions
 process.on("unhandledRejection", (reason) => {
   console.error("[karnevil9] Unhandled rejection:", reason);
@@ -151,7 +168,7 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
       pluginRegistry,
       planner,
       mode: opts.mode as "real" | "dry_run" | "mock",
-      limits: { max_steps: parseInt(opts.maxSteps, 10), max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000, max_iterations: 10 },
+      limits: { max_steps: parsePositiveInt(opts.maxSteps, "max-steps", 20), max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000, max_iterations: 10 },
       plannerTimeoutMs: 90000,
       policy,
       agentic: opts.agentic ?? false,
@@ -204,24 +221,30 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
     console.log(`Mode: ${opts.mode}`);
     console.log(`Tools: ${registry.list().map((t) => t.name).join(", ") || "(none)"}`);
     console.log(`Plugins: ${activePlugins.map((p) => p.id).join(", ") || "(none)"}\n`);
-    await kernel.createSession(task);
-    const session = await kernel.run();
-    console.log(`\nSession ${session.session_id}`);
-    console.log(`Status: ${session.status}`);
-    const state = kernel.getTaskState();
-    if (state) {
-      const snapshot = state.getSnapshot();
-      console.log(`Steps completed: ${snapshot.completed_steps}/${snapshot.total_steps}`);
-    }
-    const usage = kernel.getUsageSummary();
-    if (usage && usage.total_tokens > 0) {
-      console.log(`Tokens: ${usage.total_tokens.toLocaleString()} (${usage.total_input_tokens.toLocaleString()} in / ${usage.total_output_tokens.toLocaleString()} out)`);
-      if (usage.total_cost_usd > 0) {
-        console.log(`Estimated cost: $${usage.total_cost_usd.toFixed(4)}`);
+    try {
+      await kernel.createSession(task);
+      const session = await kernel.run();
+      console.log(`\nSession ${session.session_id}`);
+      console.log(`Status: ${session.status}`);
+      const state = kernel.getTaskState();
+      if (state) {
+        const snapshot = state.getSnapshot();
+        console.log(`Steps completed: ${snapshot.completed_steps}/${snapshot.total_steps}`);
       }
+      const usage = kernel.getUsageSummary();
+      if (usage && usage.total_tokens > 0) {
+        console.log(`Tokens: ${usage.total_tokens.toLocaleString()} (${usage.total_input_tokens.toLocaleString()} in / ${usage.total_output_tokens.toLocaleString()} out)`);
+        if (usage.total_cost_usd > 0) {
+          console.log(`Estimated cost: $${usage.total_cost_usd.toFixed(4)}`);
+        }
+      }
+    } finally {
+      removeShutdownHandler();
+      if (browserDriver && "close" in browserDriver) {
+        await (browserDriver as { close(): Promise<void> }).close();
+      }
+      await journal.close();
     }
-    removeShutdownHandler();
-    await journal.close();
   });
 
 program.command("plan").description("Generate a plan without executing").argument("<task>", "Task description")
@@ -352,7 +375,7 @@ program.command("server").description("Start the API server")
     const planner = createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic });
     const scheduleStore = new ScheduleStore(SCHEDULER_PATH);
     const pluginsDir = resolve(opts.pluginsDir);
-    const port = parseInt(opts.port, 10);
+    const port = parsePort(opts.port);
     // pluginRegistry reference needed by sessionFactory — assigned after construction
     let pluginRegistry!: PluginRegistry;
 
@@ -398,10 +421,12 @@ program.command("server").description("Start the API server")
         token: opts.swarmToken ?? process.env.KARNEVIL9_SWARM_TOKEN,
         node_name: opts.swarmName ?? process.env.KARNEVIL9_SWARM_NODE_NAME ?? hostname(),
         api_url: `http://localhost:${port}`,
-        seeds: (opts.swarmSeeds ?? process.env.KARNEVIL9_SWARM_SEEDS ?? "").split(",").map((s: string) => s.trim()).filter(Boolean),
+        seeds: (opts.swarmSeeds ?? process.env.KARNEVIL9_SWARM_SEEDS ?? "").split(",").map((s: string) => s.trim()).filter(Boolean).filter((s: string) => {
+          try { new URL(s); return true; } catch { console.warn(`[swarm] Ignoring invalid seed URL: ${s}`); return false; }
+        }),
         mdns: opts.swarmMdns ?? (process.env.KARNEVIL9_SWARM_MDNS !== "false"),
         gossip: opts.swarmGossip ?? (process.env.KARNEVIL9_SWARM_GOSSIP !== "false"),
-        max_peers: parseInt(process.env.KARNEVIL9_SWARM_MAX_PEERS ?? "50", 10),
+        max_peers: parsePositiveInt(process.env.KARNEVIL9_SWARM_MAX_PEERS ?? "50", "KARNEVIL9_SWARM_MAX_PEERS", 50),
         capabilities: registry.list().map((t) => t.name),
       };
       meshManager = new MeshManager({
@@ -492,7 +517,7 @@ program.command("server").description("Start the API server")
           sessionFactory: sharedSessionFactory,
           journal,
         },
-        "claude-code": { journal, apiKey: process.env.ANTHROPIC_API_KEY, model: process.env.KARNEVIL9_CLAUDE_CODE_MODEL, maxTurns: process.env.KARNEVIL9_CLAUDE_CODE_MAX_TURNS ? parseInt(process.env.KARNEVIL9_CLAUDE_CODE_MAX_TURNS, 10) : undefined },
+        "claude-code": { journal, apiKey: process.env.ANTHROPIC_API_KEY, model: process.env.KARNEVIL9_CLAUDE_CODE_MODEL, maxTurns: process.env.KARNEVIL9_CLAUDE_CODE_MAX_TURNS ? parsePositiveInt(process.env.KARNEVIL9_CLAUDE_CODE_MAX_TURNS, "KARNEVIL9_CLAUDE_CODE_MAX_TURNS") : undefined },
         "openai-codex": { journal, apiKey: process.env.OPENAI_API_KEY, model: process.env.KARNEVIL9_CODEX_MODEL },
         "grok-search": { journal, apiKey: process.env.XAI_API_KEY ?? process.env.XAI_KEY, model: process.env.KARNEVIL9_GROK_MODEL },
         "vault": {
@@ -521,8 +546,8 @@ program.command("server").description("Start the API server")
       apiToken,
       insecure: opts.insecure === true,
       corsOrigins: corsOrigins ? corsOrigins.split(",").map((s) => s.trim()) : undefined,
-      approvalTimeoutMs: parseInt(process.env.KARNEVIL9_APPROVAL_TIMEOUT_MS ?? "300000", 10),
-      maxConcurrentSessions: parseInt(process.env.KARNEVIL9_MAX_SESSIONS ?? "50", 10),
+      approvalTimeoutMs: parsePositiveInt(process.env.KARNEVIL9_APPROVAL_TIMEOUT_MS ?? "300000", "KARNEVIL9_APPROVAL_TIMEOUT_MS", 300000),
+      maxConcurrentSessions: parsePositiveInt(process.env.KARNEVIL9_MAX_SESSIONS ?? "50", "KARNEVIL9_MAX_SESSIONS", 50),
     });
     apiServerRef = apiServer;
     apiServer.listen(port);
@@ -581,7 +606,7 @@ program.command("relay").description("Start the browser relay server")
 
     let browserDriver;
     if (driverType === "extension") {
-      const driver = new ExtensionDriver({ bridgePort: parseInt(opts.bridgePort, 10) });
+      const driver = new ExtensionDriver({ bridgePort: parsePort(opts.bridgePort, "bridge-port") });
       await driver.startBridge();
       browserDriver = driver;
       console.log(`Using extension driver (bridge WS on port ${opts.bridgePort})`);
@@ -590,7 +615,7 @@ program.command("relay").description("Start the browser relay server")
       console.log(`Using managed driver (Playwright, headless=${opts.headless})`);
     }
 
-    const server = new RelayServer({ port: parseInt(opts.port, 10), driver: browserDriver, driverName: driverType });
+    const server = new RelayServer({ port: parsePort(opts.port), driver: browserDriver, driverName: driverType });
     await server.listen();
   });
 

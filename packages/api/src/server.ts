@@ -969,9 +969,9 @@ export class ApiServer {
       const afterSeq = Number.isNaN(rawAfterSeq) ? undefined : rawAfterSeq;
 
       if (afterSeq !== undefined) {
-        const events = await this.journal.readSession(sessionId);
-        let replayCount = 0;
         const MAX_REPLAY = 500;
+        const events = await this.journal.readSession(sessionId, { limit: MAX_REPLAY + afterSeq + 1 });
+        let replayCount = 0;
         const serverResForReplay = res as unknown as ServerResponse;
         for (const event of events) {
           if (serverResForReplay.destroyed) break;

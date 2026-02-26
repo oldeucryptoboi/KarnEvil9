@@ -14,6 +14,13 @@ export interface MetricsCollectorConfig {
   collectDefault?: boolean;
 }
 
+const MAX_LABEL_LENGTH = 64;
+
+function sanitizeLabel(value: string): string {
+  if (value.length > MAX_LABEL_LENGTH) value = value.slice(0, MAX_LABEL_LENGTH);
+  return value.replace(/[^a-zA-Z0-9_\-.:/ ]/g, "_");
+}
+
 export class MetricsCollector {
   private readonly registry: Registry;
   private readonly prefix: string;
@@ -602,7 +609,7 @@ export class MetricsCollector {
 
       // ─── Tool Events ──────────────────────────────────────────────
       case "tool.succeeded": {
-        const toolName = (event.payload.tool_name as string | undefined) ?? "unknown";
+        const toolName = this.safeLabel(event.payload, "tool_name");
         this.toolExecutionsTotal.inc({ tool_name: toolName, status: "succeeded" });
         const durationMs = event.payload.duration_ms as number | undefined;
         if (durationMs !== undefined) {
@@ -612,7 +619,7 @@ export class MetricsCollector {
       }
 
       case "tool.failed": {
-        const toolName = (event.payload.tool_name as string | undefined) ?? "unknown";
+        const toolName = this.safeLabel(event.payload, "tool_name");
         this.toolExecutionsTotal.inc({ tool_name: toolName, status: "failed" });
         const durationMs = event.payload.duration_ms as number | undefined;
         if (durationMs !== undefined) {
@@ -623,7 +630,7 @@ export class MetricsCollector {
 
       // ─── Token & Cost Events ──────────────────────────────────────
       case "usage.recorded": {
-        const model = (event.payload.model as string | undefined) ?? "unknown";
+        const model = this.safeLabel(event.payload, "model");
         const inputTokens = event.payload.input_tokens as number | undefined;
         const outputTokens = event.payload.output_tokens as number | undefined;
         const costUsd = event.payload.cost_usd as number | undefined;
@@ -687,13 +694,13 @@ export class MetricsCollector {
 
       // ─── Safety Events ────────────────────────────────────────────
       case "plugin.hook_circuit_open": {
-        const pluginId = (event.payload.plugin_id as string | undefined) ?? "unknown";
+        const pluginId = this.safeLabel(event.payload, "plugin_id");
         this.circuitBreakerOpen.set({ plugin_id: pluginId }, 1);
         break;
       }
 
       case "plugin.hook_fired": {
-        const pluginId = (event.payload.plugin_id as string | undefined) ?? "unknown";
+        const pluginId = this.safeLabel(event.payload, "plugin_id");
         this.circuitBreakerOpen.set({ plugin_id: pluginId }, 0);
         break;
       }
@@ -703,20 +710,20 @@ export class MetricsCollector {
         break;
 
       case "context.budget_assessed": {
-        const verdict = (event.payload.verdict as string | undefined) ?? "unknown";
+        const verdict = this.safeLabel(event.payload, "verdict");
         this.contextBudgetAssessmentsTotal.inc({ verdict });
         break;
       }
 
       // ─── Limit & Policy Events ────────────────────────────────────
       case "limit.exceeded": {
-        const limit = (event.payload.limit as string | undefined) ?? "unknown";
+        const limit = this.safeLabel(event.payload, "limit");
         this.limitsExceededTotal.inc({ limit });
         break;
       }
 
       case "policy.violated": {
-        const toolName = (event.payload.tool_name as string | undefined) ?? "unknown";
+        const toolName = this.safeLabel(event.payload, "tool_name");
         this.policyViolationsTotal.inc({ tool_name: toolName });
         break;
       }
@@ -733,27 +740,27 @@ export class MetricsCollector {
 
       // ─── Plugin Events ────────────────────────────────────────────
       case "plugin.loaded": {
-        const pluginId = (event.payload.plugin_id as string | undefined) ?? "unknown";
+        const pluginId = this.safeLabel(event.payload, "plugin_id");
         this.pluginsStatus.set({ plugin_id: pluginId, status: "active" }, 1);
         break;
       }
 
       case "plugin.failed": {
-        const pluginId = (event.payload.plugin_id as string | undefined) ?? "unknown";
+        const pluginId = this.safeLabel(event.payload, "plugin_id");
         this.pluginsStatus.set({ plugin_id: pluginId, status: "failed" }, 1);
         this.pluginsStatus.set({ plugin_id: pluginId, status: "active" }, 0);
         break;
       }
 
       case "plugin.unloaded": {
-        const pluginId = (event.payload.plugin_id as string | undefined) ?? "unknown";
+        const pluginId = this.safeLabel(event.payload, "plugin_id");
         this.pluginsStatus.set({ plugin_id: pluginId, status: "active" }, 0);
         break;
       }
 
       // ─── Swarm Delegation Events ──────────────────────────────────
       case "swarm.reputation_updated": {
-        const peerNodeId = (event.payload.peer_node_id as string | undefined) ?? "unknown";
+        const peerNodeId = this.safeLabel(event.payload, "peer_node_id");
         const trustScore = event.payload.trust_score as number | undefined;
         if (trustScore !== undefined) {
           this.swarmTrustScore.set({ peer_node_id: peerNodeId }, trustScore);
@@ -786,7 +793,7 @@ export class MetricsCollector {
         break;
 
       case "swarm.budget_alert": {
-        const metric = (event.payload.metric as string | undefined) ?? "unknown";
+        const metric = this.safeLabel(event.payload, "metric");
         this.swarmBudgetAlertsTotal.inc({ metric });
         break;
       }
@@ -831,7 +838,7 @@ export class MetricsCollector {
         break;
 
       case "swarm.dispute_resolved": {
-        const resolvedFor = (event.payload.resolved_for as string | undefined) ?? "unknown";
+        const resolvedFor = this.safeLabel(event.payload, "resolved_for");
         this.swarmDisputesTotal.inc({ status: `resolved_${resolvedFor}` });
         break;
       }
@@ -850,7 +857,7 @@ export class MetricsCollector {
         const actions = event.payload.actions as Record<string, number> | undefined;
         if (actions) {
           for (const [action, count] of Object.entries(actions)) {
-            if (count > 0) this.swarmReoptimizationsTotal.inc({ action }, count);
+            if (count > 0) this.swarmReoptimizationsTotal.inc({ action: sanitizeLabel(action) }, count);
           }
         }
         break;
@@ -861,8 +868,8 @@ export class MetricsCollector {
         break;
 
       case "swarm.anomaly_detected": {
-        const anomalyType = (event.payload.type as string | undefined) ?? "unknown";
-        const anomalySeverity = (event.payload.severity as string | undefined) ?? "unknown";
+        const anomalyType = this.safeLabel(event.payload, "type");
+        const anomalySeverity = this.safeLabel(event.payload, "severity");
         this.swarmAnomaliesTotal.inc({ type: anomalyType, severity: anomalySeverity });
         const quarantinedCount = event.payload.quarantined_count as number | undefined;
         if (quarantinedCount !== undefined) {
@@ -876,7 +883,7 @@ export class MetricsCollector {
         break;
 
       case "swarm.monitoring_event_pushed": {
-        const eventType = (event.payload.event_type as string | undefined) ?? "unknown";
+        const eventType = this.safeLabel(event.payload, "event_type");
         this.swarmMonitoringEventsPushed.inc({ event_type: eventType });
         const sseConnections = event.payload.sse_connections as number | undefined;
         if (sseConnections !== undefined) {
@@ -896,14 +903,14 @@ export class MetricsCollector {
       }
 
       case "swarm.gaming_detected": {
-        const flagType = (event.payload.flag_type as string | undefined) ?? "unknown";
-        const severity = (event.payload.severity as string | undefined) ?? "unknown";
+        const flagType = this.safeLabel(event.payload, "flag_type");
+        const severity = this.safeLabel(event.payload, "severity");
         this.swarmGamingDetectedTotal.inc({ flag_type: flagType, severity });
         break;
       }
 
       case "swarm.monitoring_level_negotiated": {
-        const level = (event.payload.level as string | undefined) ?? "unknown";
+        const level = this.safeLabel(event.payload, "level");
         this.swarmMonitoringLevelNegotiatedTotal.inc({ level });
         break;
       }
@@ -913,8 +920,8 @@ export class MetricsCollector {
         break;
 
       case "swarm.root_cause_diagnosed": {
-        const rootCause = (event.payload.root_cause as string | undefined) ?? "unknown";
-        const response = (event.payload.recommended_response as string | undefined) ?? "unknown";
+        const rootCause = this.safeLabel(event.payload, "root_cause");
+        const response = this.safeLabel(event.payload, "recommended_response");
         this.swarmRootCauseDiagnosesTotal.inc({ root_cause: rootCause, response });
         break;
       }
@@ -960,13 +967,13 @@ export class MetricsCollector {
         break;
 
       case "swarm.sybil_detected": {
-        const indicator = (event.payload.indicator as string | undefined) ?? "unknown";
+        const indicator = this.safeLabel(event.payload, "indicator");
         this.swarmSybilReportsTotal.inc({ indicator });
         break;
       }
 
       case "swarm.collusion_detected": {
-        const indicator = (event.payload.indicator as string | undefined) ?? "unknown";
+        const indicator = this.safeLabel(event.payload, "indicator");
         this.swarmCollusionReportsTotal.inc({ indicator });
         break;
       }
@@ -1045,7 +1052,7 @@ export class MetricsCollector {
         break;
 
       case "swarm.delegatee_routed": {
-        const target = (event.payload.target as string | undefined) ?? "unknown";
+        const target = this.safeLabel(event.payload, "target");
         this.swarmDelegateeRoutingTotal.inc({ target });
         break;
       }
@@ -1059,7 +1066,7 @@ export class MetricsCollector {
         break;
 
       case "swarm.behavioral_score_updated": {
-        const nodeId = (event.payload.node_id as string | undefined) ?? "unknown";
+        const nodeId = this.safeLabel(event.payload, "node_id");
         const newScore = event.payload.new_score as number | undefined;
         if (newScore !== undefined) {
           this.swarmBehavioralScoresGauge.set({ peer_node_id: nodeId }, newScore);
@@ -1080,7 +1087,7 @@ export class MetricsCollector {
         break;
 
       case "swarm.friction_assessed": {
-        const level = (event.payload.level as string | undefined) ?? "unknown";
+        const level = this.safeLabel(event.payload, "level");
         this.swarmFrictionAssessmentsTotal.inc({ level });
         break;
       }
@@ -1094,7 +1101,7 @@ export class MetricsCollector {
         break;
 
       case "swarm.sabotage_detected": {
-        const indicator = (event.payload.indicator as string | undefined) ?? "unknown";
+        const indicator = this.safeLabel(event.payload, "indicator");
         this.swarmSabotageReportsTotal.inc({ indicator });
         break;
       }
@@ -1147,19 +1154,25 @@ export class MetricsCollector {
     this.stepToolNames.clear();
   }
 
+  /** Extract a payload string value, sanitized for safe use as a Prometheus label. */
+  private safeLabel(payload: Record<string, unknown>, key: string): string {
+    const val = payload[key];
+    return typeof val === "string" ? sanitizeLabel(val) : "unknown";
+  }
+
   private extractToolName(payload: Record<string, unknown>): string | undefined {
     // step.started payloads may include tool_name, tool_ref.name, or tool (bare string from kernel)
-    if (typeof payload.tool_name === "string") return payload.tool_name;
-    if (typeof payload.tool === "string") return payload.tool;
+    if (typeof payload.tool_name === "string") return sanitizeLabel(payload.tool_name);
+    if (typeof payload.tool === "string") return sanitizeLabel(payload.tool);
     const toolRef = payload.tool_ref as Record<string, unknown> | undefined;
-    if (toolRef && typeof toolRef.name === "string") return toolRef.name;
+    if (toolRef && typeof toolRef.name === "string") return sanitizeLabel(toolRef.name);
     // Check step object for tool_ref
     const step = payload.step as Record<string, unknown> | undefined;
     if (step) {
-      if (typeof step.tool_name === "string") return step.tool_name;
-      if (typeof step.tool === "string") return step.tool;
+      if (typeof step.tool_name === "string") return sanitizeLabel(step.tool_name);
+      if (typeof step.tool === "string") return sanitizeLabel(step.tool);
       const ref = step.tool_ref as Record<string, unknown> | undefined;
-      if (ref && typeof ref.name === "string") return ref.name;
+      if (ref && typeof ref.name === "string") return sanitizeLabel(ref.name);
     }
     return undefined;
   }

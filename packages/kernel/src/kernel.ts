@@ -832,10 +832,14 @@ export class Kernel {
     return results;
   }
 
+  private static readonly DISALLOWED_BINDING_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
   private resolveInputBindings(step: Step, results: Map<string, StepResult>): Step {
     if (!step.input_from) return step;
     const resolvedInput = { ...step.input };
     for (const [inputField, binding] of Object.entries(step.input_from)) {
+      // Block prototype pollution from LLM-generated plans
+      if (Kernel.DISALLOWED_BINDING_KEYS.has(inputField)) continue;
       const dotIndex = binding.indexOf(".");
       if (dotIndex === -1) {
         console.warn(`[kernel] Malformed input binding "${inputField}": "${binding}" (missing "." separator)`);

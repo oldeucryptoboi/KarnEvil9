@@ -85,8 +85,9 @@ export class PluginApiImpl implements PluginApi {
           }),
         ]);
       } catch (err) {
+        console.error(`[plugin:${pluginId}] Route error:`, err instanceof Error ? err.message : String(err));
         try {
-          res.status(500).json({ error: `Plugin "${pluginId}" route error: ${err instanceof Error ? err.message : String(err)}` });
+          res.status(500).json({ error: `Plugin "${pluginId}" route handler failed` });
         } catch { /* response may already be sent */ }
       } finally {
         clearTimeout(timer!);

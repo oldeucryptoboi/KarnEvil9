@@ -475,6 +475,16 @@ export class LLMPlanner implements Planner {
       if (!validation.valid) {
         throw new Error(`Planner returned invalid plan: ${validation.errors.join("; ")}`);
       }
+      // Validate step_id uniqueness to prevent Map collisions in kernel
+      if (Array.isArray(plan.steps)) {
+        const stepIds = new Set<string>();
+        for (const step of plan.steps) {
+          if (stepIds.has(step.step_id)) {
+            throw new Error(`Planner returned duplicate step_id "${step.step_id}" in plan`);
+          }
+          stepIds.add(step.step_id);
+        }
+      }
     }
     return { plan, usage };
   }

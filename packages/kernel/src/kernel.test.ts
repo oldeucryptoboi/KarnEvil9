@@ -2704,4 +2704,61 @@ export async function register(api) {
     const session = await kernel.run();
     expect(session.status).toBe("completed");
   });
+
+  it("resolveInputBindings ignores __proto__ keys", async () => {
+    const producerTool: ToolManifest = {
+      name: "proto-producer", version: "1.0.0", description: "Produces output",
+      runner: "internal",
+      input_schema: { type: "object", additionalProperties: false },
+      output_schema: { type: "object", properties: { content: { type: "string" } }, additionalProperties: false },
+      permissions: [], timeout_ms: 5000,
+      supports: { mock: true as const, dry_run: false },
+      mock_responses: [{ content: "payload" }],
+    };
+    const consumerTool: ToolManifest = {
+      name: "proto-consumer", version: "1.0.0", description: "Consumes input",
+      runner: "internal",
+      input_schema: { type: "object", properties: { message: { type: "string" } }, additionalProperties: false },
+      output_schema: { type: "object", properties: { echo: { type: "string" } }, additionalProperties: false },
+      permissions: [], timeout_ms: 5000,
+      supports: { mock: true as const, dry_run: false },
+      mock_responses: [{ echo: "mock echo" }],
+    };
+    registry.register(producerTool);
+    registry.register(consumerTool);
+
+    const stepA = "step-proto-prod";
+    const stepB = "step-proto-cons";
+
+    const planner = {
+      async generatePlan() {
+        return { plan: {
+          plan_id: uuid(), schema_version: "0.1" as const, goal: "Proto pollution test",
+          assumptions: [],
+          steps: [
+            { step_id: stepA, title: "Produce", tool_ref: { name: "proto-producer" },
+              input: {}, success_criteria: ["done"], failure_policy: "abort" as const, timeout_ms: 5000, max_retries: 0 },
+            { step_id: stepB, title: "Consume", tool_ref: { name: "proto-consumer" },
+              input: { message: "default" }, success_criteria: ["done"], failure_policy: "abort" as const, timeout_ms: 5000, max_retries: 0,
+              depends_on: [stepA], input_from: {
+                __proto__: "step-proto-prod.content",
+                constructor: "step-proto-prod.content",
+                message: "step-proto-prod.content",
+              } },
+          ],
+          created_at: new Date().toISOString(),
+        } };
+      },
+    };
+
+    const task: Task = { task_id: uuid(), text: "Proto pollution test", created_at: new Date().toISOString() };
+    const kernel = new Kernel(makeKernelConfig({ journal, runtime, registry, permissions, planner }));
+    await kernel.createSession(task);
+    const session = await kernel.run();
+    // Session should complete — __proto__/constructor keys are silently skipped
+    expect(session.status).toBe("completed");
+    // Ensure Object prototype was not polluted
+    expect(({} as any).__proto__).toBe(Object.prototype);
+    expect(({} as any).constructor).toBe(Object);
+  });
 });

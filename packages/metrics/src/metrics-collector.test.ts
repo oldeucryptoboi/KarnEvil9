@@ -478,4 +478,47 @@ describe("MetricsCollector", () => {
       // but the session.completed should not throw
     });
   });
+
+  // ─── Label Sanitization ─────────────────────────────────────────
+
+  describe("label sanitization", () => {
+    it("truncates long tool_name labels to prevent cardinality bomb", async () => {
+      const longName = "a".repeat(200);
+      collector.handleEvent(
+        makeEvent("tool.succeeded", { tool_name: longName, duration_ms: 10 })
+      );
+      const metrics = await registry.getSingleMetricAsString("karnevil9_tool_executions_total");
+      // Should be truncated to 64 chars
+      expect(metrics).toContain("a".repeat(64));
+      expect(metrics).not.toContain("a".repeat(65));
+    });
+
+    it("replaces special characters in label values", async () => {
+      collector.handleEvent(
+        makeEvent("tool.succeeded", { tool_name: "evil\ntool\x00name", duration_ms: 10 })
+      );
+      const metrics = await registry.getSingleMetricAsString("karnevil9_tool_executions_total");
+      expect(metrics).toContain("evil_tool_name");
+    });
+
+    it("sanitizes peer_node_id in swarm events", async () => {
+      const maliciousId = "peer\x00injected" + "x".repeat(200);
+      collector.handleEvent(
+        makeEvent("swarm.reputation_updated", { peer_node_id: maliciousId, trust_score: 0.5 })
+      );
+      const metrics = await registry.getSingleMetricAsString("karnevil9_swarm_trust_score");
+      // Null byte replaced and length truncated to 64 chars
+      expect(metrics).toContain("peer_injected");
+      expect(metrics).not.toContain("x".repeat(200));
+    });
+
+    it("sanitizes plugin_id in plugin events", async () => {
+      collector.handleEvent(
+        makeEvent("plugin.loaded", { plugin_id: "bad<script>alert(1)</script>" })
+      );
+      const metrics = await registry.getSingleMetricAsString("karnevil9_plugins_status");
+      expect(metrics).not.toContain("<script>");
+      expect(metrics).toContain("bad_script_");
+    });
+  });
 });

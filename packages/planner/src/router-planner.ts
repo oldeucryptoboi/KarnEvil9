@@ -24,6 +24,14 @@ const DOMAIN_TOOL_PATTERNS: Record<TaskDomain, string[]> = {
   general: [],
 };
 
+// Pre-compile keyword regexes at module scope (avoids per-call allocation and ReDoS from unescaped specials)
+const DOMAIN_REGEXES: Record<TaskDomain, RegExp[]> = Object.fromEntries(
+  Object.entries(DOMAIN_KEYWORDS).map(([domain, keywords]) => [
+    domain,
+    keywords.map(kw => new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i")),
+  ])
+) as Record<TaskDomain, RegExp[]>;
+
 export function classifyTask(taskText: string, _toolNames: string[]): TaskDomain {
   const lower = taskText.toLowerCase();
   const scores: Record<TaskDomain, number> = {
@@ -36,10 +44,8 @@ export function classifyTask(taskText: string, _toolNames: string[]): TaskDomain
   };
 
   // Score based on keyword matches in task text
-  for (const [domain, keywords] of Object.entries(DOMAIN_KEYWORDS) as [TaskDomain, string[]][]) {
-    for (const keyword of keywords) {
-      // Match whole words to avoid partial matches like "file" in "profile"
-      const regex = new RegExp(`\\b${keyword}\\b`, "i");
+  for (const [domain, regexes] of Object.entries(DOMAIN_REGEXES) as [TaskDomain, RegExp[]][]) {
+    for (const regex of regexes) {
       if (regex.test(lower)) scores[domain]++;
     }
   }

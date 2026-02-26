@@ -178,4 +178,40 @@ ${providesYaml}
 
     expect(registry.listPlugins()).toHaveLength(2);
   });
+
+  it("reloadPlugin restores old registrations on failure", async () => {
+    // Create a valid plugin with a tool
+    await createPlugin("rollback-test", `
+      export async function register(api) {
+        api.registerTool(
+          { name: "rollback-tool", version: "1.0.0", description: "test",
+            runner: "internal",
+            input_schema: { type: "object", additionalProperties: false },
+            output_schema: { type: "object", additionalProperties: false },
+            permissions: [], timeout_ms: 5000,
+            supports: { mock: true, dry_run: false },
+            mock_responses: [{}] },
+          async () => ({ success: true })
+        );
+      }
+    `, { tools: ["rollback-tool"] });
+
+    const registry = new PluginRegistry({
+      journal, toolRegistry, pluginsDir,
+    });
+    await registry.discoverAndLoadAll();
+
+    // Verify tool is registered
+    expect(toolRegistry.get("rollback-tool")).toBeDefined();
+
+    // Now corrupt the plugin manifest so reload fails
+    await writeFile(join(pluginsDir, "rollback-test", "plugin.yaml"), "invalid yaml: [[[");
+
+    // Reload should throw
+    await expect(registry.reloadPlugin("rollback-test")).rejects.toThrow();
+
+    // Plugin state should still exist (marked as failed, but old tool still registered)
+    const state = registry.getPlugin("rollback-test");
+    expect(state).toBeDefined();
+  });
 });

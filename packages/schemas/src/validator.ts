@@ -11,12 +11,18 @@ type FormatsFn = (instance: unknown) => void;
 const applyFormats: FormatsFn = (addFormats as unknown as { default?: FormatsFn }).default ?? (addFormats as unknown as FormatsFn);
 applyFormats(ajv);
 
+const MAX_SCHEMA_CACHE = 500;
 const schemaCache = new Map<string, ValidateFunction>();
 
 function getOrCompile(schema: Record<string, unknown>): ValidateFunction {
   const key = JSON.stringify(schema);
   let validate = schemaCache.get(key);
   if (!validate) {
+    // Evict oldest entry when cache is full
+    if (schemaCache.size >= MAX_SCHEMA_CACHE) {
+      const oldest = schemaCache.keys().next().value;
+      if (oldest !== undefined) schemaCache.delete(oldest);
+    }
     validate = ajv.compile(schema);
     schemaCache.set(key, validate);
   }

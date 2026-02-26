@@ -132,20 +132,20 @@ export class PluginRegistry {
       throw new Error(`Plugin "${pluginId}" manifest is no longer valid`);
     }
 
-    // Load new instance first (atomic swap) — if loading fails, old plugin stays active
+    // Snapshot old registrations for rollback
     const oldState = this.plugins.get(pluginId);
     const oldApi = this.pluginApis.get(pluginId);
+    const oldRoutes = this.allRoutes.filter((r) => r.pluginId === pluginId);
+    const oldCommands = this.allCommands.filter((c) => c.pluginId === pluginId);
+
     try {
       // Temporarily remove old registrations to avoid conflicts
       await this.unloadPlugin(pluginId);
       const state = await this.loadDiscovered(freshDiscovered);
 
       if (state.status === "failed") {
-        // Reload failed — try to restore old state
-        if (oldState) {
-          this.plugins.set(pluginId, oldState);
-          if (oldApi) this.pluginApis.set(pluginId, oldApi);
-        }
+        // Reload failed — restore old registrations
+        this.restoreOldPlugin(pluginId, oldState, oldApi, oldRoutes, oldCommands);
         throw new Error(`Reload failed: ${state.error}`);
       }
 
@@ -157,12 +157,53 @@ export class PluginRegistry {
       return state;
     } catch (err) {
       // If we already unloaded but failed to load, attempt to restore
-      if (!this.plugins.has(pluginId) && oldState) {
-        oldState.status = "failed";
-        oldState.error = `Reload failed: ${err instanceof Error ? err.message : String(err)}`;
-        this.plugins.set(pluginId, oldState);
+      if (!this.plugins.has(pluginId) || this.plugins.get(pluginId)?.status !== "active") {
+        this.restoreOldPlugin(pluginId, oldState, oldApi, oldRoutes, oldCommands);
+        const state = this.plugins.get(pluginId);
+        if (state) {
+          state.status = "failed";
+          state.error = `Reload failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
       }
       throw err;
+    }
+  }
+
+  private restoreOldPlugin(
+    pluginId: string,
+    oldState: PluginState | undefined,
+    oldApi: PluginApiImpl | undefined,
+    oldRoutes: Array<{ pluginId: string; method: string; path: string; handler: RouteHandler }>,
+    oldCommands: Array<{ pluginId: string; name: string; opts: CommandOptions }>,
+  ): void {
+    if (!oldState || !oldApi) return;
+
+    this.plugins.set(pluginId, oldState);
+    this.pluginApis.set(pluginId, oldApi);
+
+    // Re-register tools
+    for (const { manifest: toolManifest, handler } of oldApi._tools) {
+      try {
+        this.config.toolRegistry.register(toolManifest);
+        if (this.config.toolRuntime) {
+          this.config.toolRuntime.registerHandler(toolManifest.name, handler);
+        }
+      } catch { /* tool may already be registered */ }
+    }
+
+    // Re-register hooks
+    for (const hookReg of oldApi._hooks) {
+      this.hookRunner.register(hookReg);
+    }
+
+    // Restore routes
+    for (const route of oldRoutes) {
+      this.allRoutes.push(route);
+    }
+
+    // Restore commands
+    for (const cmd of oldCommands) {
+      this.allCommands.push(cmd);
     }
   }
 

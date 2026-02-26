@@ -332,16 +332,12 @@ export class PermissionEngine {
   }
 
   clearStep(sessionId?: string): void {
-    if (sessionId) {
-      const cache = this.sessionCaches.get(sessionId);
-      if (cache) {
-        const toDelete = [...cache.entries()].filter(([, g]) => g.ttl === "step").map(([s]) => s);
-        for (const scope of toDelete) cache.delete(scope);
-      }
-    } else {
-      for (const cache of this.sessionCaches.values()) {
-        const toDelete = [...cache.entries()].filter(([, g]) => g.ttl === "step").map(([s]) => s);
-        for (const scope of toDelete) cache.delete(scope);
+    const caches = sessionId
+      ? [this.sessionCaches.get(sessionId)].filter(Boolean) as Map<string, PermissionGrant>[]
+      : [...this.sessionCaches.values()];
+    for (const cache of caches) {
+      for (const [scope, grant] of cache) {
+        if (grant.ttl === "step") cache.delete(scope);
       }
     }
   }

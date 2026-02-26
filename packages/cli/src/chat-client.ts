@@ -102,12 +102,22 @@ export class ChatClient {
     const ws = this._wsFactory(this._wsUrl);
     this._ws = ws;
 
-    ws.on("open", () => this.handleWsOpen());
-    ws.on("message", (...args: unknown[]) => this.handleWsMessage(args[0] as Buffer | string));
-    ws.on("error", (...args: unknown[]) => this.handleWsError(args[0] as Error));
+    ws.on("open", () => {
+      if (ws !== this._ws) return;
+      this.handleWsOpen();
+    });
+    ws.on("message", (...args: unknown[]) => {
+      if (ws !== this._ws) return;
+      this.handleWsMessage(args[0] as Buffer | string);
+    });
+    ws.on("error", (...args: unknown[]) => {
+      if (ws !== this._ws) return;
+      this.handleWsError(args[0] as Error);
+    });
 
     // Keepalive ping
     this._pingInterval = setInterval(() => {
+      if (ws !== this._ws) return;
       if (ws.readyState === 1 /* OPEN */) {
         ws.send(JSON.stringify({ type: "ping" }));
       }
@@ -119,6 +129,7 @@ export class ChatClient {
         clearInterval(this._pingInterval);
         this._pingInterval = null;
       }
+      if (ws !== this._ws) return;
       this.handleWsClose();
     });
   }

@@ -271,7 +271,7 @@ export class ExtensionDriver implements BrowserDriver {
       this.extensionWs.close();
       this.extensionWs = null;
       if (this.cdp) {
-        this.cdp.disconnect();
+        this.cdp.disconnect().catch(() => {});
         this.cdp = null;
       }
       this._active = false;
@@ -302,7 +302,7 @@ export class ExtensionDriver implements BrowserDriver {
       this._active = false;
       this.extensionWs = null;
       if (this.cdp) {
-        this.cdp.disconnect();
+        this.cdp.disconnect().catch(() => {});
         this.cdp = null;
       }
     });
@@ -332,7 +332,7 @@ export class ExtensionDriver implements BrowserDriver {
   private handleBridgeDetached(_msg: BridgeDetached): void {
     this._active = false;
     if (this.cdp) {
-      this.cdp.disconnect();
+      this.cdp.disconnect().catch(() => {});
       this.cdp = null;
     }
   }

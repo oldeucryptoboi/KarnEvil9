@@ -18,7 +18,7 @@ export interface BrowserDriverLike {
 }
 
 const RELAY_URL = (() => {
-  const url = process.env.KARNEVIL9_RELAY_URL ?? process.env.OPENVGER_RELAY_URL ?? "http://localhost:9222";
+  const url = process.env.KARNEVIL9_RELAY_URL ?? "http://localhost:9222";
   // Validate relay URL at module load to prevent SSRF via env var injection
   try {
     const parsed = new URL(url);

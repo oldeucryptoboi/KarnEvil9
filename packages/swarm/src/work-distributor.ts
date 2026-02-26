@@ -91,9 +91,13 @@ export class WorkDistributor {
         throw new Error("Auction failed: no bids received or no suitable bids");
       }
       // Delegate to the winning bidder
+      const peer = this.meshManager.getPeer(winning_bid.bidder_node_id)
+        ?? this.meshManager.getActivePeers()[0];
+      if (!peer) {
+        throw new Error(`Auction winner ${winning_bid.bidder_node_id} is no longer reachable and no active peers available`);
+      }
       return this.delegateToPeer(
-        this.meshManager.getPeer(winning_bid.bidder_node_id) ?? this.meshManager.getActivePeers()[0]!,
-        taskText, sessionId, constraints, parentChain, priority,
+        peer, taskText, sessionId, constraints, parentChain, priority,
       );
     }
 

@@ -272,12 +272,16 @@ export class Journal {
     if (!existsSync(this.filePath)) return [];
     const content = await readFile(this.filePath, "utf-8");
     const events: JournalEvent[] = [];
+    let skipped = 0;
     for (const line of content.trim().split("\n").filter(Boolean)) {
       try {
         events.push(JSON.parse(line) as JournalEvent);
       } catch {
-        // Skip corrupted lines rather than crashing the entire read
+        skipped++;
       }
+    }
+    if (skipped > 0) {
+      console.warn(`[journal] readAll: skipped ${skipped} corrupted line(s)`);
     }
     if (options?.limit !== undefined && options.limit < events.length) {
       return events.slice(events.length - options.limit);
@@ -289,16 +293,20 @@ export class Journal {
     if (!existsSync(this.filePath)) return;
     const fileStream = createReadStream(this.filePath, { encoding: "utf-8" });
     const rl = createInterface({ input: fileStream, crlfDelay: Infinity });
+    let skipped = 0;
     try {
       for await (const line of rl) {
         if (!line.trim()) continue;
         try {
           yield JSON.parse(line) as JournalEvent;
         } catch {
-          // Skip corrupted lines rather than crashing stream consumers
+          skipped++;
         }
       }
     } finally {
+      if (skipped > 0) {
+        console.warn(`[journal] readAllStream: skipped ${skipped} corrupted line(s)`);
+      }
       rl.close();
       fileStream.destroy();
     }

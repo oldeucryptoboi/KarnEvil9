@@ -554,5 +554,68 @@ describe("Scheduler", () => {
       const updated = scheduler.getSchedule("missed-catchup-all-stale")!;
       expect(new Date(updated.next_run_at!).getTime()).toBeGreaterThanOrEqual(Date.now() - 1000);
     });
+
+    it("catchup_all stops iterating when job marks schedule as failed", async () => {
+      let callCount = 0;
+      const factory: SessionFactory = vi.fn().mockImplementation(async () => {
+        callCount++;
+        throw new Error("boom");
+      });
+      const pastSchedule: Schedule = {
+        schedule_id: "missed-catchup-fail",
+        name: "missed-catchup-fail",
+        trigger: { type: "every", interval: "1m" },
+        action: { type: "createSession", task_text: "test" },
+        options: { missed_policy: "catchup_all", max_failures: 1 },
+        status: "active",
+        run_count: 0,
+        failure_count: 0,
+        // 3 min ago → multiple missed windows (3 × 1m), all within grace
+        next_run_at: new Date(Date.now() - 3 * 60_000).toISOString(),
+        last_run_at: null,
+        created_by: "test",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      store.set(pastSchedule);
+      await store.save();
+
+      const scheduler = createScheduler({ sessionFactory: factory, missedGracePeriodMs: 300_000 });
+      await scheduler.start();
+      await scheduler.stop();
+
+      // Should stop after first failure (max_failures=1 → immediately "failed")
+      expect(callCount).toBe(1);
+      const updated = scheduler.getSchedule("missed-catchup-fail")!;
+      expect(updated.status).toBe("failed");
+    });
+  });
+
+  describe("timestamp drift prevention", () => {
+    it("last_run_at uses scheduled time, not wall-clock time", async () => {
+      const factory = makeSessionFactory();
+      const scheduler = createScheduler({ sessionFactory: factory, tickIntervalMs: 50 });
+      await scheduler.start();
+
+      // Create a schedule with next_run_at set to a specific past time
+      const scheduledTime = new Date(Date.now() - 5000).toISOString();
+      const sched = await scheduler.createSchedule({
+        name: "drift-test",
+        trigger: { type: "every", interval: "1h" },
+        action: { type: "createSession", task_text: "drift check" },
+      });
+      const s = scheduler.getSchedule(sched.schedule_id)!;
+      s.next_run_at = scheduledTime;
+      store.set(s);
+
+      // Wait for tick to execute the job
+      await new Promise(resolve => setTimeout(resolve, 200));
+      await scheduler.stop();
+
+      const updated = scheduler.getSchedule(sched.schedule_id)!;
+      expect(updated.run_count).toBe(1);
+      // last_run_at should be the scheduled time, not current wall-clock time
+      expect(updated.last_run_at).toBe(scheduledTime);
+    });
   });
 });

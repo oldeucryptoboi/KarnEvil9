@@ -114,7 +114,7 @@ describe("Server Startup Smoke", () => {
       const s = app.listen(port, () => resolve(s));
     });
 
-    const res = await fetch(`http://localhost:${port}/api/sessions/nonexistent`);
+    const res = await fetch(`http://localhost:${port}/api/sessions/00000000-0000-0000-0000-000000000000`);
     expect(res.status).toBe(404);
   });
 

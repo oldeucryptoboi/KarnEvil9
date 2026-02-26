@@ -201,7 +201,7 @@ export class Scheduler {
       const nextRunMs = new Date(schedule.next_run_at).getTime();
       if (now >= nextRunMs && this.activeJobs < this.maxConcurrentJobs) {
         this.activeJobs++;
-        const jobPromise = this.executeJob(schedule).catch(() => {
+        const jobPromise = this.executeJob(schedule, schedule.next_run_at!).catch(() => {
           // Job-level errors are already handled inside executeJob;
           // this catch prevents unhandled rejection if executeJob itself throws.
         }).finally(() => {
@@ -213,7 +213,12 @@ export class Scheduler {
     }
   }
 
-  private async executeJob(schedule: Schedule): Promise<void> {
+  /**
+   * Execute a scheduled job. When `scheduledAt` is provided (the intended run
+   * time), it is used as `last_run_at` so that `computeNextRun` stays anchored
+   * to the schedule grid and doesn't drift with execution latency.
+   */
+  private async executeJob(schedule: Schedule, scheduledAt?: string): Promise<void> {
     await this.journal.emit(this.sessionId, "scheduler.job_triggered", {
       schedule_id: schedule.schedule_id,
       name: schedule.name,
@@ -245,7 +250,7 @@ export class Scheduler {
       // Success
       schedule.run_count++;
       schedule.failure_count = 0;
-      schedule.last_run_at = new Date().toISOString();
+      schedule.last_run_at = scheduledAt ?? new Date().toISOString();
       if (sessionId) schedule.last_session_id = sessionId;
       schedule.last_error = undefined;
 
@@ -315,7 +320,7 @@ export class Scheduler {
         });
       } else if (policy === "catchup_one") {
         if (nextRunMs >= graceLimit) {
-          await this.executeJob(schedule);
+          await this.executeJob(schedule, schedule.next_run_at!);
         } else {
           schedule.next_run_at = this.computeNextRun(schedule.trigger, new Date().toISOString());
           schedule.updated_at = new Date().toISOString();
@@ -333,7 +338,9 @@ export class Scheduler {
         let cursor = nextRunMs;
         let iterations = 0;
         while (cursor < now && cursor >= graceLimit && iterations < MAX_CATCHUP_ITERATIONS) {
-          await this.executeJob(schedule);
+          await this.executeJob(schedule, new Date(cursor).toISOString());
+          // executeJob may mark the schedule completed/failed — stop catching up
+          if (schedule.status !== "active") break;
           const nextStr = this.computeNextRun(schedule.trigger, new Date(cursor).toISOString());
           if (!nextStr) break;
           const nextMs = new Date(nextStr).getTime();

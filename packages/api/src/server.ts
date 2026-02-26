@@ -29,6 +29,7 @@ const RATE_LIMITER_PRUNE_INTERVAL_MS = 60_000;
 const MAX_JOURNAL_PAGE = 500;
 const MAX_REPLAY_EVENTS = 1000;
 const MAX_PLUGIN_BODY_BYTES = 1024 * 1024;         // 1 MB for plugin route bodies
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Structured error logging — omits stack traces in production. */
 function logError(label: string, err: unknown): void {
@@ -896,12 +897,14 @@ export class ApiServer {
     });
 
     router.get("/sessions/:id", (req, res) => {
+      if (!UUID_RE.test(req.params.id!)) { res.status(400).json({ error: "Invalid session ID format" }); return; }
       const kernel = this.kernels.get(req.params.id!);
       if (!kernel) { res.status(404).json({ error: "Session not found" }); return; }
       res.json(kernel.getSession());
     });
 
     router.post("/sessions/:id/abort", async (req, res) => {
+      if (!UUID_RE.test(req.params.id!)) { res.status(400).json({ error: "Invalid session ID format" }); return; }
       const kernel = this.kernels.get(req.params.id!);
       if (!kernel) { res.status(404).json({ error: "Session not found" }); return; }
       await kernel.abort();
@@ -909,6 +912,7 @@ export class ApiServer {
     });
 
     router.get("/sessions/:id/journal", async (req, res) => {
+      if (!UUID_RE.test(req.params.id!)) { res.status(400).json({ error: "Invalid session ID format" }); return; }
       try {
         const offset = Math.max(0, parseInt(req.query.offset as string, 10) || 0);
         const limit = Math.min(Math.max(1, parseInt(req.query.limit as string, 10) || MAX_JOURNAL_PAGE), MAX_JOURNAL_PAGE);
@@ -919,6 +923,7 @@ export class ApiServer {
     });
 
     router.get("/sessions/:id/stream", async (req, res) => {
+      if (!UUID_RE.test(req.params.id!)) { res.status(400).json({ error: "Invalid session ID format" }); return; }
       const sessionId = req.params.id!;
       const existingClients = this.sseClients.get(sessionId) ?? [];
       if (existingClients.length >= this.maxSseClientsPerSession) {
@@ -1035,6 +1040,7 @@ export class ApiServer {
     });
 
     router.post("/sessions/:id/replay", async (req, res) => {
+      if (!UUID_RE.test(req.params.id!)) { res.status(400).json({ error: "Invalid session ID format" }); return; }
       try {
         const totalEvents = this.journal.getSessionEventCount(req.params.id!);
         if (totalEvents === 0) { res.status(404).json({ error: "No events found for session" }); return; }
@@ -1045,6 +1051,7 @@ export class ApiServer {
     });
 
     router.post("/sessions/:id/recover", async (req, res) => {
+      if (!UUID_RE.test(req.params.id!)) { res.status(400).json({ error: "Invalid session ID format" }); return; }
       try {
         const sessionId = req.params.id!;
         if (this.kernels.has(sessionId)) {

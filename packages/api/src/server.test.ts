@@ -188,8 +188,15 @@ describe("ApiServer (legacy constructor)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("GET /api/sessions/:id returns 404 for unknown session", async () => {
+  it("GET /api/sessions/:id returns 400 for non-UUID session id", async () => {
     const res = await fetch(`${baseUrl}/api/sessions/nonexistent`);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("Invalid session ID");
+  });
+
+  it("GET /api/sessions/:id returns 404 for unknown UUID session", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/00000000-0000-0000-0000-000000000000`);
     expect(res.status).toBe(404);
   });
 
@@ -236,24 +243,31 @@ describe("ApiServer (legacy constructor)", () => {
   });
 
   it("GET /api/sessions/:id/journal returns events", async () => {
-    await journal.emit("sess-1", "session.created", { task: "test" });
-    const res = await fetch(`${baseUrl}/api/sessions/sess-1/journal`);
+    const sessId = "00000000-0000-0000-0000-000000000001";
+    await journal.emit(sessId, "session.created", { task: "test" });
+    const res = await fetch(`${baseUrl}/api/sessions/${sessId}/journal`);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.events).toHaveLength(1);
   });
 
   it("POST /api/sessions/:id/replay returns events", async () => {
-    await journal.emit("sess-1", "session.created", {});
-    await journal.emit("sess-1", "session.started", {});
-    const res = await fetch(`${baseUrl}/api/sessions/sess-1/replay`, { method: "POST" });
+    const sessId = "00000000-0000-0000-0000-000000000002";
+    await journal.emit(sessId, "session.created", {});
+    await journal.emit(sessId, "session.started", {});
+    const res = await fetch(`${baseUrl}/api/sessions/${sessId}/replay`, { method: "POST" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.event_count).toBe(2);
   });
 
-  it("POST /api/sessions/:id/replay returns 404 for empty session", async () => {
+  it("POST /api/sessions/:id/replay returns 400 for non-UUID session id", async () => {
     const res = await fetch(`${baseUrl}/api/sessions/nonexistent/replay`, { method: "POST" });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /api/sessions/:id/replay returns 404 for empty UUID session", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/00000000-0000-0000-0000-ffffffffffff/replay`, { method: "POST" });
     expect(res.status).toBe(404);
   });
 
@@ -593,8 +607,13 @@ describe("ApiServer recovery", () => {
     expect(["completed", "failed"]).toContain(body.status);
   });
 
-  it("POST /sessions/:id/recover returns 404 for nonexistent session", async () => {
+  it("POST /sessions/:id/recover returns 400 for non-UUID session id", async () => {
     const res = await fetch(`${baseUrl}/api/sessions/nonexistent/recover`, { method: "POST" });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /sessions/:id/recover returns 404 for nonexistent UUID session", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/00000000-0000-0000-0000-ffffffffffff/recover`, { method: "POST" });
     expect(res.status).toBe(404);
   });
 
@@ -951,12 +970,13 @@ describe("ApiServer journal pagination", () => {
   });
 
   it("GET /sessions/:id/journal returns paginated events with metadata", async () => {
+    const sessId = "10000000-0000-0000-0000-000000000001";
     // Write 10 events
     for (let i = 0; i < 10; i++) {
-      await journal.emit("test-sess", "step.started", { step: i });
+      await journal.emit(sessId, "step.started", { step: i });
     }
 
-    const res = await fetch(`${baseUrl}/api/sessions/test-sess/journal?limit=3&offset=2`);
+    const res = await fetch(`${baseUrl}/api/sessions/${sessId}/journal?limit=3&offset=2`);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.events).toHaveLength(3);
@@ -966,12 +986,13 @@ describe("ApiServer journal pagination", () => {
   });
 
   it("GET /sessions/:id/journal defaults to max 500 events", async () => {
+    const sessId = "10000000-0000-0000-0000-000000000002";
     // Write 5 events
     for (let i = 0; i < 5; i++) {
-      await journal.emit("test-sess-2", "step.started", { step: i });
+      await journal.emit(sessId, "step.started", { step: i });
     }
 
-    const res = await fetch(`${baseUrl}/api/sessions/test-sess-2/journal`);
+    const res = await fetch(`${baseUrl}/api/sessions/${sessId}/journal`);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.events).toHaveLength(5);
@@ -981,9 +1002,10 @@ describe("ApiServer journal pagination", () => {
   });
 
   it("GET /sessions/:id/journal clamps oversized limit", async () => {
-    await journal.emit("test-sess-3", "step.started", { step: 1 });
+    const sessId = "10000000-0000-0000-0000-000000000003";
+    await journal.emit(sessId, "step.started", { step: 1 });
 
-    const res = await fetch(`${baseUrl}/api/sessions/test-sess-3/journal?limit=9999`);
+    const res = await fetch(`${baseUrl}/api/sessions/${sessId}/journal?limit=9999`);
     expect(res.status).toBe(200);
     const body = await res.json();
     // limit should be clamped to 500
@@ -991,12 +1013,13 @@ describe("ApiServer journal pagination", () => {
   });
 
   it("POST /sessions/:id/replay caps events at 1000", async () => {
+    const sessId = "10000000-0000-0000-0000-000000000004";
     // Write a few events
     for (let i = 0; i < 5; i++) {
-      await journal.emit("replay-sess", "step.started", { step: i });
+      await journal.emit(sessId, "step.started", { step: i });
     }
 
-    const res = await fetch(`${baseUrl}/api/sessions/replay-sess/replay`, { method: "POST" });
+    const res = await fetch(`${baseUrl}/api/sessions/${sessId}/replay`, { method: "POST" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.event_count).toBe(5);
@@ -2141,8 +2164,9 @@ describe("ApiServer SSE streaming", () => {
     try {
       const events: string[] = [];
       let contentType = "";
+      const sseSessionId = "20000000-0000-0000-0000-000000000001";
       const gotEvent = new Promise<void>((resolve) => {
-        const parsed = new URL(`${baseUrl}/api/sessions/sse-sess/stream`);
+        const parsed = new URL(`${baseUrl}/api/sessions/${sseSessionId}/stream`);
         const req = http.request(parsed, (res: any) => {
           contentType = res.headers["content-type"] ?? "";
           res.on("data", (chunk: Buffer) => {
@@ -2161,7 +2185,7 @@ describe("ApiServer SSE streaming", () => {
 
       await new Promise((r) => setTimeout(r, 100));
 
-      await journal.emit("sse-sess", "step.started", { step_id: "s1" });
+      await journal.emit(sseSessionId, "step.started", { step_id: "s1" });
 
       await Promise.race([gotEvent, new Promise((r) => setTimeout(r, 2000))]);
       expect(events.length).toBeGreaterThanOrEqual(1);
@@ -2194,7 +2218,7 @@ describe("ApiServer SSE streaming", () => {
     try {
       // First SSE connection — fire-and-forget (headers won't flush until data is written,
       // but the server registers the SSE client synchronously)
-      const parsed = new URL(`${baseUrl}/api/sessions/limited-sse/stream`);
+      const parsed = new URL(`${baseUrl}/api/sessions/20000000-0000-0000-0000-000000000002/stream`);
       const req1 = http.request(parsed, { agent: false }, () => {});
       req1.on("error", () => {});
       req1.end();

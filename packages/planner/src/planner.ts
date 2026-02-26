@@ -474,6 +474,22 @@ export class LLMPlanner implements Planner {
     if (typeof plan.schema_version === "number") {
       plan.schema_version = String(plan.schema_version);
     }
+    // Normalize plan fields that small/local models often get wrong
+    if (!plan.assumptions) plan.assumptions = [];
+    if (Array.isArray(plan.steps)) {
+      for (const step of plan.steps) {
+        // Strip extra properties from tool_ref (additionalProperties: false)
+        if (step.tool_ref && typeof step.tool_ref === "object") {
+          const { name, version_range } = step.tool_ref as unknown as Record<string, unknown>;
+          step.tool_ref = { name: name as string, ...(version_range ? { version_range: version_range as string } : {}) };
+        }
+        // Fill missing required step fields with safe defaults
+        if (!step.title) step.title = step.description ?? step.tool_ref?.name ?? "untitled";
+        if (!step.failure_policy) step.failure_policy = "continue";
+        if (step.timeout_ms === undefined) step.timeout_ms = 30000;
+        if (step.max_retries === undefined) step.max_retries = 0;
+      }
+    }
     // Agentic "done" signals have empty steps — skip schema validation for those
     // since PlanSchema requires minItems: 1 for real executable plans
     const isAgenticDone = this.agentic && Array.isArray(plan.steps) && plan.steps.length === 0;

@@ -30,6 +30,9 @@ export class ScheduleStore {
   }
 
   async save(): Promise<void> {
+    // Snapshot before acquiring lock — prevents interleaved mutations from external set/delete
+    const entries = [...this.schedules.values()];
+
     let releaseLock: () => void;
     const acquired = new Promise<void>((resolve) => { releaseLock = resolve; });
     const prev = this.writeLock;
@@ -38,7 +41,6 @@ export class ScheduleStore {
 
     try {
       await mkdir(dirname(this.filePath), { recursive: true });
-      const entries = [...this.schedules.values()];
       const content = entries.map(s => JSON.stringify(s)).join("\n") + (entries.length > 0 ? "\n" : "");
       const tmpPath = this.filePath + ".tmp";
       const fh = await open(tmpPath, "w");

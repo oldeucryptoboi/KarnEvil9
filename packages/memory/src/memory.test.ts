@@ -108,6 +108,45 @@ describe("TaskStateManager", () => {
     expect(snap.total_steps).toBe(0);
     expect(snap.step_titles).toEqual({});
   });
+
+  it("evicts oldest step_results when at capacity", () => {
+    const mgr = new TaskStateManager("sess-evict");
+    const max = TaskStateManager.MAX_STEP_RESULTS;
+    // Fill to capacity
+    for (let i = 0; i < max; i++) {
+      mgr.setStepResult(`step-${i}`, { step_id: `step-${i}`, status: "succeeded", output: {} } as any);
+    }
+    expect(mgr.getAllStepResults()).toHaveLength(max);
+    // Add one more — should evict the oldest (step-0)
+    mgr.setStepResult("step-overflow", { step_id: "step-overflow", status: "succeeded", output: {} } as any);
+    expect(mgr.getAllStepResults()).toHaveLength(max);
+    expect(mgr.getStepResult("step-0")).toBeUndefined();
+    expect(mgr.getStepResult("step-overflow")).toBeDefined();
+  });
+
+  it("evicts oldest artifacts when at capacity", () => {
+    const mgr = new TaskStateManager("sess-evict-art");
+    const max = TaskStateManager.MAX_ARTIFACTS;
+    for (let i = 0; i < max; i++) {
+      mgr.setArtifact(`art-${i}`, { data: i });
+    }
+    // Add one more — should evict the oldest
+    mgr.setArtifact("art-overflow", { data: "new" });
+    expect(mgr.getArtifact("art-0")).toBeUndefined();
+    expect(mgr.getArtifact("art-overflow")).toEqual({ data: "new" });
+  });
+
+  it("updating existing entry does not trigger eviction", () => {
+    const mgr = new TaskStateManager("sess-update");
+    const max = TaskStateManager.MAX_STEP_RESULTS;
+    for (let i = 0; i < max; i++) {
+      mgr.setStepResult(`step-${i}`, { step_id: `step-${i}`, status: "succeeded", output: {} } as any);
+    }
+    // Update an existing entry — should NOT evict
+    mgr.setStepResult("step-0", { step_id: "step-0", status: "failed", output: {} } as any);
+    expect(mgr.getAllStepResults()).toHaveLength(max);
+    expect(mgr.getStepResult("step-0")!.status).toBe("failed");
+  });
 });
 
 describe("WorkingMemoryManager", () => {

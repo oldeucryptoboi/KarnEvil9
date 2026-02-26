@@ -753,6 +753,15 @@ export class Kernel {
         }
         previousPlanId = plan.plan_id;
 
+        // Validate plan steps array integrity
+        if (!Array.isArray(plan.steps) || plan.steps.length < 0) {
+          await this.config.journal.tryEmit(this.session.session_id, "session.failed", {
+            reason: "Plan has invalid steps array",
+          });
+          await this.transition("failed");
+          return;
+        }
+
         // Check cumulative step limit
         if (totalStepsExecuted + plan.steps.length > this.session.limits.max_steps) {
           await this.config.journal.tryEmit(this.session.session_id, "limit.exceeded", {

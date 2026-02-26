@@ -65,11 +65,21 @@ export class RateLimiter {
     return { allowed: entry.count <= this.maxRequests, remaining, resetAt: entry.resetAt };
   }
 
+  private static readonly MAX_WINDOWS = 100_000;
+
   /** Periodically prune expired entries to prevent memory leak */
   prune(): void {
     const now = Date.now();
     for (const [key, entry] of this.windows) {
       if (now >= entry.resetAt) this.windows.delete(key);
+    }
+    // Hard cap: evict oldest entries if still over limit after pruning
+    if (this.windows.size > RateLimiter.MAX_WINDOWS) {
+      let toEvict = this.windows.size - RateLimiter.MAX_WINDOWS;
+      for (const key of this.windows.keys()) {
+        if (toEvict-- <= 0) break;
+        this.windows.delete(key);
+      }
     }
   }
 }
@@ -410,6 +420,11 @@ export class ApiServer {
   registerKernel(sessionId: string, kernel: Kernel): void { this.kernels.set(sessionId, kernel); }
 
   registerApproval(requestId: string, request: unknown, resolve: (decision: ApprovalDecision) => void): void {
+    // Reject request IDs with control characters at registration time for audit trail consistency
+    if (/[\x00-\x1f\x7f]/.test(requestId)) {
+      resolve("deny");
+      return;
+    }
     const timer = setTimeout(() => {
       if (this.pendingApprovals.has(requestId)) {
         this.pendingApprovals.delete(requestId);
@@ -966,24 +981,32 @@ export class ApiServer {
       const lastEventId = req.headers["last-event-id"] as string | undefined;
       const afterSeqParam = req.query.after_seq as string | undefined;
       const rawAfterSeq = lastEventId !== undefined ? parseInt(lastEventId, 10) : afterSeqParam !== undefined ? parseInt(afterSeqParam, 10) : NaN;
-      const afterSeq = Number.isNaN(rawAfterSeq) ? undefined : rawAfterSeq;
+      const afterSeq = Number.isNaN(rawAfterSeq) || !Number.isSafeInteger(rawAfterSeq) || rawAfterSeq < 0
+        ? undefined
+        : rawAfterSeq;
 
       if (afterSeq !== undefined) {
         const MAX_REPLAY = 500;
-        const events = await this.journal.readSession(sessionId, { limit: MAX_REPLAY + afterSeq + 1 });
-        let replayCount = 0;
-        const serverResForReplay = res as unknown as ServerResponse;
-        for (const event of events) {
-          if (serverResForReplay.destroyed) break;
-          if (event.seq !== undefined && event.seq > afterSeq) {
-            if (replayCount >= MAX_REPLAY) {
-              res.write(`data: ${JSON.stringify({ type: "replay.truncated", remaining: events.length - replayCount })}\n\n`);
-              break;
+        try {
+          const events = await this.journal.readSession(sessionId, { limit: MAX_REPLAY + afterSeq + 1 });
+          let replayCount = 0;
+          const serverResForReplay = res as unknown as ServerResponse;
+          for (const event of events) {
+            if (serverResForReplay.destroyed) break;
+            if (event.seq === undefined || !Number.isSafeInteger(event.seq)) continue;
+            if (event.seq > afterSeq) {
+              if (replayCount >= MAX_REPLAY) {
+                res.write(`data: ${JSON.stringify({ type: "replay.truncated", remaining: events.length - replayCount })}\n\n`);
+                break;
+              }
+              const seqId = `id: ${event.seq}\n`;
+              res.write(`${seqId}data: ${JSON.stringify(event)}\n\n`);
+              replayCount++;
             }
-            const seqId = `id: ${event.seq}\n`;
-            res.write(`${seqId}data: ${JSON.stringify(event)}\n\n`);
-            replayCount++;
           }
+        } catch (err) {
+          logError("SSE replay", err);
+          res.write(`data: ${JSON.stringify({ type: "replay.error", message: "Failed to replay events" })}\n\n`);
         }
       }
 

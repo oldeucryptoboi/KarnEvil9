@@ -12,6 +12,9 @@ import type {
 } from "@karnevil9/schemas";
 
 export class TaskStateManager {
+  static readonly MAX_STEP_RESULTS = 10_000;
+  static readonly MAX_ARTIFACTS = 10_000;
+
   private state: TaskState;
 
   constructor(sessionId: string) {
@@ -27,6 +30,10 @@ export class TaskStateManager {
   getPlan(): Plan | null { return this.state.plan; }
 
   setStepResult(stepId: string, result: StepResult): void {
+    if (this.state.step_results.size >= TaskStateManager.MAX_STEP_RESULTS && !this.state.step_results.has(stepId)) {
+      const oldest = this.state.step_results.keys().next().value;
+      if (oldest !== undefined) this.state.step_results.delete(oldest);
+    }
     this.state.step_results.set(stepId, result);
   }
 
@@ -39,6 +46,10 @@ export class TaskStateManager {
   }
 
   setArtifact(name: string, value: unknown): void {
+    if (this.state.artifacts.size >= TaskStateManager.MAX_ARTIFACTS && !this.state.artifacts.has(name)) {
+      const oldest = this.state.artifacts.keys().next().value;
+      if (oldest !== undefined) this.state.artifacts.delete(oldest);
+    }
     this.state.artifacts.set(name, value);
   }
 

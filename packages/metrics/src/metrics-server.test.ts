@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Registry } from "prom-client";
 import { MetricsCollector } from "./metrics-collector.js";
 import { createMetricsRouter } from "./metrics-server.js";
@@ -75,5 +75,62 @@ describe("createMetricsRouter", () => {
 
     expect(responseText).toContain("karnevil9_sessions_total");
     expect(responseText).toContain('status="created"');
+  });
+
+  it("handler returns 500 when collector.getMetrics() throws", async () => {
+    vi.spyOn(collector, "getMetrics").mockRejectedValueOnce(new Error("Registry failure"));
+
+    let statusCode = 0;
+    let responseText = "";
+    let responseContentType = "";
+
+    const req = { method: "GET", path: "/metrics", params: {}, query: {}, body: undefined };
+    const res = {
+      json: () => {},
+      text: () => {},
+      status: (code: number) => {
+        statusCode = code;
+        return {
+          json: () => {},
+          text: (data: string, contentType?: string) => {
+            responseText = data;
+            responseContentType = contentType ?? "";
+          },
+        };
+      },
+    };
+
+    await route.handler(req, res);
+
+    expect(statusCode).toBe(500);
+    expect(responseText).toContain("Error collecting metrics");
+    expect(responseContentType).toContain("text/plain");
+  });
+
+  it("handler returns 500 with plain text content type on error", async () => {
+    vi.spyOn(collector, "getMetrics").mockRejectedValueOnce(new TypeError("Unexpected"));
+
+    let statusCode = 0;
+    let responseContentType = "";
+
+    const req = { method: "GET", path: "/metrics", params: {}, query: {}, body: undefined };
+    const res = {
+      json: () => {},
+      text: () => {},
+      status: (code: number) => {
+        statusCode = code;
+        return {
+          json: () => {},
+          text: (_data: string, contentType?: string) => {
+            responseContentType = contentType ?? "";
+          },
+        };
+      },
+    };
+
+    await route.handler(req, res);
+
+    expect(statusCode).toBe(500);
+    expect(responseContentType).toBe("text/plain; charset=utf-8");
   });
 });

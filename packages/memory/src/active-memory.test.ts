@@ -8,6 +8,20 @@ import { ActiveMemory, extractLesson } from "./memory.js";
 const TEST_DIR = resolve(import.meta.dirname ?? ".", "../../.test-memory-data");
 const TEST_FILE = resolve(TEST_DIR, "memory.jsonl");
 
+function makeLesson(overrides: Partial<MemoryLesson> = {}): MemoryLesson {
+  return {
+    lesson_id: uuid(),
+    task_summary: "Read a file",
+    outcome: "succeeded",
+    lesson: "Completed using read-file. 1 step(s) succeeded.",
+    tool_names: ["read-file"],
+    created_at: new Date().toISOString(),
+    session_id: uuid(),
+    relevance_count: 0,
+    ...overrides,
+  };
+}
+
 describe("ActiveMemory", () => {
   beforeEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
@@ -17,20 +31,6 @@ describe("ActiveMemory", () => {
   afterEach(async () => {
     try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
   });
-
-  function makeLesson(overrides: Partial<MemoryLesson> = {}): MemoryLesson {
-    return {
-      lesson_id: uuid(),
-      task_summary: "Read a file",
-      outcome: "succeeded",
-      lesson: "Completed using read-file. 1 step(s) succeeded.",
-      tool_names: ["read-file"],
-      created_at: new Date().toISOString(),
-      session_id: uuid(),
-      relevance_count: 0,
-      ...overrides,
-    };
-  }
 
   it("loads from empty file (no file exists)", async () => {
     const mem = new ActiveMemory(TEST_FILE);
@@ -166,6 +166,109 @@ describe("ActiveMemory", () => {
     const mem2 = new ActiveMemory(TEST_FILE);
     await mem2.load();
     expect(mem2.getLessons()).toHaveLength(1);
+  });
+});
+
+describe("ActiveMemory — concurrent save serialization", () => {
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    await mkdir(TEST_DIR, { recursive: true });
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("serializes concurrent save() calls via write lock", async () => {
+    const mem = new ActiveMemory(TEST_FILE);
+    await mem.load();
+    mem.addLesson(makeLesson({ task_summary: "First" }));
+
+    // Fire two saves concurrently — they should serialize, not corrupt
+    const p1 = mem.save();
+    mem.addLesson(makeLesson({ task_summary: "Second" }));
+    const p2 = mem.save();
+    await Promise.all([p1, p2]);
+
+    const mem2 = new ActiveMemory(TEST_FILE);
+    await mem2.load();
+    expect(mem2.getLessons()).toHaveLength(2);
+    const summaries = mem2.getLessons().map(l => l.task_summary);
+    expect(summaries).toContain("First");
+    expect(summaries).toContain("Second");
+  });
+});
+
+describe("ActiveMemory — search metadata updates", () => {
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    await mkdir(TEST_DIR, { recursive: true });
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("search updates last_retrieved_at on matched lessons", async () => {
+    const mem = new ActiveMemory(TEST_FILE);
+    await mem.load();
+    const lesson = makeLesson({ task_summary: "Read configuration data" });
+    expect(lesson.last_retrieved_at).toBeUndefined();
+    mem.addLesson(lesson);
+
+    mem.search("configuration data");
+    expect(lesson.last_retrieved_at).toBeDefined();
+    expect(new Date(lesson.last_retrieved_at!).getTime()).toBeGreaterThan(0);
+  });
+
+  it("search returns empty array when no words match", async () => {
+    const mem = new ActiveMemory(TEST_FILE);
+    await mem.load();
+    mem.addLesson(makeLesson({ task_summary: "Read a file" }));
+
+    const results = mem.search("completely unrelated query");
+    expect(results).toEqual([]);
+  });
+
+  it("search ignores words 3 chars or shorter", async () => {
+    const mem = new ActiveMemory(TEST_FILE);
+    await mem.load();
+    mem.addLesson(makeLesson({ task_summary: "The big cat sat" }));
+
+    // All query words are <= 3 chars, so no scoring → empty results
+    const results = mem.search("the big cat sat");
+    expect(results).toEqual([]);
+  });
+});
+
+describe("ActiveMemory — prune with last_retrieved_at", () => {
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    await mkdir(TEST_DIR, { recursive: true });
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("keeps old lesson with recent last_retrieved_at", async () => {
+    const mem = new ActiveMemory(TEST_FILE);
+    await mem.load();
+
+    const oldDate = new Date();
+    oldDate.setDate(oldDate.getDate() - 60);
+    mem.addLesson(makeLesson({
+      task_summary: "Old but recently retrieved",
+      created_at: oldDate.toISOString(),
+      relevance_count: 0, // Would be pruned without last_retrieved_at
+      last_retrieved_at: new Date().toISOString(), // Recent retrieval
+    }));
+    await mem.save();
+
+    const mem2 = new ActiveMemory(TEST_FILE);
+    await mem2.load();
+    expect(mem2.getLessons()).toHaveLength(1);
+    expect(mem2.getLessons()[0]!.task_summary).toBe("Old but recently retrieved");
   });
 });
 
@@ -401,5 +504,52 @@ describe("extractLesson", () => {
 
     const lesson = extractLesson("task", plan, results, "completed");
     expect(lesson!.session_id).toBe(plan.plan_id);
+  });
+
+  it("extracts failed lesson from aborted session", () => {
+    const plan = makePlan(["shell-exec"]);
+    const results: StepResult[] = [{
+      step_id: "step-0", status: "failed",
+      error: { code: "ABORTED", message: "User aborted" },
+      started_at: new Date().toISOString(), attempts: 1,
+    }];
+
+    const lesson = extractLesson("Run dangerous command", plan, results, "aborted");
+    expect(lesson).not.toBeNull();
+    expect(lesson!.outcome).toBe("failed");
+    expect(lesson!.lesson).toContain("User aborted");
+  });
+
+  it("limits error messages to 3 in failed lesson", () => {
+    const plan = makePlan(["t1", "t2", "t3", "t4", "t5"]);
+    const results: StepResult[] = Array.from({ length: 5 }, (_, i) => ({
+      step_id: `step-${i}`, status: "failed" as const,
+      error: { code: "ERR", message: `Error ${i}` },
+      started_at: new Date().toISOString(), attempts: 1,
+    }));
+
+    const lesson = extractLesson("Multi-failure task", plan, results, "failed");
+    expect(lesson!.lesson).toContain("Error 0");
+    expect(lesson!.lesson).toContain("Error 2");
+    expect(lesson!.lesson).not.toContain("Error 3");
+  });
+
+  it("returns null for null plan", () => {
+    expect(extractLesson("task", null as any, [], "completed")).toBeNull();
+  });
+
+  it("redacts PEM private keys from task summary", () => {
+    const plan = makePlan(["http-request"]);
+    const results: StepResult[] = [{
+      step_id: "step-0", status: "succeeded",
+      started_at: new Date().toISOString(), attempts: 1,
+    }];
+
+    const lesson = extractLesson(
+      "Deploy with -----BEGIN PRIVATE KEY----- certificate",
+      plan, results, "completed"
+    );
+    expect(lesson!.task_summary).toContain("[REDACTED]");
+    expect(lesson!.task_summary).not.toContain("-----BEGIN PRIVATE KEY-----");
   });
 });

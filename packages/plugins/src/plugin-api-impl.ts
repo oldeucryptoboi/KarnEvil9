@@ -76,17 +76,20 @@ export class PluginApiImpl implements PluginApi {
     // Wrap handler with error isolation and timeout
     const pluginId = this.id;
     const wrappedHandler: RouteHandler = async (req, res) => {
+      let timer: ReturnType<typeof setTimeout>;
       try {
         await Promise.race([
           handler(req, res),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("Route handler timeout")), 30000)
-          ),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Route handler timeout")), 30000);
+          }),
         ]);
       } catch (err) {
         try {
           res.status(500).json({ error: `Plugin "${pluginId}" route error: ${err instanceof Error ? err.message : String(err)}` });
         } catch { /* response may already be sent */ }
+      } finally {
+        clearTimeout(timer!);
       }
     };
     this._routes.push({ method: method.toUpperCase(), path, handler: wrappedHandler });

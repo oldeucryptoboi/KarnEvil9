@@ -95,16 +95,17 @@ export class HookRunner {
       }
 
       let result: HookResult;
+      let hookTimer: ReturnType<typeof setTimeout>;
       try {
         const hookTimeout = reg.timeout_ms && reg.timeout_ms > 0 ? reg.timeout_ms : 5000;
         const raw = await Promise.race([
           reg.handler({ ...context, ...mergedData }),
-          new Promise<never>((_, reject) =>
-            setTimeout(
+          new Promise<never>((_, reject) => {
+            hookTimer = setTimeout(
               () => reject(new Error(`Hook "${hookName}" from plugin "${reg.plugin_id}" timed out after ${hookTimeout}ms`)),
               hookTimeout
-            )
-          ),
+            );
+          }),
         ]);
         result = validateHookResult(raw, hookName, reg.plugin_id);
       } catch (err) {
@@ -115,6 +116,8 @@ export class HookRunner {
           error: err instanceof Error ? err.message : String(err),
         });
         continue;
+      } finally {
+        clearTimeout(hookTimer!);
       }
 
       breaker.recordSuccess(reg.plugin_id);

@@ -372,6 +372,10 @@ export class MeshManager {
     return this.config.token;
   }
 
+  getMaxDelegationDepth(): number {
+    return this.config.max_delegation_depth ?? 3;
+  }
+
   get isRunning(): boolean {
     return this.running;
   }

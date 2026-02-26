@@ -324,6 +324,7 @@ export class Journal {
     const acquired = new Promise<void>((resolve) => { releaseLock = resolve; });
     const prev = this.writeLock;
     this.writeLock = acquired;
+    await prev;
 
     const tmpPath = `${this.filePath}.tmp`;
 

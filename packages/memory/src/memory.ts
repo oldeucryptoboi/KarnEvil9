@@ -145,6 +145,7 @@ const PRUNE_AGE_DAYS = 30;
 export class ActiveMemory {
   private lessons: MemoryLesson[] = [];
   private filePath: string;
+  private writeLock: Promise<void> = Promise.resolve();
 
   constructor(filePath: string) {
     this.filePath = filePath;
@@ -169,18 +170,28 @@ export class ActiveMemory {
   }
 
   async save(): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true });
-    const content = this.lessons.map(l => JSON.stringify(l)).join("\n") + (this.lessons.length > 0 ? "\n" : "");
-    // Atomic write: write to temp file, fsync, then rename
-    const tmpPath = this.filePath + ".tmp";
-    const fh = await open(tmpPath, "w");
+    let releaseLock: () => void;
+    const acquired = new Promise<void>((resolve) => { releaseLock = resolve; });
+    const prev = this.writeLock;
+    this.writeLock = acquired;
+    await prev;
+
     try {
-      await fh.writeFile(content, "utf-8");
-      await fh.sync();
+      await mkdir(dirname(this.filePath), { recursive: true });
+      const content = this.lessons.map(l => JSON.stringify(l)).join("\n") + (this.lessons.length > 0 ? "\n" : "");
+      // Atomic write: write to temp file, fsync, then rename
+      const tmpPath = this.filePath + ".tmp";
+      const fh = await open(tmpPath, "w");
+      try {
+        await fh.writeFile(content, "utf-8");
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
+      await rename(tmpPath, this.filePath);
     } finally {
-      await fh.close();
+      releaseLock!();
     }
-    await rename(tmpPath, this.filePath);
   }
 
   addLesson(lesson: MemoryLesson): void {

@@ -14,6 +14,7 @@ import type { TaskAuction } from "./task-auction.js";
 import type { EscrowManager } from "./escrow-manager.js";
 import type { ConsensusVerifier } from "./consensus-verifier.js";
 import type { CheckpointSerializer } from "./checkpoint-serializer.js";
+import { timingSafeEqual } from "node:crypto";
 import type {
   SwarmTaskRequest,
   SwarmTaskResult,
@@ -57,11 +58,13 @@ export function createSwarmRoutes(
   consensusVerifier?: ConsensusVerifier,
   checkpointSerializer?: CheckpointSerializer,
 ): SwarmRoute[] {
-  const identity: RouteHandler = async (_req, res) => {
+  const identity: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     res.json(meshManager.getIdentity());
   };
 
   const peers: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     let peerList = meshManager.getPeers();
     const statusFilter = req.query.status;
     if (statusFilter) {
@@ -87,9 +90,18 @@ export function createSwarmRoutes(
   const requireToken = (req: Parameters<RouteHandler>[0], res: Parameters<RouteHandler>[1]): boolean => {
     if (!swarmToken) return false; // no token configured — open mesh
     const auth = req.headers?.authorization;
-    if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== swarmToken) {
+    if (!auth || !auth.startsWith("Bearer ")) {
       res.status(401).json({ error: "Unauthorized: invalid or missing swarm token" });
-      return true; // rejected
+      return true;
+    }
+    const provided = auth.slice(7);
+    const expected = swarmToken;
+    // Constant-time comparison to prevent timing-oracle attacks
+    const a = Buffer.from(provided, "utf-8");
+    const b = Buffer.from(expected, "utf-8");
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      res.status(401).json({ error: "Unauthorized: invalid or missing swarm token" });
+      return true;
     }
     return false;
   };
@@ -155,7 +167,7 @@ export function createSwarmRoutes(
     }
 
     // Early depth check
-    const maxDepth = meshManager.getSwarmToken() ? 3 : 3; // from config default
+    const maxDepth = meshManager.getMaxDelegationDepth();
     if (body.delegation_depth !== undefined && body.delegation_depth >= maxDepth) {
       res.json({ accepted: false, reason: `Delegation depth ${body.delegation_depth} exceeds max ${maxDepth}` });
       return;
@@ -183,7 +195,8 @@ export function createSwarmRoutes(
     res.json({ ok: true });
   };
 
-  const status: RouteHandler = async (_req, res) => {
+  const status: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     res.json({
       running: meshManager.isRunning,
       node_id: meshManager.getIdentity().node_id,
@@ -196,7 +209,8 @@ export function createSwarmRoutes(
 
   // ─── Reputation Routes ──────────────────────────────────────────────
 
-  const reputationList: RouteHandler = async (_req, res) => {
+  const reputationList: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!reputationStore) {
       res.json({ reputations: [], total: 0 });
       return;
@@ -206,6 +220,7 @@ export function createSwarmRoutes(
   };
 
   const reputationGet: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!reputationStore) {
       res.status(404).json({ error: "Reputation store not configured" });
       return;
@@ -226,6 +241,7 @@ export function createSwarmRoutes(
   // ─── Contract Routes ──────────────────────────────────────────────
 
   const contractList: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!contractStore) {
       res.json({ contracts: [], total: 0 });
       return;
@@ -238,6 +254,7 @@ export function createSwarmRoutes(
   };
 
   const contractGet: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!contractStore) {
       res.status(404).json({ error: "Contract store not configured" });
       return;
@@ -309,6 +326,7 @@ export function createSwarmRoutes(
   // ─── SSE Events Route ──────────────────────────────────────────────
 
   const eventsSSE: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!monitoringStream) {
       res.status(501).json({ error: "SSE monitoring not configured" });
       return;
@@ -328,7 +346,8 @@ export function createSwarmRoutes(
 
   // ─── Anomaly Routes ──────────────────────────────────────────────
 
-  const anomaliesList: RouteHandler = async (_req, res) => {
+  const anomaliesList: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!anomalyDetector) {
       res.json({ anomalies: [], total: 0 });
       return;
@@ -370,6 +389,7 @@ export function createSwarmRoutes(
   // ─── Credential Routes ──────────────────────────────────────────
 
   const credentialsGet: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!credentialVerifier) {
       res.json({ credentials: [] });
       return;
@@ -385,7 +405,8 @@ export function createSwarmRoutes(
 
   // ─── DCT Routes ──────────────────────────────────────────────────
 
-  const tokensList: RouteHandler = async (_req, res) => {
+  const tokensList: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!dctManager) {
       res.json({ tokens: [], total: 0 });
       return;
@@ -411,7 +432,8 @@ export function createSwarmRoutes(
 
   // ─── Sybil Routes ─────────────────────────────────────────────────
 
-  const sybilReports: RouteHandler = async (_req, res) => {
+  const sybilReports: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!sybilDetector) {
       res.json({ reports: [], total: 0 });
       return;
@@ -463,7 +485,8 @@ export function createSwarmRoutes(
     res.json(result);
   };
 
-  const auctionsList: RouteHandler = async (_req, res) => {
+  const auctionsList: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!taskAuction) {
       res.json({ auctions: [], total: 0 });
       return;
@@ -476,6 +499,7 @@ export function createSwarmRoutes(
 
   // Escrow routes
   const escrowBalance: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!escrowManager) {
       res.json({ balance: 0, held: 0, free: 0 });
       return;
@@ -555,6 +579,7 @@ export function createSwarmRoutes(
   };
 
   const consensusStatus: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!consensusVerifier) {
       res.status(501).json({ error: "Consensus verifier not configured" });
       return;
@@ -642,6 +667,7 @@ export function createSwarmRoutes(
   };
 
   const contractRenegotiationList: RouteHandler = async (req, res) => {
+    if (requireToken(req, res)) return;
     if (!contractStore) {
       res.json({ renegotiations: [] });
       return;

@@ -316,7 +316,8 @@ export class ObjectStore {
 
     if (isEntity) {
       const typeDef = schema.object_types.find((ot) => ot.name === objectType);
-      const folder = typeDef?.folder ?? objectType;
+      const rawFolder = typeDef?.folder ?? objectType;
+      const folder = sanitizeFileName(rawFolder);
       return join("_Ontology", "Objects", folder, safeName);
     }
 

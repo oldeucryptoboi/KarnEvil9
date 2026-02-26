@@ -219,15 +219,14 @@ export class Scheduler {
    * to the schedule grid and doesn't drift with execution latency.
    */
   private async executeJob(schedule: Schedule, scheduledAt?: string): Promise<void> {
-    await this.journal.emit(this.sessionId, "scheduler.job_triggered", {
-      schedule_id: schedule.schedule_id,
-      name: schedule.name,
-      action_type: schedule.action.type,
-      created_by: schedule.created_by,
-      task_text: schedule.action.type === "createSession" ? schedule.action.task_text : undefined,
-    });
-
     try {
+      await this.journal.emit(this.sessionId, "scheduler.job_triggered", {
+        schedule_id: schedule.schedule_id,
+        name: schedule.name,
+        action_type: schedule.action.type,
+        created_by: schedule.created_by,
+        task_text: schedule.action.type === "createSession" ? schedule.action.task_text : undefined,
+      });
       let sessionId: string | undefined;
       if (schedule.action.type === "createSession") {
         const task: Task = {

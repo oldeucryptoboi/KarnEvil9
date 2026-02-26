@@ -319,6 +319,8 @@ export class ApiServer {
       this.agentic = false;
       this.approvalTimeoutMs = 300000; // 5 minutes
       this.rateLimiter = new RateLimiter();
+      this.rateLimiterPruneInterval = setInterval(() => this.rateLimiter.prune(), RATE_LIMITER_PRUNE_INTERVAL_MS);
+      this.rateLimiterPruneInterval.unref();
       // No token in legacy constructor — unauthenticated
     } else {
       const config = configOrRegistry as ApiServerConfig;
@@ -693,11 +695,14 @@ export class ApiServer {
     });
     Promise.race([kernelPromise, timeoutPromise])
       .catch((err) => {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        // Persist failure to journal so replays/reconnects can see it
+        this.journal.emit(sessionId, "session.failed", { error: errorMsg }).catch(() => {});
         try {
           this.broadcastEvent(sessionId, {
             type: "session.failed",
             session_id: sessionId,
-            payload: { error: err instanceof Error ? err.message : String(err) },
+            payload: { error: errorMsg },
             timestamp: new Date().toISOString(),
           });
         } catch (broadcastErr) {
@@ -1017,8 +1022,8 @@ export class ApiServer {
       clearTimeout(approval.timer);
       approval.resolve(decision);
       this.pendingApprovals.delete(req.params.id!);
-      // Audit trail: log who approved what
-      const requestId = req.params.id!;
+      // Audit trail: log who approved what (sanitize to prevent log injection)
+      const requestId = req.params.id!.replace(/[\x00-\x1f\x7f]/g, "");
       const sourceIp = getClientIP(req, this.trustedProxies);
       const decisionStr = typeof decision === "string" ? decision : typeof decision === "object" && decision !== null && "type" in decision ? (decision as { type: string }).type : "unknown";
       console.log(`[api] Approval resolved: request_id=${requestId} decision=${decisionStr} source_ip=${sourceIp}`);

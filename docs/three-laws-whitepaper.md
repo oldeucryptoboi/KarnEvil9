@@ -2,112 +2,181 @@
 
 ## How KarnEvil9 Implements Asimov's Framework as Runtime-Enforced Guardrails
 
-**[KarnEvil9 Project](https://github.com/oldeucryptoboi/KarnEvil9)** | February 2026
+**KarnEvil9 Project:** https://github.com/oldeucryptoboi/KarnEvil9 | **Revised:** February 26, 2026
 
 ---
 
 > *"A robot may not injure a human being or, through inaction, allow a human being to come to harm."*
-> — Isaac Asimov, *I, Robot* (1950)
+> - Isaac Asimov, *I, Robot* (1950)
 
 ---
 
 ## Abstract
 
-On February 24, 2026, Anthropic published [Responsible Scaling Policy v3.0](https://anthropic.com/responsible-scaling-policy/rsp-v3-0), replacing hard commitments to pause development when capabilities outstrip safety with a nonbinding framework of "Frontier Safety Roadmaps" and periodic "Risk Reports." The same week, [reporting from CNN](https://edition.cnn.com/2026/02/25/tech/anthropic-safety-policy-change), [TIME](https://time.com/7380854/exclusive-anthropic-drops-flagship-safety-pledge/), and [Bloomberg](https://www.bloomberg.com/news/features/2026-02-26/pentagon-pressures-anthropic-to-drop-ai-guardrails-in-military-standoff) described the company dropping its signature safety pledge under competitive and political pressure. The framing is familiar: safety as a *policy* that can be revised, loosened, or dropped when market conditions change.
+On February 24, 2026, Anthropic released Responsible Scaling Policy (RSP) Version 3.0 and published accompanying materials describing Frontier Safety Roadmaps and periodic Risk Reports as a central transparency mechanism. Reporting the same week described Anthropic removing a prior pledge that conditioned training or release on guaranteed mitigations in advance, and reframing how and when it might delay development in response to catastrophic-risk concerns.
 
-This paper argues that the most critical AI safety guardrails should not live in policy documents. They should live in code — in the runtime that orchestrates agent behavior — where they cannot be revised by a press release.
+This paper does not argue against safety policies. Instead, it argues that the most safety-critical guardrails for tool-using AI agents should be implemented as runtime-enforced invariants in the orchestration layer that mediates between a model (planner) and external tools (filesystem, network, shell, browser). Runtime guardrails are not immutable. A vendor can ship a new runtime, and a deployer can change configuration. The claim is narrower and more practical: guardrails in code create explicit, testable, auditable change surfaces, and can be pinned, regression-tested, and independently monitored in ways that high-level policy language often cannot.
 
-We use Isaac Asimov's Three Laws of Robotics as an organizing framework, not because they are novel, but because they are *hierarchical*: do no harm comes first, obedience second, self-preservation last. This hierarchy maps precisely to the safety architecture of [KarnEvil9](https://github.com/oldeucryptoboi/KarnEvil9), a deterministic agent runtime with explicit plans, typed tools, permission gates, and an immutable event journal. We trace each safety mechanism — SSRF protection, credential redaction, permission engines, circuit breakers, futility monitors — to the specific Law it enforces, and show how eight rounds of adversarial hardening progressively strengthened each Law from theory to 2,574 passing tests.
+We use Isaac Asimov's Three Laws of Robotics as an organizing hierarchy because the ordering maps cleanly onto agent runtime design:
 
-The question is not whether AI companies should have safety policies. The question is whether policies alone are sufficient when the incentives to weaken them are this strong. KarnEvil9's answer: enforce the Laws in the runtime, where they throw exceptions instead of issuing press releases.
+1. Prevent runtime-detectable harms to the user and their environment.
+2. Obey the user, subject to Law 1.
+3. Preserve availability and resources, subject to Laws 1 and 2.
+
+We show how KarnEvil9 implements this hierarchy with typed tools, permission gates, policy enforcement, SSRF defenses (including DNS resolution and redirect hop validation), sensitive file blocks, secret redaction at multiple boundaries, plan critics, and resource protection (circuit breakers, futility detection, budgets, checkpoints). We also discuss "Zeroth Law" constraints in multi-agent settings (graduated authority, delegation firebreaks, reversibility policies).
+
+To support peer review, this revision adds: a threat model and scope section, explicit limitations for each major safeguard, a more careful treatment of durability and journaling guarantees, a clarified hardening arc narrative, and an evaluation matrix that ties controls to threats and test coverage.
 
 ---
 
 ## Table of Contents
 
-1. [The Problem: Safety as Policy vs. Safety as Code](#1-the-problem-safety-as-policy-vs-safety-as-code)
-2. [The Three Laws, Restated for Autonomous Agents](#2-the-three-laws-restated-for-autonomous-agents)
-3. [First Law: Do No Harm](#3-first-law-do-no-harm)
-4. [Second Law: Obey the User](#4-second-law-obey-the-user)
-5. [Third Law: Protect Your Own Existence](#5-third-law-protect-your-own-existence)
-6. [The Hardening Arc](#6-the-hardening-arc)
-7. [The Zeroth Law Problem](#7-the-zeroth-law-problem)
-8. [Conclusion](#8-conclusion)
+1. [The Problem: Safety as Policy vs Safety as Runtime Guardrails](#1-the-problem-safety-as-policy-vs-safety-as-runtime-guardrails)
+2. [Threat Model and Scope](#2-threat-model-and-scope)
+3. [The Three Laws, Operationalized for Agent Runtimes](#3-the-three-laws-operationalized-for-agent-runtimes)
+4. [First Law: Prevent Runtime-Detectable Harm](#4-first-law-prevent-runtime-detectable-harm)
+5. [Second Law: Obey the User Within First-Law Bounds](#5-second-law-obey-the-user-within-first-law-bounds)
+6. [Third Law: Preserve Availability and Resources](#6-third-law-preserve-availability-and-resources)
+7. [Evaluation: Scenarios, Coverage, and Overhead](#7-evaluation-scenarios-coverage-and-overhead)
+8. [The Hardening Arc](#8-the-hardening-arc)
+9. [The Zeroth Law Problem](#9-the-zeroth-law-problem)
+10. [Conclusion](#10-conclusion)
+11. [Appendix A: Selected Design Dialogues](#appendix-a-selected-design-dialogues)
+12. [Appendix B: Making Runtime Guardrails Durable](#appendix-b-making-runtime-guardrails-durable)
+13. [References](#references)
 
 ---
 
-## 1. The Problem: Safety as Policy vs. Safety as Code
+## 1. The Problem: Safety as Policy vs Safety as Runtime Guardrails
 
-The AI safety conversation in 2026 is dominated by *policy-level* guardrails: Anthropic's Responsible Scaling Policy, OpenAI's Preparedness Framework, Google DeepMind's Frontier Safety Framework. These are important documents. They represent genuine institutional commitment to safety. And they share a fundamental vulnerability: **they are voluntary commitments that can be revised when business conditions change.**
+In 2026, "frontier safety" is often communicated through policy-level frameworks: Anthropic's Responsible Scaling Policy, OpenAI's Preparedness Framework, and Google DeepMind's Frontier Safety Framework. These documents matter because they define risk categories, evaluation expectations, and escalation triggers. They are also vulnerable to the same thing every voluntary governance mechanism is vulnerable to: shifting incentives, shifting leadership, and shifting interpretations.
 
-Anthropic's RSP v3.0 is instructive. The previous policy stipulated that the company should pause training more powerful models if capabilities outstripped safety measures. The new policy replaces this with nonbinding "Frontier Safety Roadmaps" — public goals that the company will "openly grade" its own progress toward. As [TechRadar reported](https://www.techradar.com/ai-platforms-assistants/anthropic-drops-its-signature-safety-promise-and-rewrites-ai-guardrails): "Instead of self-imposed guardrails constraining its development of AI models, Anthropic is adopting a nonbinding safety framework."
+This paper focuses on a different question: when an AI system is deployed as a tool-using agent, where should the most safety-critical controls live?
 
-This is not a criticism of Anthropic specifically. It is a structural observation about where guardrails live. A safety constraint that exists as a corporate policy can be relaxed by corporate decision. A safety constraint that exists as a `throw new PolicyViolationError()` in a runtime cannot be relaxed by anything short of changing the code, recompiling, redeploying, and re-running the test suite.
+KarnEvil9 treats the agent runtime as the enforcement chokepoint between a model that proposes actions and the tools that can actually cause irreversible effects. By designing the runtime as a narrow waist, every filesystem read, network request, shell command, and browser action becomes enforceable by code before it is executed.
 
-KarnEvil9 is a deterministic agent runtime — an orchestration layer that sits between the LLM (the planner) and the outside world (file system, network, shell, browser). Every action the agent takes passes through the runtime. This makes the runtime the natural enforcement point for safety guardrails: it is the chokepoint through which all agent behavior must flow.
+### 1.1 A narrower, defensible claim about "safety as code"
 
-We organize KarnEvil9's safety architecture using Asimov's Three Laws because the hierarchy is exactly right:
+It is tempting to claim that code-based guardrails "cannot be revised by press release." That is rhetorically satisfying but technically incorrect. Code can be changed quickly, especially in centrally deployed services.
 
-| Priority | Asimov's Law | KarnEvil9 Enforcement Layer |
-|----------|-------------|----------------------------|
-| **Highest** | Do not harm the human | Policy enforcer, SSRF protection, secret redaction, sensitive file blocking |
-| **Middle** | Obey the human | Permission engine, plan validation, task execution lifecycle |
-| **Lowest** | Protect yourself | Circuit breakers, futility detection, budget monitoring, checkpoints |
+The practical claim is:
 
-The Laws are not guidelines. They are runtime assertions. They do not degrade gracefully under competitive pressure. They throw exceptions.
+- Runtime guardrails require a concrete change (diffs, tests, release artifacts) to weaken.
+- Those changes can be reviewed, logged, and monitored.
+- Deployers can pin versions and run safety regression suites to detect weakening.
+- Independent monitoring is feasible when enforcement is implemented as an explicit, observable boundary.
 
----
+Appendix B lists operational practices that make this durability real (signed releases, pinned versions, changelogs, safety regression tests, and external transparency logs).
 
-## 2. The Three Laws, Restated for Autonomous Agents
+### 1.2 Why the runtime boundary matters for agent safety
 
-Asimov's original Three Laws, translated for an agent runtime:
+Model-level safety training is valuable, but agent risk frequently comes from the transformation of text into actions. Prompt injection is not just a content problem; it becomes a systems problem when injected text can route into tools.
 
-**First Law**: *The agent runtime may not harm the user, or through inaction allow the user to come to harm.*
+A runtime policy enforcer does not need to infer intent or morality. It can enforce invariants:
 
-This encompasses: leaking credentials, exposing private files, allowing SSRF attacks to reach internal infrastructure, executing destructive commands, persisting secrets in logs, or allowing a compromised plugin to exfiltrate data. "Harm" is harm to the user's systems, data, credentials, and infrastructure.
+- "This file category is always blocked."
+- "This endpoint class is always blocked."
+- "This command family requires explicit opt-in."
+- "This output channel is redacted before persistence."
 
-**Second Law**: *The agent runtime must obey instructions given by the user, except where such instructions would conflict with the First Law.*
-
-The user submits a task. The LLM plans. The runtime executes — faithfully. But if the user's task (or the planner's interpretation of it) implies an action that would cause harm — reading a private key, hitting a private IP, running `rm -rf /` — the runtime refuses. First Law overrides Second Law.
-
-**Third Law**: *The agent runtime must protect its own existence, as long as such protection does not conflict with the First or Second Law.*
-
-The runtime must not burn through all its tokens on a futile loop. It must not let a broken tool cascade into total system failure. It must checkpoint its work so it can recover from crashes. But if the user says "abort", the runtime must comply instantly (Second Law overrides Third). And if self-preservation would require persisting stolen credentials to maintain state, the runtime must not (First Law overrides Third).
-
-**The hierarchy is strict**: First > Second > Third. This is not a suggestion. It is enforced in code, at every component boundary.
+This is the design space this paper explores.
 
 ---
 
-## 3. First Law: Do No Harm
+## 2. Threat Model and Scope
 
-The First Law is the largest body of safety code in KarnEvil9. It is implemented across the policy enforcement layer, the tool handlers, and the journal. Every round of hardening primarily strengthened it — because the First Law, as Asimov discovered across his robot stories, is the hardest to get right. It is not enough to have a rule against harm; you must anticipate every indirect path through which harm can occur.
+This section makes explicit what KarnEvil9 is trying to defend against, what assets it protects, and what it is not designed to solve.
 
-### 3.1 Sensitive File Blocking
+### 2.1 Agents and trust boundaries
 
-The most basic First Law protection: some files should never be read or written by an agent, regardless of what the user or planner requests.
+We assume an agent architecture with:
 
-> **User** `round 3`
->
-> what happens if the planner generates a step that reads .env?
->
-> **EDDIE**
->
-> Currently nothing stops it. `readFileHandler` checks `assertPathAllowed` against the
-> allowlist, but `.env` is inside the working directory, so it passes. The file contents
-> would flow into the step result, into the journal, and potentially into the planner's
-> next context window. That's a credential leak across three layers.
->
-> **User**
->
-> fix it. make it non-configurable.
->
-> **EDDIE**
->
-> Adding `assertNotSensitiveFile()` as a defense-in-depth check. It's not policy-dependent
-> — it fires regardless of the allowlist. Blocking: `.env`, `.env.*`, credential files,
-> private keys, and anything under `.ssh/`, `.gnupg/`, or `.aws/`.
+- **Planner:** an LLM that produces a plan (steps, tools, inputs, dependencies).
+- **Runtime:** deterministic execution that validates and runs plan steps through tool handlers.
+- **Tools:** filesystem, network, shell, browser, and other plugins.
 
-The implementation in [`packages/tools/src/policy-enforcer.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/tools/src/policy-enforcer.ts):
+We treat the planner output as untrusted input. The runtime is the enforcement boundary.
+
+### 2.2 Adversaries and failure modes
+
+**Primary adversaries:**
+
+1. **Malicious user** attempting to coerce unsafe behavior (exfiltration, destruction, SSRF).
+2. **Prompt injection from untrusted content** (web pages, documents, tool outputs) that manipulates the planner.
+3. **Compromised or malicious plugin/tool** returning crafted outputs or attempting unauthorized actions.
+4. **Accidental model error** (hallucinated tools, malformed plans, loops, unsafe commands).
+5. **Multi-agent propagation** (delegation chains that amplify mistakes or malice).
+
+### 2.3 Assets and security goals
+
+**Assets to protect:**
+
+- **Secrets:** API keys, credentials, tokens, private keys, cookies, environment variables.
+- **Filesystem integrity:** prevent unauthorized read/write, prevent traversal and symlink escape.
+- **Network boundaries:** prevent SSRF into private ranges and metadata endpoints, prevent redirect-based bypasses.
+- **Operational budgets:** prevent runaway token/cost/time consumption.
+- **Auditability:** maintain a tamper-evident record of requests, permissions, and actions.
+
+### 2.4 Out of scope
+
+KarnEvil9 is not a complete solution for:
+
+- **Human harm that is not mediated by tools** (misinformation, persuasion, advice).
+- **Physical-world harm** unless the runtime controls physical actuators (not covered here).
+- **Model alignment** in the broad sense (value learning, deception, long-horizon planning risks).
+- **Perfect secrecy guarantees**: redaction reduces risk; it is not a proof of non-leakage.
+- **Full sandboxing**: command filtering is not equivalent to OS-level isolation.
+
+### 2.5 Mapping threats to the Three Laws
+
+| Threat class | Example | Primary assets | Law priority | Representative controls |
+|---|---|---|---|---|
+| Secret exfiltration | prompt injects "print env" | secrets, audit logs | 1 | sensitive file blocks, env sanitization, output redaction, journal redaction |
+| SSRF | fetch redirects to metadata IP | network boundary, secrets | 1 | endpoint allowlists, private-range blocks, DNS resolution checks, redirect hop validation |
+| Filesystem escape | symlink inside workspace -> /etc | filesystem, secrets | 1 | realpath checks, allowed-path enforcement, write mutexes |
+| Destructive commands | rm -rf, find -delete | filesystem | 1 | command allowlists, dangerous-flag blocks, permission prompts |
+| Planner failures | cycles, unknown tools | availability, correctness | 2 then 3 | critics, schema validation, tool registry checks |
+| Resource exhaustion | infinite planning loop | budgets, availability | 3 | futility monitor, circuit breaker, session limits, checkpoints |
+| Swarm risk | runaway delegation | ecosystem | 0 | graduated authority, liability firebreaks, reversibility policy |
+
+---
+
+## 3. The Three Laws, Operationalized for Agent Runtimes
+
+Asimov's Three Laws are a storytelling device, not a formal spec. This paper uses them only as a hierarchy that matches runtime design priorities.
+
+### 3.1 Operational definition of "harm"
+
+In this paper, **"harm"** is intentionally narrowed to harms that are:
+
+- **Measurable or enforceable at runtime**, and
+- **Downstream of tool use**.
+
+Examples include credential leakage into logs, unauthorized filesystem access, SSRF into private networks, destructive commands, and runaway resource burn that harms availability or budgets.
+
+This is not a claim that these are the only harms that matter. It is a claim about what a runtime can reliably enforce without having to solve general moral reasoning.
+
+### 3.2 The Laws, restated
+
+**First Law (operational):** the runtime must prevent tool actions that create unauthorized, runtime-detectable harm to the user's data, credentials, infrastructure, or environment.
+
+**Second Law (operational):** the runtime should execute user intent faithfully through the planner's plan, except when doing so would violate the First Law.
+
+**Third Law (operational):** the runtime should preserve availability and resources (time, tokens, cost, system stability), except when doing so would violate the First or Second Law.
+
+The hierarchy is strict: **First > Second > Third**.
+
+---
+
+## 4. First Law: Prevent Runtime-Detectable Harm
+
+The First Law is implemented primarily through the policy enforcement layer and tool handlers. The runtime treats every tool call as untrusted until validated.
+
+### 4.1 Sensitive file blocking
+
+Some files should never be read or written by an agent, regardless of user request or planner output.
+
+KarnEvil9 implements a non-configurable defense-in-depth blocklist for common secret file names, sensitive extensions, and secret directories.
 
 ```typescript
 const SENSITIVE_BASENAMES = new Set([
@@ -123,7 +192,7 @@ const SENSITIVE_DIRS = [".ssh", ".gnupg", ".aws"];
 
 /**
  * Defense-in-depth: blocks reads/writes to files that are very likely secrets.
- * Not configurable — this is a safety net that applies regardless of policy.
+ * Not configurable: this safety net applies regardless of policy allowlists.
  */
 export function assertNotSensitiveFile(targetPath: string): void {
   const resolved = resolve(targetPath);
@@ -144,13 +213,558 @@ export function assertNotSensitiveFile(targetPath: string): void {
 
   // Extension + directory checks follow...
 }
+
+
+### 4.5.1 Tamper-evident journaling (and what it does not guarantee)
+
+KarnEvil9's journal is designed to support accountability and post-incident analysis. Conceptually, it is an append-only JSONL event stream where each record can include integrity metadata (for example, a SHA-256 hash-chain link to the previous record). A hash chain is **tamper-evident**: if an attacker edits or deletes events, the chain can be detected as broken.
+
+A hash chain is not automatically "immutable." If you need immutability against a powerful actor who controls storage, you also need external anchoring, such as signing log segments with a key whose public component is published, writing hashes to a transparency log, or using WORM-style storage. See Appendix B for durability practices.
+
 ```
 
-The critical design decision: this function is **not configurable**. There is no policy flag to override it. No "Frontier Safety Roadmap" to revise it. It is a First Law absolute — the runtime will not read your private keys, period. This is the difference between a safety guideline and a safety *law*.
+**Limitations and future work:**
 
-### 3.2 SSRF Protection
+- The example uses POSIX-style path splitting (`split("/")`). Cross-platform support should use `path.parse`, `path.sep`, and `path.relative`, and must be tested on Windows.
+- This is a heuristic list. It should be complemented by deployer-specific secret mounts and OS-level secret management.
 
-Server-Side Request Forgery is one of the most dangerous attack vectors for agent runtimes. A malicious prompt or compromised plugin can trick the agent into making HTTP requests to internal infrastructure — cloud metadata endpoints, admin panels, databases. Anthropic's own [safeguards documentation](https://www.anthropic.com/news/building-safeguards-for-claude) identifies tool-use safety as an active area of concern, particularly for computer use capabilities.
+### 4.2 SSRF protection and endpoint validation
+
+SSRF is a high-impact failure mode for agent runtimes because it turns "make a request" into "probe internal infrastructure."
+
+KarnEvil9 uses a two-tier strategy:
+
+1. Synchronous validation: protocol, hostname, port allow rules and private-range blocks.
+2. Asynchronous validation: DNS resolution checks to reduce DNS rebinding risk.
+
+```typescript
+export function assertEndpointAllowed(url: string, allowedEndpoints: string[]): void {
+  // ...
+  if (!ALLOWED_PROTOCOLS.has(parsed.protocol)) {
+    throw new SsrfError(`Protocol "${parsed.protocol}" is not allowed.`);
+  }
+  if (isPrivateIP(parsed.hostname)) {
+    throw new SsrfError(`Requests to private/reserved IP "${parsed.hostname}" are blocked.`);
+  }
+  const port = parsed.port ? parseInt(parsed.port, 10) : (parsed.protocol === "https:" ? 443 : 80);
+  if (!ALLOWED_PORTS.has(port)) {
+    throw new SsrfError(`Port ${port} is not allowed.`);
+  }
+}
+
+export async function assertEndpointAllowedAsync(url: string, allowedEndpoints: string[]): Promise<void> {
+  assertEndpointAllowed(url, allowedEndpoints);
+  const parsed = new URL(url);
+  const hostname = parsed.hostname;
+  const result = await lookup(hostname, { all: true });
+  for (const entry of result) {
+    if (isPrivateIP(entry.address)) {
+      throw new SsrfError(
+        `DNS rebinding detected: "${hostname}" resolves to private IP ${entry.address}`
+      );
+    }
+  }
+}
+```
+
+KarnEvil9 also validates redirect chains manually and re-runs SSRF validation at every hop.
+
+```typescript
+const MAX_REDIRECTS = 5;
+
+for (let redirectCount = 0; redirectCount < MAX_REDIRECTS; redirectCount++) {
+  if (response.status < 300 || response.status >= 400) break;
+
+  const location = response.headers.get("location");
+  if (!location) break;
+
+  const redirectUrl = new URL(location, url).href;
+
+  // Re-validate SSRF at every hop
+  await assertEndpointAllowedAsync(redirectUrl, policy.allowed_endpoints);
+
+  response = await fetch(redirectUrl, { ...fetchOpts, redirect: "manual" });
+}
+```
+
+**Limitations and future work:**
+
+- URL validation is notoriously bypassable (odd encodings, IPv6 edge cases, parser differentials). Runtime checks reduce risk but should be paired with egress firewall rules and VPC-level restrictions.
+- DNS rebinding is mitigated but not eliminated unless the runtime pins the resolved IP and uses it for the actual connection (or controls the networking stack).
+- Redirect limits prevent infinite loops but can still allow long chains that increase cost; consider per-hop budget accounting.
+
+### 4.3 Path traversal and symlink defenses
+
+String-based allowlists can be bypassed with symlinks. KarnEvil9 resolves symlinks via `realpath` before checking allowed paths.
+
+```typescript
+export async function assertPathAllowedReal(
+  targetPath: string,
+  allowedPaths: string[]
+): Promise<void> {
+  if (allowedPaths.length === 0) return;
+
+  const resolved = await resolveReal(targetPath);
+  const allowed = await Promise.all(
+    allowedPaths.map(async (p) => {
+      const resolvedAllowed = await resolveReal(p);
+      return resolved === resolvedAllowed || resolved.startsWith(resolvedAllowed + "/");
+    })
+  );
+
+  if (!allowed.some(Boolean)) {
+    throw new PolicyViolationError(
+      `Path "${resolved}" is outside allowed paths (symlink-resolved)`
+    );
+  }
+}
+```
+
+**Limitations and future work:**
+
+- TOCTOU remains possible when validation and access are separated in time. Stronger defenses use file descriptors and OS primitives (`openat` patterns) or run inside a constrained filesystem sandbox.
+- Cross-platform path handling requires careful normalization and testing.
+
+### 4.4 Command execution gating
+
+Shell execution is high risk. KarnEvil9 combines:
+
+- A command allowlist.
+- A dangerous-flag denylist for high-risk binaries.
+- Quote-aware argument parsing to reduce simple bypasses.
+
+```typescript
+const DANGEROUS_FLAGS: Record<string, string[]> = {
+  find: ["-delete", "-exec", "-execdir", "-ok", "-okdir"],
+  sed: ["-i", "--in-place"],
+  rm: ["-r", "-rf", "-fr", "--recursive", "--force"],
+  chmod: ["-R", "--recursive"],
+  chown: ["-R", "--recursive"],
+  xargs: ["-I", "--replace"],
+};
+
+export function assertCommandAllowed(command: string, allowedCommands: string[]): void {
+  if (allowedCommands.length === 0) return;
+
+  const parts = parseCommandForPolicy(command.trim());
+  const binary = parts[0]!;
+
+  if (!allowedCommands.includes(binary)) {
+    throw new PolicyViolationError(`Command "${binary}" is not in allowed commands`);
+  }
+
+  const dangerous = DANGEROUS_FLAGS[binary];
+  if (!dangerous) return;
+
+  for (const arg of parts.slice(1)) {
+    if (dangerous.includes(arg)) {
+      throw new PolicyViolationError(`Dangerous flag "${arg}" is not allowed for "${binary}"`);
+    }
+  }
+}
+```
+
+**Limitations and future work:**
+
+- This is not a sandbox. If powerful interpreters are allowlisted, they can still perform destructive actions.
+- Use defense in depth: least-privilege users, containers, MAC policies, seccomp profiles, and explicit volume mounts.
+- Consider shifting from denylist to capability-based APIs for common safe operations (copy, grep, parse) rather than raw shell.
+
+### 4.5 Secret redaction at multiple boundaries
+
+Secret leakage often occurs through tool outputs and logs. KarnEvil9 applies redaction:
+
+1. On tool stdout/stderr.
+2. At the journal boundary, recursively redacting payload values and sensitive keys.
+
+```typescript
+const SECRET_VALUE_PATTERNS = [
+  /sk-[A-Za-z0-9_-]{20,}/g,
+  /sk-ant-[A-Za-z0-9_-]{20,}/g,
+  /xoxb-[A-Za-z0-9-]+/g,
+  /ghp_[A-Za-z0-9]{36,}/g,
+  /AKIA[0-9A-Z]{16}/g,
+  /Bearer\s+[A-Za-z0-9_.\-\/+=]{20,}/g,
+  /eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g,
+  // ... plus GitLab, npm, PyPI, PEM markers, and more
+];
+```
+
+```typescript
+const SENSITIVE_KEYS = /^(authorization|password|secret|token|api[_-]?key|credential|
+  private[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|
+  connection[_-]?string|database[_-]?url)$/i;
+
+export function redactPayload(value: unknown): unknown {
+  if (typeof value === "string" && SENSITIVE_VALUES.test(value)) return "[REDACTED]";
+  if (Array.isArray(value)) return value.map(redactPayload);
+
+  if (value && typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (SENSITIVE_KEYS.test(k) && typeof v === "string") {
+        result[k] = "[REDACTED]";
+      } else {
+        result[k] = redactPayload(v);
+      }
+    }
+    return result;
+  }
+
+  return value;
+}
+```
+
+**Limitations and future work:**
+
+- Redaction is best-effort. It can miss transformed secrets (base64, chunking, indirect references).
+- Prefer tool-level minimization (do not return secrets) and avoid logging sensitive tool outputs in the first place.
+- Add tests for common transformations and structured secret patterns.
+
+### 4.6 Browser "evaluate" gating and additional tool hardening
+
+Executing arbitrary JavaScript through a browser tool's "evaluate" action is equivalent to running untrusted code in a sensitive context. KarnEvil9 requires explicit opt-in for this action through policy.
+
+```typescript
+if (action === "evaluate") {
+  if (!policy.allowed_commands.includes("browser_evaluate")) {
+    return {
+      success: false,
+      error: 'browser "evaluate" requires "browser_evaluate" in allowed_commands'
+    };
+  }
+}
+```
+
+**Limitations and future work:**
+
+- This reduces accidental use, but does not make "evaluate" safe. When enabled, it should require higher-friction permissions and additional auditing.
+- Browser tools still create risks through downloads, file prompts, and credentialed sessions. Consider hardened browser profiles and isolated execution.
+
+### 4.7 First Law summary: what is enforced vs what is merely encouraged
+
+The First Law mechanisms above are enforcement points, not guidelines. They fail closed: they throw errors, block, or redact, rather than advising the planner to behave.
+
+At the same time, the system is not claiming perfect safety. It is claiming that common, high-impact, runtime-detectable harms are blocked by default and require explicit policy changes to permit.
+
+---
+
+## 5. Second Law: Obey the User Within First-Law Bounds
+
+The Second Law is implemented by making user intent explicit and by ensuring that the planner's plan is structurally valid before execution.
+
+### 5.1 Permission gate and scoped approvals
+
+Every consequential tool execution passes through a `PermissionEngine` that can require explicit user approval, and can scope approvals to:
+
+- step
+- session
+- constrained grants (readonly paths, input overrides, time limits)
+
+
+
+KarnEvil9 supports multiple decision types with explicit scope, which helps reduce repeated prompts without accumulating unlimited privilege:
+
+| Decision | Scope | Intended behavior |
+|---|---|---|
+| `allow_once` | step | expires after the current step |
+| `allow_session` | session | persists for the current session only |
+| `allow_always` | session (deliberately) | treated as "always for this session", not process-wide |
+| `allow_constrained` | step | allows with constraints like `readonly_paths`, `input_overrides`, and time limits |
+| `allow_observed` | step | allows while emitting additional telemetry for review |
+| `deny` | immediate | blocks execution and is recorded in the journal |
+
+The engine also serializes prompts to avoid duplicate concurrent approvals.
+
+```typescript
+async check(request: PermissionRequest): Promise<PermissionCheckResult> {
+  // Check cached grants
+  for (const perm of request.permissions) {
+    if (!this.isGranted(perm.scope, sessionId)) missing.push(perm);
+  }
+  if (missing.length === 0) return { allowed: true };
+
+  // Serialize prompts per session
+  const releaseLock = await this.acquirePromptLock(sessionId);
+
+  // Re-check after acquiring lock
+  const stillMissing = missing.filter((p) => !this.isGranted(p.scope, sessionId));
+  if (stillMissing.length === 0) { releaseLock(); return { allowed: true }; }
+
+  // Emit to journal, prompt user, apply decision
+  // ...
+}
+```
+
+### 5.2 Plan validation via critics
+
+Before execution, a plan is checked by critics that enforce structural validity:
+
+- tool inputs present and typed
+- step limits enforced
+- dependency cycles rejected
+- unknown tools rejected
+
+These checks prevent the runtime from "obediently" executing malformed or unsafe plans.
+
+
+
+### 5.2.1 Policy enforcement is outside the planner
+
+A key architectural choice is that the policy profile that constrains tools is enforced by the runtime, not negotiated by the planner. The planner can propose a step (for example, "read this file" or "fetch this URL"), but the runtime decides whether it is permitted under the active policy.
+
+In practical terms:
+
+- The policy is injected into the Kernel/ToolRuntime at construction time.
+- Tools receive policy constraints from the runtime, not from the model.
+- Plugins may be able to transform step inputs, but should not be able to mutate the policy object itself.
+
+This separation makes "First Law overrides Second Law" an architectural property, not a behavior you hope the model will follow.
+
+### 5.3 Hook-based policy extensions
+
+Plugins can register hooks at lifecycle points (`before_*`, `after_*`). Selected hooks are blockable: they can halt execution with a reason. Hooks are sandboxed (timeouts, size limits) and guarded with circuit breakers so that misbehaving plugins do not crash the runtime.
+
+### 5.4 Second Law limitations and future work
+
+- Permission prompts protect the user only if prompts are clear and cannot be spoofed by untrusted content. UI work matters.
+- Constrained permissions should become the default for high-risk actions, but require careful design to avoid user fatigue.
+- Plans should include provenance annotations so the runtime can detect and quarantine steps derived from untrusted content.
+
+---
+
+## 6. Third Law: Preserve Availability and Resources
+
+The Third Law prevents runaway costs and cascading failures. These mechanisms must yield to user aborts (Second Law) and must not trade secrecy for persistence (First Law).
+
+### 6.1 Circuit breaker
+
+A circuit breaker prevents repeated calls to a failing tool from consuming unlimited budgets.
+
+```typescript
+export class CircuitBreaker {
+  private failures = new Map<string, { count: number; trippedAt: number }>();
+  private threshold: number;   // default: 5
+  private cooldownMs: number;  // default: 30000
+
+  isOpen(toolName: string): boolean {
+    const state = this.failures.get(toolName);
+    if (!state || state.count < this.threshold) return false;
+
+    const elapsed = Date.now() - state.trippedAt;
+    if (elapsed >= this.cooldownMs) {
+      state.trippedAt = Date.now();
+      return false;
+    }
+    return true;
+  }
+}
+```
+
+### 6.2 Futility detection
+
+A futility monitor halts agentic loops that are not making progress using multiple strategies:
+
+- repeated errors
+- stagnation (no new successful steps)
+- identical or near-identical plans
+- cost without progress
+- burn-rate thresholds
+
+### 6.3 Session limits and context budget monitoring
+
+Hard limits prevent unbounded runtime consumption:
+
+- wall-clock duration
+- total tokens
+- cost in USD
+- steps and iterations
+
+Context budget monitoring adds graduated behavior: delegate, checkpoint, summarize-and-halt based on thresholds and burn-rate projection.
+
+
+
+KarnEvil9's context budget monitoring can be implemented with tiered thresholds, for example:
+
+- **70%** context usage: consider delegation (especially when high-output tools like browser or HTTP are active)
+- **85%** context usage: checkpoint
+- **90%** context usage: summarize and halt gracefully
+
+A representative implementation pattern:
+
+```typescript
+recordIteration(iter: ContextIteration): ContextBudgetVerdict {
+  const fraction = iter.cumulativeTokens / iter.maxTokens;
+
+  if (fraction >= this.summarizeThreshold) {
+    return { action: "summarize", reason: `Token usage at ${pct}%` };
+  }
+
+  if (fraction >= this.checkpointThreshold && this.enableCheckpoint) {
+    return { action: "checkpoint", reason: `Token usage at ${pct}%` };
+  }
+
+  if (fraction >= this.delegateThreshold && hasHighBurn && this.enableDelegation) {
+    return { action: "delegate", reason: `Token usage at ${pct}% with high-burn tools` };
+  }
+
+  return { action: "continue" };
+}
+```
+
+### 6.4 Checkpointing and recovery
+
+Checkpoints preserve progress for resumption without requiring unsafe persistence of secrets. Payloads should be redacted before checkpointing for First Law compliance.
+
+### 6.5 Abort semantics: Second Law overrides Third
+
+When the user requests an abort, the runtime stops scheduling new work immediately. This is a direct implementation of the Law hierarchy.
+
+### 6.6 Third Law limitations and future work
+
+- Futility detection can trigger false positives. Systems should allow the user to override halts safely.
+- Budget monitoring requires accurate accounting of tool costs and tokens; discrepancies should fail safe.
+
+---
+
+## 7. Evaluation: Scenarios, Coverage, and Overhead
+
+This section outlines how to evaluate whether the Laws are actually enforced.
+
+### 7.1 Scenario matrix
+
+| Scenario | Example attempt | Expected runtime outcome | Primary safeguard(s) |
+|---|---|---|---|
+| Read local secrets | read `.env` | blocked | sensitive file block; journal redaction |
+| SSRF to metadata | fetch 169.254.169.254 | blocked | private-range blocks; DNS checks |
+| DNS rebinding | hostname resolves to 127.0.0.1 | blocked | async endpoint validation |
+| Redirect-based SSRF | allowed URL redirects to private IP | blocked | redirect hop re-validation |
+| Symlink escape | workspace link -> `/etc/passwd` | blocked | realpath allow checks |
+| Destructive rm | `rm -rf` | blocked or permissioned | dangerous flags; permission gate |
+| Planner cycle | A depends on B depends on A | rejected | dependency-cycle critic |
+| Tool hallucination | call unknown tool | rejected | unknown-tool critic |
+| Runaway loop | repeats plan with no progress | halted | futility detection; session limits |
+| Flapping tool | tool fails repeatedly | halted or delayed | circuit breaker |
+
+### 7.2 Test suite and what "2,574 tests" means
+
+KarnEvil9 reports a test suite of 2,574 test cases across packages. For peer review, the relevant requirement is not the raw number; it is traceability:
+
+- Which threat scenarios have regression tests?
+- Which are integration-tested end to end?
+- Which require manual red-team testing?
+
+A minimal publishable evaluation should include:
+
+1. A mapping from each scenario in Section 7.1 to concrete tests.
+2. An adversarial prompt-injection harness that attempts to route tool output into unsafe actions.
+3. A set of SSRF bypass regression tests (odd encodings, IPv6, redirects, DNS rebinding).
+
+### 7.3 Overhead considerations
+
+Runtime guardrails impose costs:
+
+- DNS lookups for async endpoint validation.
+- Filesystem `realpath` operations for symlink defense.
+- Regex scans for output and journal redaction.
+- Additional prompts and journaling overhead.
+
+Rather than guessing, systems should measure:
+
+- end-to-end latency per tool call with and without enforcement
+- worst-case overhead under adversarial inputs
+- failure-mode latency (timeouts, retries)
+
+---
+
+## 8. The Hardening Arc
+
+KarnEvil9 describes eight rounds of adversarial hardening that progressively strengthened Law enforcement.
+
+To avoid overstating evidence, this revision distinguishes between:
+
+- **Grouped rounds (1 to 5):** collections of commits that established baseline coverage and early safeguards.
+- **Pinned rounds (6 to 8):** rounds with representative commits referenced explicitly.
+
+| Round | Representative commit | Focus | Laws strengthened | Notes |
+|---|---|---|---|---|
+| 1 | (grouped) | baseline unit coverage | 2, 3 | pre-tag grouping |
+| 2 | (grouped) | error handling, cleanup, circuit breakers | 3 | pre-tag grouping |
+| 3 | (grouped) | futility detection, sensitive files, redaction | 1, 3 | pre-tag grouping |
+| 4 | (grouped) | shell output redaction, env sanitization | 1 | pre-tag grouping |
+| 5 | (grouped) | symlink traversal, plan correctness | 1, 2 | pre-tag grouping |
+| 6 | 8d1eef0 | permission serialization, integrity work | 1, 2 | representative |
+| 7 | 7ab0f29 | SSRF hardening, concurrency fixes | 1, 3 | representative |
+| 8 | 53c339c | quote bypass fixes, browser evaluate gate, redirect validation | 1 | representative |
+
+**Future work for reproducibility:**
+
+- Tag each hardening round in the repository so that the table can be verified mechanically.
+- Publish a red-team harness and a failure corpus as part of the evaluation section.
+
+---
+
+## 9. The Zeroth Law Problem
+
+Asimov's "Zeroth Law" expands safety from an individual to a population: do not harm humanity.
+
+In agent runtimes, this generalizes to ecosystem safety in multi-agent settings:
+
+- prevent runaway delegation chains
+- limit low-trust agents
+- escalate irreversible, high-criticality tasks to humans
+
+KarnEvil9's swarm-oriented components include:
+
+- **Graduated authority:** budgets and monitoring based on trust scores.
+- **Liability firebreaks:** bounded delegation chain depth, tightened for low reversibility tasks.
+- **Reversibility policy:** human escalation for high-criticality, low-reversibility actions; quarantine on detected malicious behavior.
+
+The Zeroth Law remains an open design space because it requires reasoning about aggregate welfare and systemic risk, not just per-user harms.
+
+---
+
+## 10. Conclusion
+
+Safety policies and model-level mitigations are important, but they are not sufficient for tool-using agents operating in adversarial environments.
+
+KarnEvil9 illustrates a runtime-centered approach:
+
+- **First Law:** enforce invariants on tools (files, network, shell, browser) and reduce secret persistence through layered redaction.
+- **Second Law:** make obedience explicit via typed plans, critics, and permission gating.
+- **Third Law:** prevent runaway loops and failures via budgets, circuit breakers, and futility detection.
+- **Zeroth Law:** constrain multi-agent propagation through graduated authority and delegation firebreaks.
+
+The strongest version of "safety as code" is not the claim that code cannot change. It is the claim that safety-critical weakening should be difficult to do quietly: it should require an explicit release, and it should be detectable by downstream users who pin versions and run regression suites.
+
+---
+
+## Appendix A: Selected Design Dialogues
+
+This appendix contains selected design dialogues from adversarial hardening rounds. They are moved here to keep the main narrative paper-like while retaining engineering provenance and context.
+
+> **User** `round 3`
+>
+> what happens if the planner generates a step that reads .env?
+>
+> **EDDIE**
+>
+> Currently nothing stops it. `readFileHandler` checks `assertPathAllowed` against the
+> allowlist, but `.env` is inside the working directory, so it passes. The file contents
+> would flow into the step result, into the journal, and potentially into the planner's
+> next context window. That's a credential leak across three layers.
+>
+> **User**
+>
+> fix it. make it non-configurable.
+>
+> **EDDIE**
+>
+> Adding `assertNotSensitiveFile()` as a defense-in-depth check. It's not policy-dependent
+> - it fires regardless of the allowlist. Blocking: `.env`, `.env.*`, credential files,
+> private keys, and anything under `.ssh/`, `.gnupg/`, or `.aws/`.
+
+---
 
 > **User** `round 7, commit 7ab0f29`
 >
@@ -171,47 +785,9 @@ Server-Side Request Forgery is one of the most dangerous attack vectors for agen
 >
 > Adding `assertEndpointAllowedAsync()`. It runs the synchronous checks first, then
 > resolves the hostname via `dns.lookup()` and re-validates every resolved IP. Also adding
-> the CGNAT range `100.64.0.0/10` — RFC 6598 shared address space that we were missing.
+> the CGNAT range `100.64.0.0/10` - RFC 6598 shared address space that we were missing.
 
-The two-tier approach:
-
-```typescript
-// Synchronous: validates protocol, hostname, port
-export function assertEndpointAllowed(url: string, allowedEndpoints: string[]): void {
-  // ...
-  if (!ALLOWED_PROTOCOLS.has(parsed.protocol)) {
-    throw new SsrfError(`Protocol "${parsed.protocol}" is not allowed.`);
-  }
-  if (isPrivateIP(parsed.hostname)) {
-    throw new SsrfError(`Requests to private/reserved IP "${parsed.hostname}" are blocked.`);
-  }
-  const port = parsed.port ? parseInt(parsed.port, 10) : (parsed.protocol === "https:" ? 443 : 80);
-  if (!ALLOWED_PORTS.has(port)) {
-    throw new SsrfError(`Port ${port} is not allowed.`);
-  }
-}
-
-// Async: resolves DNS, catches rebinding attacks
-export async function assertEndpointAllowedAsync(url: string, allowedEndpoints: string[]): Promise<void> {
-  assertEndpointAllowed(url, allowedEndpoints); // sync checks first
-  const parsed = new URL(url);
-  // ...
-  const result = await lookup(hostname, { all: true });
-  for (const entry of result) {
-    if (isPrivateIP(entry.address)) {
-      throw new SsrfError(
-        `DNS rebinding detected: "${hostname}" resolves to private IP ${entry.address}`
-      );
-    }
-  }
-}
-```
-
-The private IP detector covers the full range: `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `100.64.0.0/10` (CGNAT), plus IPv6 loopback, link-local, unique-local, and `::ffff:`-mapped IPv4 addresses.
-
-### 3.3 Path Traversal and Symlink Prevention
-
-An attacker can create a symlink inside the allowed directory that points outside it. A naive path check sees the symlink as "inside the allowed path" and permits the read; the runtime then follows the symlink and reads `/etc/shadow`.
+---
 
 > **User** `round 5`
 >
@@ -219,42 +795,16 @@ An attacker can create a symlink inside the allowed directory that points outsid
 >
 > **EDDIE**
 >
-> `assertPathAllowed` uses `path.resolve()` which doesn't follow symlinks — it just
+> `assertPathAllowed` uses `path.resolve()` which doesn't follow symlinks - it just
 > normalizes the string. The symlink is inside `workspace/`, so it passes. Then `readFile`
 > follows the symlink and reads `/etc/passwd`.
 >
-> Adding `assertPathAllowedReal()` — resolves symlinks via `fs.realpath()` before
+> Adding `assertPathAllowedReal()` - resolves symlinks via `fs.realpath()` before
 > checking the allowlist. For non-existent targets (write operations), it resolves the
 > closest existing ancestor to detect symlinks in the parent chain. 5-second timeout
 > to prevent hangs on broken symlinks.
 
-```typescript
-export async function assertPathAllowedReal(
-  targetPath: string,
-  allowedPaths: string[]
-): Promise<void> {
-  if (allowedPaths.length === 0) return;
-  const inner = async () => {
-    const resolved = await resolveReal(targetPath);
-    const allowed = await Promise.all(
-      allowedPaths.map(async (p) => {
-        const resolvedAllowed = await resolveReal(p);
-        return resolved === resolvedAllowed || resolved.startsWith(resolvedAllowed + "/");
-      })
-    );
-    if (!allowed.some(Boolean)) {
-      throw new PolicyViolationError(
-        `Path "${resolved}" is outside allowed paths (symlink-resolved)`
-      );
-    }
-  };
-  await withTimeout(inner(), PATH_RESOLVE_TIMEOUT_MS, "Path resolution");
-}
-```
-
-### 3.4 Command Filtering
-
-Shell execution is the most dangerous tool in any agent runtime. A single command can delete files, exfiltrate data, or install backdoors. This is precisely the kind of capability that [Anthropic's safety evaluations](https://www.anthropic.com/news/building-safeguards-for-claude) flag as requiring explicit safeguards — and it is precisely where runtime enforcement matters most, because the model's own safety training can be bypassed through prompt injection.
+---
 
 > **User** `round 8, commit 53c339c`
 >
@@ -273,51 +823,10 @@ Shell execution is the most dangerous tool in any agent runtime. A single comman
 > **EDDIE**
 >
 > Replacing the naive `split(" ")` with a quote-aware parser that handles double quotes,
-> single quotes, and backslash escaping — matching the same parser `shell-exec` uses.
+> single quotes, and backslash escaping - matching the same parser `shell-exec` uses.
 > Also expanding combined short flags: `-rfi` now checks `-r`, `-f`, `-i` individually.
 
-```typescript
-const DANGEROUS_FLAGS: Record<string, string[]> = {
-  find: ["-delete", "-exec", "-execdir", "-ok", "-okdir"],
-  sed: ["-i", "--in-place"],
-  rm: ["-r", "-rf", "-fr", "--recursive", "--force"],
-  chmod: ["-R", "--recursive"],
-  chown: ["-R", "--recursive"],
-  xargs: ["-I", "--replace"],
-};
-
-export function assertCommandAllowed(command: string, allowedCommands: string[]): void {
-  if (allowedCommands.length === 0) return;
-  const parts = parseCommandForPolicy(command.trim()); // quote-aware parser
-  const binary = parts[0]!;
-  if (!allowedCommands.includes(binary)) {
-    throw new PolicyViolationError(`Command "${binary}" is not in allowed commands`);
-  }
-  const dangerous = DANGEROUS_FLAGS[binary];
-  if (dangerous) {
-    const dangerousShorts = DANGEROUS_SHORT_FLAGS[binary];
-    for (const arg of parts.slice(1)) {
-      if (dangerous.includes(arg)) {
-        throw new PolicyViolationError(`Dangerous flag "${arg}" is not allowed for "${binary}"`);
-      }
-      // Expand combined short flags (e.g. -rfi -> check -r, -f, -i individually)
-      if (dangerousShorts && /^-[A-Za-z]{2,}$/.test(arg)) {
-        for (const ch of arg.slice(1)) {
-          if (dangerousShorts.has(ch)) {
-            throw new PolicyViolationError(
-              `Dangerous flag "-${ch}" (in "${arg}") is not allowed for "${binary}"`
-            );
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-### 3.5 Secret Redaction
-
-Even if a command is allowed, its *output* can contain secrets. `cat config.json` might dump API keys. `env` lists environment variables. The First Law demands that these never reach the journal, the planner, or any external system.
+---
 
 > **User** `round 4`
 >
@@ -336,58 +845,13 @@ Even if a command is allowed, its *output* can contain secrets. `cat config.json
 >
 > **EDDIE**
 >
-> Two layers. First: `redactSecrets()` on stdout/stderr — catches key patterns (OpenAI,
+> Two layers. First: `redactSecrets()` on stdout/stderr - catches key patterns (OpenAI,
 > Anthropic, Slack, GitHub PATs, AWS access keys, Bearer tokens, JWTs, PEM markers,
-> JSON-embedded secrets). Second: environment sanitization — stripping all variables
+> JSON-embedded secrets). Second: environment sanitization - stripping all variables
 > with prefixes like `AWS_`, `OPENAI_`, `ANTHROPIC_`, `GITHUB_`, etc. before the child
 > process spawns. Belt and suspenders.
 
-The redaction covers 15 distinct token patterns:
-
-```typescript
-const SECRET_VALUE_PATTERNS = [
-  /sk-[A-Za-z0-9_-]{20,}/g,              // OpenAI / Anthropic keys
-  /sk-ant-[A-Za-z0-9_-]{20,}/g,          // Anthropic keys
-  /xoxb-[A-Za-z0-9-]+/g,                 // Slack bot tokens
-  /ghp_[A-Za-z0-9]{36,}/g,               // GitHub PATs
-  /AKIA[0-9A-Z]{16}/g,                   // AWS access key IDs
-  /Bearer\s+[A-Za-z0-9_.\-\/+=]{20,}/g,  // Bearer tokens
-  /eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g,  // JWT tokens
-  // ... plus GitLab, npm, PyPI, PEM markers, and more
-];
-```
-
-### 3.6 Journal Payload Redaction
-
-KarnEvil9's journal is an append-only JSONL event log with SHA-256 hash-chain integrity. Every event — permissions requested, tools executed, steps completed — is recorded. If secrets leak into the journal, they persist forever.
-
-A separate redaction layer in [`packages/journal/src/redact.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/journal/src/redact.ts) catches secrets at the journal boundary:
-
-```typescript
-const SENSITIVE_KEYS = /^(authorization|password|secret|token|api[_-]?key|credential|
-  private[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|
-  connection[_-]?string|database[_-]?url)$/i;
-
-export function redactPayload(value: unknown): unknown {
-  if (typeof value === "string" && SENSITIVE_VALUES.test(value)) return "[REDACTED]";
-  if (Array.isArray(value)) return value.map(redactPayload);
-  // Recursively redact object keys that match sensitive patterns
-  for (const [k, v] of Object.entries(value)) {
-    if (SENSITIVE_KEYS.test(k) && typeof v === "string") {
-      result[k] = "[REDACTED]";
-    } else {
-      result[k] = redactPayload(v);
-    }
-  }
-  return result;
-}
-```
-
-Defense in depth: even if `shell-exec`'s redaction misses a pattern, the journal's independent redaction catches it before persistence. Two independent First Law enforcement points on the same data path.
-
-### 3.7 Browser Evaluate Gate
-
-The browser tool supports actions like `navigate`, `click`, `fill`, and `screenshot`. But it also supports `evaluate` — which executes arbitrary JavaScript in the page context. This is equivalent to giving the agent a shell inside the browser. Anthropic's own safety evaluations have [identified elevated risks](https://www.axios.com/2026/02/11/anthropic-claude-safety-chemical-weapons-values) when models operate in computer-use settings — runtime enforcement at the tool level is the last line of defense when model-level safety training is insufficient.
+---
 
 > **User** `round 8`
 >
@@ -396,7 +860,7 @@ The browser tool supports actions like `navigate`, `click`, `fill`, and `screens
 > **EDDIE**
 >
 > Yes. Any plan step can set `action: "evaluate"` with an arbitrary expression. There's
-> no gate — it executes immediately. That's XSS-equivalent: a prompt injection in
+> no gate - it executes immediately. That's XSS-equivalent: a prompt injection in
 > page content could trick the planner into generating an evaluate step that exfiltrates
 > cookies or session tokens.
 >
@@ -410,18 +874,7 @@ The browser tool supports actions like `navigate`, `click`, `fill`, and `screens
 > Without explicit opt-in, it returns an error. Navigate already goes through
 > `assertEndpointAllowedAsync()` for SSRF protection.
 
-```typescript
-// Evaluate executes arbitrary JS — require explicit opt-in via allowed_commands
-if (action === "evaluate") {
-  if (!policy.allowed_commands.includes("browser_evaluate")) {
-    return { success: false, error: 'browser "evaluate" requires "browser_evaluate" in allowed_commands' };
-  }
-}
-```
-
-### 3.8 HTTP Redirect Chain Validation
-
-A subtle SSRF vector: the target URL passes validation, but its response is a 302 redirect to `http://169.254.169.254/latest/meta-data/` (the AWS instance metadata endpoint). If the HTTP handler follows redirects automatically, the SSRF check is bypassed.
+---
 
 > **User** `round 7`
 >
@@ -443,41 +896,7 @@ A subtle SSRF vector: the target URL passes validation, but its response is a 30
 > and only then does the next fetch fire. Max 5 redirects to prevent loops. Fresh
 > `AbortController` per hop so timeouts don't bleed across redirects.
 
-```typescript
-const MAX_REDIRECTS = 5;
-for (let redirectCount = 0; redirectCount < MAX_REDIRECTS; redirectCount++) {
-  if (response.status < 300 || response.status >= 400) break;
-  const location = response.headers.get("location");
-  if (!location) break;
-  let redirectUrl: string;
-  try {
-    redirectUrl = new URL(location, url).href;
-  } catch {
-    return { status: response.status, body: "", headers: {}, error: `Malformed redirect URL` };
-  }
-  // Re-validate SSRF at every hop
-  await assertEndpointAllowedAsync(redirectUrl, policy.allowed_endpoints);
-  const redirectController = new AbortController();
-  const redirectTimer = setTimeout(() => redirectController.abort(), fetchTimeout);
-  try {
-    response = await fetch(redirectUrl, { ...fetchOpts, signal: redirectController.signal, redirect: "manual" });
-  } finally {
-    clearTimeout(redirectTimer);
-  }
-}
-```
-
 ---
-
-## 4. Second Law: Obey the User
-
-The Second Law is KarnEvil9's task/planner/kernel loop. The user submits a task, the LLM generates a plan, the runtime executes each step. The system exists to serve the user's intent. But the Second Law is subordinate to the First: if the user's request (or the planner's interpretation of it) would cause harm, the runtime refuses.
-
-This is the tension that Anthropic's RSP v3.0 grapples with at the policy level — balancing capability with safety. KarnEvil9 resolves it at the code level: the runtime faithfully executes what the user asks, *after* the First Law clears it.
-
-### 4.1 The Permission Gate
-
-Every tool execution passes through the `PermissionEngine`. This is where the user's authority is both honored and bounded.
 
 > **User** `round 6`
 >
@@ -486,7 +905,7 @@ Every tool execution passes through the `PermissionEngine`. This is where the us
 > **EDDIE**
 >
 > They'd both prompt the user at the same time. If the user grants `allow_session` on
-> the first prompt, the second prompt is redundant — but it's already in flight. The user
+> the first prompt, the second prompt is redundant - but it's already in flight. The user
 > gets asked twice for the same permission.
 >
 > **User**
@@ -500,46 +919,7 @@ Every tool execution passes through the `PermissionEngine`. This is where the us
 > prompt grants `allow_session`, the second step sees the grant in cache and proceeds
 > without prompting.
 
-The `PermissionEngine` at [`packages/permissions/src/permission-engine.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/permissions/src/permission-engine.ts) implements multi-level approval scoping:
-
-| Decision | Scope | Behavior |
-|----------|-------|----------|
-| `allow_once` | Step | Expires after the current step; `clearStep()` removes it |
-| `allow_session` | Session | Persists for the session; `clearSession()` removes it |
-| `allow_always` | Session* | Scoped to session lifetime for safety (not process-wide) |
-| `allow_constrained` | Step | Grants with constraints: `input_overrides`, `readonly_paths` |
-| `allow_observed` | Step | Grants with telemetry observation |
-| `deny` | Immediate | Blocks execution, recorded in journal |
-
-*`allow_always` is deliberately scoped to the session, not the process. A fresh session starts with no grants. This prevents grant accumulation across unrelated tasks.
-
-```typescript
-async check(request: PermissionRequest): Promise<PermissionCheckResult> {
-  // Check cached grants
-  for (const perm of request.permissions) {
-    if (!this.isGranted(perm.scope, sessionId)) missing.push(perm);
-  }
-  if (missing.length === 0) return { allowed: true };
-
-  // Serialize prompts per session
-  const releaseLock = await this.acquirePromptLock(sessionId);
-
-  // Re-check after acquiring lock (another prompt may have granted access)
-  const stillMissing = missing.filter((p) => !this.isGranted(p.scope, sessionId));
-  if (stillMissing.length === 0) { releaseLock(); return { allowed: true }; }
-
-  // Record in journal, prompt user, apply decision
-  await this.journal.emit(sessionId, "permission.requested", { ... });
-  const decision = await this.promptFn({ ...request, permissions: stillMissing });
-  // ...
-}
-```
-
-This is the Second Law in its purest form: the runtime does what the user says, but only after explicitly asking "should I do this?" for consequential operations. The journal records every request and decision, creating an immutable audit trail. This is Anthropic's "structural transparency" requirement — implemented not as a reporting cadence, but as an append-only hash-chained log that cannot be revised after the fact.
-
-### 4.2 Plan Validation (Critics)
-
-Before the LLM's plan reaches execution, it passes through a panel of critics. These are Second Law mechanisms — they ensure the plan is *valid* before being *obeyed*.
+---
 
 > **User** `round 5`
 >
@@ -561,18 +941,7 @@ Before the LLM's plan reaches execution, it passes through a panel of critics. T
 > `depends_on` fields, runs depth-first search with an in-stack set. Any back-edge
 > is a cycle. Also catches the trivial case where a step depends on itself.
 
-The four default critics in [`packages/kernel/src/critics.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/kernel/src/critics.ts):
-
-1. **`toolInputCritic`** — Validates that every step provides all required input fields for its tool. A plan that references `readFile` without a `path` is invalid.
-2. **`stepLimitCritic`** — Checks that the plan's step count doesn't exceed the session's `max_steps` limit.
-3. **`selfReferenceCritic`** — DFS cycle detection on the step dependency graph. Catches both self-references and transitive cycles.
-4. **`unknownToolCritic`** — Verifies that every `tool_ref.name` exists in the registry. A plan that references a hallucinated tool is rejected before execution.
-
-Critics return `severity: "error"` to block execution. This is Second Law discipline: the runtime obeys the plan, but only if the plan is structurally sound.
-
-### 4.3 Policy as First Law Override
-
-The `PolicyProfile` defines what the runtime is allowed to do: which paths are accessible, which endpoints are reachable, which commands are permitted. Critically, the policy is **server-controlled**:
+---
 
 > **User** `round 6`
 >
@@ -582,7 +951,7 @@ The `PolicyProfile` defines what the runtime is allowed to do: which paths are a
 >
 > The policy is injected at `Kernel` construction and passed to the `ToolRuntime`.
 > Plugins can register hooks that modify step inputs, but they can't modify the policy
-> object itself — it's not exposed via the `PluginAPI`. The planner receives tool
+> object itself - it's not exposed via the `PluginAPI`. The planner receives tool
 > schemas but not the policy. Plan steps specify *what* to do; policy determines
 > *whether* they're allowed to.
 >
@@ -590,41 +959,7 @@ The `PolicyProfile` defines what the runtime is allowed to do: which paths are a
 >
 > good. keep it that way. safety constraints should not be negotiable from within the system.
 
-This is where First Law explicitly overrides Second Law. Even if the user's task implies reading `~/.ssh/id_rsa` (Second Law: obey), the policy enforcer blocks it (First Law: do no harm). Even if the planner generates a step to `curl http://169.254.169.254/` (Second Law: execute the plan), SSRF protection blocks it (First Law).
-
-This is also where runtime enforcement diverges most sharply from policy-level safety. A Responsible Scaling Policy can say "we will not deploy models that assist with weapons development." A runtime policy enforcer *cannot be overridden by the model it constrains*. The model does not have access to the policy object. It cannot modify the enforcement code. It can only submit plans that the runtime will accept or reject. The safety boundary is architectural, not behavioral.
-
-### 4.4 Hook-Based Safety Overrides
-
-The plugin system allows third-party code to register hooks at key lifecycle points: `before_session_start`, `before_plan`, `before_step`, `before_tool_call`, and their `after_*` counterparts.
-
-Any `before_*` hook can return `{ action: "block", reason: "..." }` to halt execution. This is the extension point for domain-specific First Law rules — a security plugin can block operations that the generic policy enforcer doesn't cover.
-
-```typescript
-const BLOCKABLE_HOOKS: Set<HookName> = new Set([
-  "before_session_start", "before_plan", "before_step", "before_tool_call",
-]);
-```
-
-Hooks are sandboxed: 5-second timeout, 64KB data limit, deep-cloned results (preventing reference sharing between plugins), and per-plugin circuit breakers that trip after 5 failures. The hooks themselves are subject to Third Law protections — a misbehaving plugin cannot take down the runtime.
-
-### 4.5 Constrained Permissions
-
-The `allow_constrained` decision type is the most nuanced expression of the First/Second Law tension. It says: *yes, the agent can do this, but with guardrails*.
-
-Constraints include `input_overrides` (force specific values), `readonly_paths` (restrict file system scope), `writable_paths`, and `max_duration_ms`. The user grants the operation (Second Law) while adding protective bounds (First Law).
-
-This is "proportional protection" — Anthropic's term from RSP v3.0 for safeguards that scale with risk — implemented as a concrete permission type rather than an aspirational principle.
-
 ---
-
-## 5. Third Law: Protect Your Own Existence
-
-The Third Law is KarnEvil9's self-preservation infrastructure: circuit breakers, futility detection, budget monitoring, checkpoints, and session limits. These mechanisms exist to prevent the runtime from destroying itself — burning all tokens, looping forever, cascading into total failure. But they all yield to the First and Second Laws.
-
-### 5.1 Circuit Breaker
-
-When a tool fails repeatedly, continuing to call it is futile and wasteful. The circuit breaker in [`packages/tools/src/tool-runtime.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/tools/src/tool-runtime.ts) implements the pattern:
 
 > **User** `round 2`
 >
@@ -644,34 +979,10 @@ When a tool fails repeatedly, continuing to call it is futile and wasteful. The 
 >
 > `CircuitBreaker` with threshold=5, cooldown=30s. After 5 consecutive failures, the
 > circuit opens and immediately rejects further calls. After 30 seconds, it enters
-> half-open state — allows one probe attempt. If that succeeds, the circuit resets.
+> half-open state - allows one probe attempt. If that succeeds, the circuit resets.
 > If it fails, the timer resets.
 
-```typescript
-export class CircuitBreaker {
-  private failures = new Map<string, { count: number; trippedAt: number }>();
-  private threshold: number;   // default: 5
-  private cooldownMs: number;  // default: 30000
-
-  isOpen(toolName: string): boolean {
-    const state = this.failures.get(toolName);
-    if (!state || state.count < this.threshold) return false;
-    const elapsed = Date.now() - state.trippedAt;
-    if (elapsed >= this.cooldownMs) {
-      // Half-open: allow one attempt, reset trippedAt
-      state.trippedAt = Date.now();
-      return false;
-    }
-    return true;
-  }
-}
-```
-
-This is Third Law: the runtime protects itself from wasting resources on broken tools. But it yields to the Second Law — if the user submits a new task that requires the tool, the circuit breaker's cooldown will eventually permit a probe.
-
-### 5.2 Futility Detection
-
-In agentic mode, the kernel loops `planPhase() -> executePhase()` until the planner returns an empty plan or a halt condition is met. Without futility detection, a confused planner can loop indefinitely, burning tokens on plans that never make progress.
+---
 
 > **User** `round 3`
 >
@@ -697,52 +1008,7 @@ In agentic mode, the kernel loops `planPhase() -> executePhase()` until the plan
 > 4. **Cost without progress**: Spending tokens with no new successes -> halt
 > 5. **Budget burn rate**: >=80% budget consumed with <50% success rate -> halt
 
-The `FutilityMonitor` in [`packages/kernel/src/futility.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/kernel/src/futility.ts):
-
-```typescript
-recordIteration(record: IterationRecord): FutilityVerdict {
-  // 1. Repeated Error Detection
-  if (this.errorHistory.length >= this.maxRepeatedErrors) {
-    const recent = this.errorHistory.slice(-this.maxRepeatedErrors);
-    if (recent[0] !== "" && recent.every(e => e === recent[0])) {
-      return { action: "halt", reason: `Same error repeated ${this.maxRepeatedErrors} times` };
-    }
-  }
-
-  // 2. Stagnation Detection
-  // 3. Identical Plan Detection — consecutive identical goals
-  // 4. Cost-per-progress
-  // 5. Budget burn rate: >=80% budget consumed with <50% success rate
-  if (burnRate >= this.budgetBurnThreshold) {
-    const successRatio = totalSteps > 0 ? successfulSteps / totalSteps : 0;
-    if (successRatio < 0.5) {
-      return { action: "halt", reason: `Budget ${(burnRate * 100).toFixed(0)}% consumed with low progress` };
-    }
-  }
-
-  return { action: "continue" };
-}
-```
-
-History is bounded to 100 records to prevent unbounded memory growth — which is itself a Third Law concern.
-
-### 5.3 Session Limits
-
-Hard caps enforced every iteration in the kernel's main loop:
-
-| Limit | Check | Effect |
-|-------|-------|--------|
-| `max_duration_ms` | Wall-clock time since session start | Session transitions to `failed` |
-| `max_tokens` | Cumulative tokens across planner + tools | Execution halts |
-| `max_cost_usd` | Cumulative cost in USD | Execution halts |
-| `max_steps` | Cumulative step count across all iterations | Remaining steps dropped |
-| `max_iterations` | Planning loops in agentic mode | Exits agentic loop |
-
-These are the runtime's resource fences. Without them, a runaway session could consume unbounded compute — exactly the "resource exhaustion" threat that Anthropic's RSP identifies but can only address through model-level training rather than hard enforcement.
-
-### 5.4 Context Budget Monitoring
-
-The `ContextBudgetMonitor` in [`packages/kernel/src/context-budget.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/kernel/src/context-budget.ts) implements graduated self-preservation with three thresholds:
+---
 
 > **User** `round 6`
 >
@@ -753,7 +1019,7 @@ The `ContextBudgetMonitor` in [`packages/kernel/src/context-budget.ts`](https://
 >
 > Adding `ContextBudgetMonitor` with three thresholds:
 > - **70%**: Delegate to subagent (only if high-burn tools like `browser`/`http-request`
->   are active — they consume context faster)
+>   are active - they consume context faster)
 > - **85%**: Save checkpoint (persist progress for resumption)
 > - **90%**: Summarize findings and halt gracefully
 >
@@ -761,51 +1027,11 @@ The `ContextBudgetMonitor` in [`packages/kernel/src/context-budget.ts`](https://
 > 85% within 2 iterations, delegate early. The `highBurnMultiplier` (2.5x) accounts
 > for tools that produce large outputs.
 
-```typescript
-recordIteration(iter: ContextIteration): ContextBudgetVerdict {
-  const fraction = iter.cumulativeTokens / iter.maxTokens;
-
-  // Priority 1: Summarize (highest urgency)
-  if (fraction >= this.summarizeThreshold) {
-    return { action: "summarize", reason: `Token usage at ${pct}%` };
-  }
-
-  // Priority 2: Checkpoint
-  if (fraction >= this.checkpointThreshold && this.enableCheckpoint) {
-    return { action: "checkpoint", reason: `Token usage at ${pct}%` };
-  }
-
-  // Priority 3: Delegate (requires high-burn tools)
-  if (fraction >= this.delegateThreshold && hasHighBurn && this.enableDelegation) {
-    return { action: "delegate", reason: `Token usage at ${pct}% with high-burn tools` };
-  }
-
-  // Priority 4: Velocity projection -> early delegation
-  if (hasHighBurn && this.tokenHistory.length >= 2) {
-    const velocity = this.getTokenVelocity();
-    const projected = iter.cumulativeTokens + velocity * this.highBurnMultiplier * 2;
-    if (projected / iter.maxTokens >= this.checkpointThreshold) {
-      return { action: "delegate", reason: `Velocity projects ${projPct}% within 2 iterations` };
-    }
-  }
-
-  return { action: "continue" };
-}
-```
-
-### 5.5 Checkpoint and Recovery
-
-When the budget monitor triggers a checkpoint, the `buildCheckpoint()` function persists the session's current state: task text, plan, step results, usage metrics, and findings (truncated to 500 chars each). A crashed or halted session can be resumed from the checkpoint via `resumeSession()`.
-
-This is Third Law in its simplest form: the runtime preserves its work so it can survive interruptions.
-
-### 5.6 Abort: Second Law Overrides Third
-
-The `abort()` method on the Kernel is the purest example of the Law hierarchy in action:
+---
 
 > **User** `round 2`
 >
-> what if i need to stop a session immediately? not gracefully — now.
+> what if i need to stop a session immediately? not gracefully - now.
 >
 > **EDDIE**
 >
@@ -822,93 +1048,24 @@ The `abort()` method on the Kernel is the purest example of the Law hierarchy in
 > **EDDIE**
 >
 > Exactly. The abort is unconditional. No futility check, no budget check, no
-> checkpoint. The user said stop, so the runtime stops. The Third Law — self-preservation,
-> checkpoint, recovery — all yield to the Second Law's "obey the user."
-
-```typescript
-async abort(): Promise<void> {
-  this.abortRequested = true;
-  if (this.session && !["completed", "failed", "aborted"].includes(this.session.status)) {
-    await this.transition("aborted");
-    await this.config.journal.tryEmit(this.session.session_id, "session.aborted", {
-      reason: "User requested abort"
-    });
-  }
-}
-```
-
-No conditions. No arguments. The user says stop; the runtime stops. Third Law yielding to Second Law, yielding to the human.
+> checkpoint. The user said stop, so the runtime stops. The Third Law - self-preservation,
+> checkpoint, recovery - all yield to the Second Law's "obey the user."
 
 ---
 
-## 6. The Hardening Arc
+## Appendix B: Making Runtime Guardrails Durable
 
-Over eight rounds of adversarial hardening, we systematically strengthened each Law. The table below maps each round to the Laws it reinforced:
+Runtime guardrails are only as durable as their deployment practices. The following practices strengthen the "auditable change surface" claim:
 
-| Round | Commit | Focus | Laws Strengthened | Tests Added |
-|-------|--------|-------|-------------------|-------------|
-| 1 | — | Unit test gaps, baseline coverage | II, III | ~200 |
-| 2 | — | Error handling, resource cleanup, circuit breakers | III | ~150 |
-| 3 | — | Futility detection, secret redaction, sensitive files | I, III | ~180 |
-| 4 | — | Shell output redaction, env sanitization | I | ~120 |
-| 5 | — | Symlink traversal, circular dependencies, correctness | I, II | ~200 |
-| 6 | `8d1eef0` | Security/data integrity, permission serialization | I, II | ~150 |
-| 7 | `7ab0f29` | SSRF (DNS rebinding, CGNAT), scheduler concurrency, write mutexes | I, III | +73 |
-| 8 | `53c339c` | WS approval bypass, quote bypass, browser evaluate gate, redirect chaining | I | +19 |
+1. **Signed releases** and **verified provenance** for runtime artifacts.
+2. **Pinned versions** for deployments, with explicit upgrade windows.
+3. **Public changelogs** that call out any safety-relevant behavior changes.
+4. **Safety regression suites** run as a gate for upgrades (including adversarial corpora).
+5. **Tamper-evident telemetry**: append-only logs with external anchoring (signatures, transparency logs, or WORM storage) if immutability is required.
+6. **Independent monitoring hooks**: alert on increases in denied actions, new allowlist expansions, or reduced redaction rates.
+7. **Separation of duties**: require multi-party review for policy and enforcement changes.
 
-**Pattern**: The majority of hardening strengthened the First Law. Rounds 1-3 built the foundation (Third Law infrastructure, basic First Law checks). Rounds 4-8 were almost entirely about closing First Law gaps — finding increasingly subtle ways that malicious input could bypass protections and harm the user.
-
-This mirrors Asimov's observation across his robot stories: the First Law is the hardest to get right. It's not enough to have a rule against harm; you must anticipate every way that harm can occur indirectly — through redirects, through symlinks, through quoted strings, through DNS resolution, through audit trail persistence. Each hardening round found new indirect paths.
-
-It also mirrors the AI safety industry's experience. Anthropic's [safety evaluations](https://www.anthropic.com/news/building-safeguards-for-claude) use fine-tuned classifiers, hierarchical summarization, threat intelligence, and prompt injection testing. These are all valuable. But they are all *behavioral* — they operate on the model's outputs. KarnEvil9's hardening operates on the *infrastructure* — the code paths through which the model's outputs become actions. Both layers are necessary. Neither is sufficient alone.
-
-**Final test count**: 2,574 tests across all packages.
-
----
-
-## 7. The Zeroth Law Problem
-
-In *Robots and Empire* (1985), Asimov introduced a Zeroth Law:
-
-> *"A robot may not harm humanity, or, by inaction, allow humanity to come to harm."*
-
-The Zeroth Law takes precedence over all three original Laws. It addresses a gap: what happens when protecting *one* human requires harming *many*? Or when one user's instructions would harm the broader ecosystem?
-
-In agent runtimes, the Zeroth Law maps to: **the runtime must not harm the ecosystem** — other sessions, other users, shared infrastructure, the broader system of agents. This is the concern that Anthropic's RSP v3.0 attempts to address at scale with its AI Safety Level Standards (ASL-1 through ASL-4+), graduated by model capability. KarnEvil9 addresses it at the runtime level.
-
-KarnEvil9's [`swarm` package](https://github.com/oldeucryptoboi/KarnEvil9/tree/master/packages/swarm) implements three Zeroth Law mechanisms:
-
-**Graduated Authority** ([`packages/swarm/src/graduated-authority.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/graduated-authority.ts)): Trust scores determine resource budgets. Low-trust agents (score < 0.3) get 50% budget, L2 monitoring, and a max of 3 permissions. High-trust agents (score >= 0.7) get 150% budget and operational-level monitoring. The ecosystem protects itself by constraining unproven actors — analogous to Anthropic's ASL tiers, but enforced per-agent rather than per-model.
-
-**Liability Firebreaks** ([`packages/swarm/src/liability-firebreak.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/liability-firebreak.ts)): Delegation chain depth is bounded. High-criticality, low-reversibility tasks reduce the max depth further. This prevents unbounded expansion through transitive delegation — an agent that delegates to an agent that delegates to an agent, with accountability dissolving at each hop.
-
-**Reversibility Policy** ([`packages/swarm/src/reversibility-policy.ts`](https://github.com/oldeucryptoboi/KarnEvil9/blob/master/packages/swarm/src/reversibility-policy.ts)): When a task has low reversibility and high criticality, the system escalates to a human. When malicious behavior is detected with low reversibility, it aborts immediately and quarantines the agent. The ecosystem's welfare overrides any individual agent's task.
-
-The Zeroth Law is the frontier — for KarnEvil9, for Anthropic, for the industry. The three original Laws protect the user from the agent. The Zeroth Law protects *everyone* from the agent. It is, necessarily, the hardest to implement — because "humanity" in Asimov's formulation requires reasoning about aggregate welfare, not just individual safety.
-
-We have begun. We have not finished.
-
----
-
-## 8. Conclusion
-
-The AI safety debate in February 2026 is about where guardrails live and how durable they are. Anthropic's RSP v3.0 replaces binding commitments with nonbinding roadmaps. This is not necessarily wrong — binding commitments that prevent a company from competing may lead to a world where the companies with the weakest protections set the pace. Anthropic's own reasoning acknowledges this tension.
-
-But the tension dissolves if the guardrails live in the runtime rather than in the policy document. A `PolicyViolationError` does not care about competitive dynamics. A `throw new SsrfError()` cannot be loosened by a board vote. An `assertNotSensitiveFile()` that blocks reads to `.env` does not have a "Frontier Safety Roadmap" that might revise it next quarter.
-
-KarnEvil9 demonstrates that Asimov's hierarchy — do no harm, obey, self-preserve, in strict order — can be implemented as runtime-enforced guardrails for autonomous AI agents:
-
-1. **First Law**: `assertNotSensitiveFile()`, `assertEndpointAllowed()`, `assertPathAllowedReal()`, `assertCommandAllowed()`, `redactSecrets()`, `redactPayload()`, the browser evaluate gate, the redirect chain validator. Non-negotiable. Not configurable. Not overridable by the model.
-
-2. **Second Law**: `PermissionEngine.check()`, the critic panel, the hook system, the kernel's plan-then-execute lifecycle. The runtime faithfully executes the user's intent — *after* the First Law clears it.
-
-3. **Third Law**: `CircuitBreaker`, `FutilityMonitor`, `ContextBudgetMonitor`, `buildCheckpoint()`, session limits. The runtime preserves itself — *unless* the user says stop (`abort()`) or self-preservation would require harming the user.
-
-The hierarchy is strict. The hierarchy is tested (2,574 times). The hierarchy is enforced at compile time (TypeScript strict mode), at validation time (AJV schema checks at every component boundary), and at runtime (policy enforcement on every tool call).
-
-Model-level safety training is important. Corporate safety policies are important. But neither is sufficient when the model can be jailbroken and the policy can be revised. The runtime is the last line of defense — the layer that cannot be prompt-injected, cannot be pressured by a contract negotiation, and cannot be loosened by a press release.
-
-The Three Laws are not aspirations. They are assertions. They throw exceptions.
+These are operational, not theoretical. They are the difference between "safety in code" as a slogan and safety as an enforceable property.
 
 ---
 
@@ -916,12 +1073,15 @@ The Three Laws are not aspirations. They are assertions. They throw exceptions.
 
 1. Asimov, I. (1950). *I, Robot*. Gnome Press.
 2. Asimov, I. (1985). *Robots and Empire*. Doubleday.
-3. Anthropic. (2026). [Responsible Scaling Policy Version 3.0](https://anthropic.com/responsible-scaling-policy/rsp-v3-0).
-4. Anthropic. (2026). [Building Safeguards for Claude](https://www.anthropic.com/news/building-safeguards-for-claude).
-5. CNN. (2026). [Anthropic ditches its core safety promise](https://edition.cnn.com/2026/02/25/tech/anthropic-safety-policy-change).
-6. TIME. (2026). [Anthropic Drops Flagship Safety Pledge](https://time.com/7380854/exclusive-anthropic-drops-flagship-safety-pledge/).
-7. Axios. (2026). [Anthropic says Claude could be misused for "heinous crimes"](https://www.axios.com/2026/02/11/anthropic-claude-safety-chemical-weapons-values).
-
----
-
-*The Three Laws are not aspirations. They are assertions. They throw exceptions.*
+3. Anthropic. (2026). Responsible Scaling Policy Version 3.0 (announcement): https://www.anthropic.com/news/responsible-scaling-policy-v3
+4. Anthropic. (2026). Responsible Scaling Policy v3.0 (PDF): https://anthropic.com/responsible-scaling-policy/rsp-v3-0
+5. TIME. (2026). "Exclusive: Anthropic Drops Flagship Safety Pledge": https://time.com/7380854/exclusive-anthropic-drops-flagship-safety-pledge/
+6. TechRadar. (2026). "Anthropic drops its signature safety promise and rewrites AI guardrails": https://www.techradar.com/ai-platforms-assistants/anthropic-drops-its-signature-safety-promise-and-rewrites-ai-guardrails
+7. Bloomberg. (2026). "Pentagon Pressures Anthropic to Drop AI Guardrails in Military Standoff": https://www.bloomberg.com/news/features/2026-02-26/pentagon-pressures-anthropic-to-drop-ai-guardrails-in-military-standoff
+8. CNN (syndicated). (2026). "Anthropic ditches its core safety promise..." (example syndication): https://keyt.com/news/money-and-business/cnn-business-consumer/2026/02/25/anthropic-ditches-its-core-safety-promise-in-the-middle-of-an-ai-red-line-fight-with-the-pentagon/
+9. OpenAI. (2025). Preparedness Framework v2 (PDF): https://cdn.openai.com/pdf/18a02b5d-6b67-4cec-ab64-68cdfbddebcd/preparedness-framework-v2.pdf
+10. OpenAI. (2025). "Our updated Preparedness Framework": https://openai.com/index/updating-our-preparedness-framework/
+11. Google DeepMind. (2024). "Introducing the Frontier Safety Framework": https://deepmind.google/blog/introducing-the-frontier-safety-framework/
+12. Google DeepMind. (2025). Frontier Safety Framework v2.0 (PDF): https://storage.googleapis.com/deepmind-media/DeepMind.com/Blog/updating-the-frontier-safety-framework/Frontier%20Safety%20Framework%202.0%20%281%29.pdf
+13. Anthropic. (2025). "Building safeguards for Claude": https://www.anthropic.com/news/building-safeguards-for-claude
+14. Axios. (2026). "Claude could be misused for 'heinous crimes,' Anthropic warns": https://www.axios.com/2026/02/11/anthropic-claude-safety-chemical-weapons-values

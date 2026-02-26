@@ -98,9 +98,9 @@ function createClaudeCallFn(model: string): ModelCallFn {
   };
 }
 
-function createOpenAICallFn(model: string): ModelCallFn {
+function createOpenAICallFn(model: string, overrideBaseURL?: string): ModelCallFn {
   const apiKey = process.env.OPENAI_API_KEY;
-  const baseURL = process.env.OPENAI_BASE_URL;
+  const baseURL = overrideBaseURL ?? process.env.OPENAI_BASE_URL;
 
   if (!apiKey && !baseURL) {
     throw new Error(
@@ -151,7 +151,7 @@ function createOpenAICallFn(model: string): ModelCallFn {
   };
 }
 
-export function createPlanner(opts: { planner?: string; model?: string; agentic?: boolean }): Planner {
+export function createPlanner(opts: { planner?: string; model?: string; agentic?: boolean; baseURL?: string }): Planner {
   const provider = resolveProvider(opts);
   const model = resolveModel(provider, opts);
 
@@ -161,7 +161,7 @@ export function createPlanner(opts: { planner?: string; model?: string; agentic?
     case "claude":
       return new LLMPlanner(createClaudeCallFn(model), { agentic: opts.agentic });
     case "openai":
-      return new LLMPlanner(createOpenAICallFn(model), { agentic: opts.agentic });
+      return new LLMPlanner(createOpenAICallFn(model, opts.baseURL), { agentic: opts.agentic });
     case "router": {
       const underlying = new LLMPlanner(createClaudeCallFn(model), { agentic: opts.agentic });
       return new RouterPlanner({ delegate: underlying });

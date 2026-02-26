@@ -13,7 +13,7 @@ import { computeNextCron, computeNextInterval } from "./interval.js";
 
 export type SessionFactory = (
   task: Task,
-  options?: { mode?: ExecutionMode; agentic?: boolean }
+  options?: { mode?: ExecutionMode; agentic?: boolean; planner?: string; model?: string }
 ) => Promise<{ session_id: string; status: string }>;
 
 export interface SchedulerConfig {
@@ -249,6 +249,8 @@ export class Scheduler {
         const result = await this.sessionFactory(task, {
           mode: schedule.action.mode,
           agentic: schedule.action.agentic,
+          planner: schedule.action.planner,
+          model: schedule.action.model,
         });
         sessionId = result.session_id;
       } else if (schedule.action.type === "emitEvent") {

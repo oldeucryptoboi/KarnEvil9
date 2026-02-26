@@ -18,7 +18,7 @@ import { ActiveMemory } from "@karnevil9/memory";
 import { ScheduleStore, Scheduler } from "@karnevil9/scheduler";
 import { MeshManager, WorkDistributor, DEFAULT_SWARM_CONFIG } from "@karnevil9/swarm";
 import type { SwarmConfig } from "@karnevil9/swarm";
-import type { Task, ApprovalDecision, PermissionRequest } from "@karnevil9/schemas";
+import type { Task, ApprovalDecision, PermissionRequest, Planner } from "@karnevil9/schemas";
 import type { ChatWebSocket } from "./chat-client.js";
 
 function parsePort(value: string, label = "port"): number {
@@ -380,12 +380,34 @@ program.command("server").description("Start the API server")
     // pluginRegistry reference needed by sessionFactory — assigned after construction
     let pluginRegistry!: PluginRegistry;
 
+    // Per-session planner cache keyed by "provider:model" to reuse across sessions
+    const plannerCache = new Map<string, Planner>();
+    const mlxBaseURL = process.env.KARNEVIL9_MLX_BASE_URL ?? "http://localhost:8080/v1";
+
     // Shared session factory used by scheduler and slack plugins
-    const sharedSessionFactory = async (task: Task, sessionOpts?: { mode?: string; agentic?: boolean }) => {
+    const sharedSessionFactory = async (task: Task, sessionOpts?: { mode?: string; agentic?: boolean; planner?: string; model?: string }) => {
+      let sessionPlanner = planner;
+      if (sessionOpts?.planner || sessionOpts?.model) {
+        const provider = sessionOpts.planner ?? opts.planner ?? "mock";
+        const model = sessionOpts.model ?? opts.model;
+        const cacheKey = `${provider}:${model ?? "default"}`;
+        let cached = plannerCache.get(cacheKey);
+        if (!cached) {
+          cached = createPlanner({
+            planner: provider,
+            model,
+            agentic: sessionOpts?.agentic ?? opts.agentic,
+            baseURL: provider === "openai" ? mlxBaseURL : undefined,
+          });
+          plannerCache.set(cacheKey, cached);
+        }
+        sessionPlanner = cached;
+      }
+
       const kernel = new Kernel({
         journal, toolRuntime: runtime, toolRegistry: registry, permissions,
         pluginRegistry,
-        planner,
+        planner: sessionPlanner,
         mode: (sessionOpts?.mode ?? (opts.agentic ? "real" : "mock")) as "real" | "dry_run" | "mock",
         limits: { max_steps: 20, max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000 },
         policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true },

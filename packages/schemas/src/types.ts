@@ -688,6 +688,8 @@ export interface JobActionCreateSession {
   mode?: ExecutionMode;
   constraints?: TaskConstraints;
   agentic?: boolean;
+  planner?: string;
+  model?: string;
 }
 
 export interface JobActionEmitEvent {

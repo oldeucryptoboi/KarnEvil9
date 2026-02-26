@@ -154,7 +154,7 @@ export class CDPClient {
         const listeners = this.eventListeners.get(msg.method);
         if (listeners) {
           for (const cb of listeners) {
-            try { cb(msg.params ?? {}); } catch { /* listener error must not break other listeners */ }
+            try { cb(msg.params ?? {}); } catch (err) { console.warn("[cdp] Event listener threw:", err instanceof Error ? err.message : String(err)); }
           }
         }
       }

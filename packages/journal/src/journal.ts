@@ -228,7 +228,11 @@ export class Journal {
       this.evictSessionsIfNeeded();
 
       for (const listener of this.listeners) {
-        try { listener(event); } catch { /* listeners must not break the journal */ }
+        try {
+          listener(event);
+        } catch (err) {
+          console.warn("[journal] Listener threw:", err instanceof Error ? err.message : String(err));
+        }
       }
 
       // Check if a disk warning needs to be emitted after releasing the lock

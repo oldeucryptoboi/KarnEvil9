@@ -92,11 +92,18 @@ export function createBrowserHandler(driver?: BrowserDriverLike): ToolHandler {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
+    // 5xx = server error (may be non-JSON proxy page); 4xx = tool-level error with JSON body
+    if (response.status >= 500) {
+      const text = typeof response.text === "function"
+        ? await response.text().catch(() => "")
+        : "";
+      throw new Error(`Browser relay server error: ${response.status}${text ? ` — ${text.slice(0, 200)}` : ""}`);
+    }
     let body: unknown;
     try {
       body = await response.json();
     } catch {
-      throw new Error(`Browser relay error: ${response.status} ${response.statusText ?? "non-JSON response"}`);
+      throw new Error(`Browser relay returned non-JSON response (status ${response.status})`);
     }
     return body;
   };

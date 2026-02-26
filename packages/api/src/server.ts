@@ -692,12 +692,16 @@ export class ApiServer {
     });
     Promise.race([kernelPromise, timeoutPromise])
       .catch((err) => {
-        this.broadcastEvent(sessionId, {
-          type: "session.failed",
-          session_id: sessionId,
-          payload: { error: err instanceof Error ? err.message : String(err) },
-          timestamp: new Date().toISOString(),
-        });
+        try {
+          this.broadcastEvent(sessionId, {
+            type: "session.failed",
+            session_id: sessionId,
+            payload: { error: err instanceof Error ? err.message : String(err) },
+            timestamp: new Date().toISOString(),
+          });
+        } catch (broadcastErr) {
+          logError("runSessionLifecycle broadcast", broadcastErr);
+        }
       })
       .finally(() => {
         clearTimeout(sessionTimer!);

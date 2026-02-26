@@ -80,13 +80,17 @@ export class GmailAdapter extends BaseAdapter {
         clearTimeout(msgTimer);
       }
 
-      if (!msgRes.ok) continue;
+      if (!msgRes.ok) {
+        console.warn(`[gmail-adapter] Skipping message ${id}: HTTP ${msgRes.status}`);
+        continue;
+      }
 
       let msg: GmailMessage;
       try {
         msg = await msgRes.json() as GmailMessage;
-      } catch {
-        continue; // skip messages with malformed JSON
+      } catch (err) {
+        console.warn(`[gmail-adapter] Skipping message ${id}: malformed JSON —`, err instanceof Error ? err.message : String(err));
+        continue;
       }
       const item = this.messageToItem(msg);
       if (item) yield item;

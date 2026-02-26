@@ -87,8 +87,8 @@ export class GoogleDriveAdapter extends BaseAdapter {
             modified_at: file.modifiedTime,
           },
         };
-      } catch {
-        // Skip files that can't be read
+      } catch (err) {
+        console.warn(`[google-drive-adapter] Skipping file "${file.name}" (${file.id}):`, err instanceof Error ? err.message : String(err));
       }
     }
   }

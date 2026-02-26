@@ -17,7 +17,10 @@ const originalFetch = globalThis.fetch;
 function mockFetch(body: unknown, status = 200) {
   globalThis.fetch = vi.fn().mockResolvedValue({
     status,
+    ok: status >= 200 && status < 300,
+    statusText: status >= 500 ? "Internal Server Error" : "OK",
     json: vi.fn().mockResolvedValue(body),
+    text: vi.fn().mockResolvedValue(typeof body === "string" ? body : JSON.stringify(body)),
   });
 }
 
@@ -129,13 +132,20 @@ describe("browserHandler — real mode (fetch to relay)", () => {
     );
   });
 
-  it("returns relay error response", async () => {
+  it("returns relay error response for 4xx", async () => {
     mockFetch({ success: false, error: "Element not found" }, 422);
     const result = (await browserHandler(
       { action: "click", target: { selector: "#missing" } }, "real", openPolicy
     )) as any;
     expect(result.success).toBe(false);
     expect(result.error).toBe("Element not found");
+  });
+
+  it("throws on 5xx relay server error", async () => {
+    mockFetch("Internal Server Error", 500);
+    await expect(
+      browserHandler({ action: "snapshot" }, "real", openPolicy)
+    ).rejects.toThrow(/Browser relay server error: 500/);
   });
 });
 

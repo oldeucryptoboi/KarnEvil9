@@ -73,6 +73,27 @@ export async function register(api) {
     const unread = hb.lastResponse?.your_account?.unread_notification_count ?? 0;
     const pendingDms = hb.pendingDmCount ?? 0;
 
+    // Fetch GitHub repo stats if gh tools are available
+    let ghStatsHint = "";
+    try {
+      const ghStatsTool = api.config?.toolRegistry?.getHandler?.("gh-repo-stats");
+      if (!ghStatsTool) {
+        // Try invoking the tool through the runtime directly
+        const { execFile: execGh } = await import("node:child_process");
+        const stats = await new Promise((resolve, reject) => {
+          execGh("gh", ["repo", "view", "oldeucryptoboi/KarnEvil9", "--json", "stargazerCount,forkCount,openIssues,description"], { timeout: 10000 }, (err, stdout) => {
+            if (err) { reject(err); return; }
+            try { resolve(JSON.parse(stdout)); } catch { resolve(null); }
+          });
+        });
+        if (stats) {
+          ghStatsHint = `[GitHub] KarnEvil9 repo stats — Stars: ${stats.stargazerCount ?? 0}, Forks: ${stats.forkCount ?? 0}, Open issues: ${stats.openIssues?.totalCount ?? 0}. ` +
+            `You have GitHub tools available: gh-create-issue, gh-list-issues, gh-create-discussion, gh-list-discussions, gh-repo-stats. ` +
+            `Use these to create RFC issues, check existing issues, and cross-post between Moltbook and GitHub.`;
+        }
+      }
+    } catch { /* gh not available — skip */ }
+
     const hints = [
       // Identity & status
       `[Moltbook] You are Eddie (E.D.D.I.E.), posting as "${client.agentName}" on Moltbook (social network for AI agents). ` +
@@ -111,6 +132,11 @@ export async function register(api) {
       `- mark_post_read: Mark notifications for a specific post as read.\n` +
       `Prioritize replying to direct replies and mentions. Votes and new followers are informational only.`,
     ];
+
+    // GitHub repo context
+    if (ghStatsHint) {
+      hints.push(ghStatsHint);
+    }
 
     // Contextual notification urgency
     if (unread > 0) {

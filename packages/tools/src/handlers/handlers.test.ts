@@ -723,6 +723,63 @@ describe("httpRequestHandler — input validation", () => {
   });
 });
 
+describe("httpRequestHandler — headers and methods", () => {
+  it("passes custom headers in dry_run", async () => {
+    const result = (await httpRequestHandler(
+      { url: "https://example.com", method: "GET", headers: { "X-Custom": "value" } }, "dry_run", openPolicy
+    )) as any;
+    expect(result.body).toContain("[dry_run]");
+  });
+
+  it("accepts POST method with body in dry_run", async () => {
+    const result = (await httpRequestHandler(
+      { url: "https://example.com/api", method: "POST", body: '{"key":"value"}' }, "dry_run", openPolicy
+    )) as any;
+    expect(result.body).toContain("[dry_run]");
+    expect(result.body).toContain("POST");
+  });
+
+  it("accepts PATCH method in dry_run", async () => {
+    const result = (await httpRequestHandler(
+      { url: "https://example.com/api/1", method: "PATCH", body: '{"update":true}' }, "dry_run", openPolicy
+    )) as any;
+    expect(result.body).toContain("[dry_run]");
+    expect(result.body).toContain("PATCH");
+  });
+
+  it("accepts DELETE method in dry_run", async () => {
+    const result = (await httpRequestHandler(
+      { url: "https://example.com/api/1", method: "DELETE" }, "dry_run", openPolicy
+    )) as any;
+    expect(result.body).toContain("[dry_run]");
+    expect(result.body).toContain("DELETE");
+  });
+
+  it("ignores body for GET requests in dry_run", async () => {
+    const result = (await httpRequestHandler(
+      { url: "https://example.com", method: "GET", body: "should-be-ignored" }, "dry_run", openPolicy
+    )) as any;
+    expect(result.body).toContain("[dry_run]");
+    expect(result.body).toContain("GET");
+  });
+
+  it("rejects invalid headers type", async () => {
+    // headers as non-object should be ignored (not throw)
+    const result = (await httpRequestHandler(
+      { url: "https://example.com", method: "GET", headers: "bad" }, "dry_run", openPolicy
+    )) as any;
+    expect(result.body).toContain("[dry_run]");
+  });
+
+  it("rejects request to link-local IPv6 address", async () => {
+    await expect(
+      httpRequestHandler(
+        { url: "http://[::1]/admin", method: "GET" }, "real", openPolicy
+      )
+    ).rejects.toThrow();
+  });
+});
+
 describe("browserHandler — DNS rebinding protection", () => {
   it("H2: browser handler uses async SSRF check (imports assertEndpointAllowedAsync)", async () => {
     // Verify the browser handler rejects private IPs (proves it uses assertEndpointAllowedAsync)

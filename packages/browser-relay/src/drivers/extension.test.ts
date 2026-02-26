@@ -332,6 +332,52 @@ describe("ExtensionDriver (bridge protocol)", () => {
     });
   });
 
+  describe("malformed WS messages", () => {
+    it("ignores non-JSON messages without crashing", async () => {
+      const driver = await createDriver();
+      const ext = await connectFakeExtension(driver.getBridgePort());
+      ext.autoRespond(defaultCDPResponder);
+
+      // Send garbage data before hello
+      ext.ws.send("this is not json{{{");
+      ext.ws.send(Buffer.from([0xff, 0xfe, 0x00]));
+
+      // Now send a valid hello — driver should still work
+      ext.sendHello();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(driver.isActive()).toBe(true);
+
+      ext.close();
+    });
+  });
+
+  describe("connection replacement", () => {
+    it("replaces an existing extension connection when a new one connects", async () => {
+      const driver = await createDriver();
+
+      // First extension connects
+      const ext1 = await connectFakeExtension(driver.getBridgePort());
+      ext1.autoRespond(defaultCDPResponder);
+      ext1.sendHello();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(driver.isActive()).toBe(true);
+
+      // Second extension connects — should replace first
+      const ext2 = await connectFakeExtension(driver.getBridgePort());
+      ext2.autoRespond(defaultCDPResponder);
+      ext2.sendHello();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(driver.isActive()).toBe(true);
+
+      // Close second — driver should go inactive
+      ext2.close();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(driver.isActive()).toBe(false);
+
+      ext1.close();
+    });
+  });
+
   describe("getBridgePort", () => {
     it("returns the actual port when started with port 0", async () => {
       const driver = await createDriver();

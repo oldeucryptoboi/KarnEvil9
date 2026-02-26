@@ -432,6 +432,10 @@ export class ApiServer {
         }
         continue;
       }
+      if (client.res.destroyed) {
+        toRemove.push(client);
+        continue;
+      }
       const ok = client.res.write(msg);
       if (!ok) {
         client.paused = true;

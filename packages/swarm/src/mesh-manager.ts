@@ -151,13 +151,13 @@ export class MeshManager {
       peer_node_id: identity.node_id,
       peer_name: identity.display_name,
       peer_url: identity.api_url,
-    });
+    }).catch(() => {});
     return entry;
   }
 
   handleLeave(nodeId: string): void {
     this.peerTable.markLeft(nodeId);
-    void this.emitEvent("swarm.peer_left", { peer_node_id: nodeId });
+    void this.emitEvent("swarm.peer_left", { peer_node_id: nodeId }).catch(() => {});
   }
 
   handleHeartbeat(heartbeat: HeartbeatMessage, latencyMs: number): boolean {
@@ -166,7 +166,7 @@ export class MeshManager {
 
   handleGossip(gossip: GossipMessage): GossipMessage {
     // Process incoming peers
-    void this.discovery.processGossip(gossip.peers);
+    void this.discovery.processGossip(gossip.peers).catch(() => {});
 
     // Return our peer list
     const ourPeers = this.peerTable.getAll().map((p) => ({
@@ -179,7 +179,7 @@ export class MeshManager {
       from: gossip.sender_node_id,
       peers_received: gossip.peers.length,
       peers_sent: ourPeers.length,
-    });
+    }).catch(() => {});
 
     return {
       sender_node_id: this.identity.node_id,
@@ -222,7 +222,7 @@ export class MeshManager {
         originator_node_id: request.originator_node_id,
         correlation_id: request.correlation_id,
         delegation_depth: request.delegation_depth,
-      });
+      }).catch(() => {});
     }
     return result;
   }
@@ -238,7 +238,7 @@ export class MeshManager {
           status: result.status,
           attestation_valid: false,
           warning: "Attestation verification failed",
-        });
+        }).catch(() => {});
       }
     }
 
@@ -250,7 +250,7 @@ export class MeshManager {
           task_id: result.task_id,
           peer_node_id: result.peer_node_id,
           invalid_at_depth: chainResult.invalid_at_depth,
-        });
+        }).catch(() => {});
       }
     }
 
@@ -262,7 +262,7 @@ export class MeshManager {
       tokens_used: result.tokens_used,
       cost_usd: result.cost_usd,
       duration_ms: result.duration_ms,
-    });
+    }).catch(() => {});
 
     if (this.onTaskResult) {
       this.onTaskResult(result);
@@ -274,7 +274,7 @@ export class MeshManager {
       return { cancelled: false };
     }
     // Fire and forget — the cancel is async but the route handler needs a sync response
-    void this.onTaskCancel(taskId);
+    void this.onTaskCancel(taskId).catch(() => {});
     return { cancelled: true };
   }
 
@@ -326,7 +326,7 @@ export class MeshManager {
       peer_node_id: peerNodeId,
       correlation_id: request.correlation_id,
       task_text: taskText.slice(0, 200),
-    });
+    }).catch(() => {});
 
     const response = await this.transport.sendTaskRequest(peer.identity.api_url, request);
     if (!response.ok || !response.data?.accepted) {
@@ -335,7 +335,7 @@ export class MeshManager {
         task_id: taskId,
         peer_node_id: peerNodeId,
         reason,
-      });
+      }).catch(() => {});
       return { accepted: false, taskId, reason };
     }
 
@@ -405,13 +405,13 @@ export class MeshManager {
   private handlePeerDiscovered(peerIdentity: SwarmNodeIdentity): void {
     this.peerTable.add(peerIdentity);
     // Announce ourselves to newly discovered peer
-    void this.transport.sendJoin(peerIdentity.api_url, { identity: this.identity });
+    void this.transport.sendJoin(peerIdentity.api_url, { identity: this.identity }).catch(() => {});
     void this.emitEvent("swarm.peer_joined", {
       peer_node_id: peerIdentity.node_id,
       peer_name: peerIdentity.display_name,
       peer_url: peerIdentity.api_url,
       via: "discovery",
-    });
+    }).catch(() => {});
   }
 
   private async sendHeartbeats(): Promise<void> {
@@ -443,17 +443,17 @@ export class MeshManager {
     });
 
     for (const nodeId of result.suspected) {
-      void this.emitEvent("swarm.peer_suspected", { peer_node_id: nodeId });
+      void this.emitEvent("swarm.peer_suspected", { peer_node_id: nodeId }).catch(() => {});
     }
     for (const nodeId of result.unreachable) {
-      void this.emitEvent("swarm.peer_unreachable", { peer_node_id: nodeId });
+      void this.emitEvent("swarm.peer_unreachable", { peer_node_id: nodeId }).catch(() => {});
       this.discovery.forget(nodeId);
     }
 
     // Trigger redelegation for suspected + unreachable peers
     const degradedPeerIds = [...result.suspected, ...result.unreachable];
     if (degradedPeerIds.length > 0 && this.workDistributor) {
-      void this.workDistributor.handlePeerDegradation(degradedPeerIds);
+      void this.workDistributor.handlePeerDegradation(degradedPeerIds).catch(() => {});
     }
   }
 

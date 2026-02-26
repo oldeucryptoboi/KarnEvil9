@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { appendFile, readFile, mkdir, writeFile, rename, access, constants, open, unlink, statfs } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { dirname } from "node:path";
 import { v4 as uuid } from "uuid";
 import type { JournalEvent, JournalEventType } from "@karnevil9/schemas";
@@ -260,14 +261,20 @@ export class Journal {
 
   async *readAllStream(): AsyncGenerator<JournalEvent, void, undefined> {
     if (!existsSync(this.filePath)) return;
-    const content = await readFile(this.filePath, "utf-8");
-    const lines = content.trim().split("\n").filter(Boolean);
-    for (const line of lines) {
-      try {
-        yield JSON.parse(line) as JournalEvent;
-      } catch {
-        // Skip corrupted lines rather than crashing stream consumers
+    const fileStream = createReadStream(this.filePath, { encoding: "utf-8" });
+    const rl = createInterface({ input: fileStream, crlfDelay: Infinity });
+    try {
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        try {
+          yield JSON.parse(line) as JournalEvent;
+        } catch {
+          // Skip corrupted lines rather than crashing stream consumers
+        }
       }
+    } finally {
+      rl.close();
+      fileStream.destroy();
     }
   }
 

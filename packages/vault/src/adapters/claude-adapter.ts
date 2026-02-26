@@ -49,7 +49,12 @@ export class ClaudeAdapter extends BaseAdapter {
 
   private async *processJsonFile(filePath: string): AsyncGenerator<IngestItem, void, undefined> {
     const raw = await readFile(filePath, "utf-8");
-    const data = JSON.parse(raw);
+    let data: unknown;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error(`Failed to parse Claude export file: ${filePath}`);
+    }
 
     const conversations: ClaudeConversation[] = Array.isArray(data) ? data : [data];
 

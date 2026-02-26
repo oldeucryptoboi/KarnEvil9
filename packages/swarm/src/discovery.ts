@@ -144,7 +144,7 @@ export class PeerDiscovery {
                     this.discoveredNodes.add(response.data.node_id);
                     this.config.onPeerDiscovered(response.data);
                   }
-                });
+                }).catch(() => {});
               }
             }
           }

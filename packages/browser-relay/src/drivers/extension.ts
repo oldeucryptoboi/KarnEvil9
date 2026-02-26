@@ -52,6 +52,10 @@ export class ExtensionDriver implements BrowserDriver {
         resolve();
       });
 
+      this.wss.on("error", () => {
+        // Server-level errors (e.g. EADDRINUSE) — handled via close/reconnect
+      });
+
       this.wss.on("connection", (ws) => {
         this.handleExtensionConnection(ws);
       });
@@ -278,11 +282,16 @@ export class ExtensionDriver implements BrowserDriver {
     ws.on("message", (data) => {
       // Guard: ignore messages from a stale WebSocket
       if (this.extensionWs !== ws) return;
-      const msg = JSON.parse(data.toString());
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(data.toString());
+      } catch {
+        return; // Ignore malformed messages
+      }
       if (msg.type === "bridge:hello") {
-        this.handleBridgeHello(ws, msg as BridgeHello);
+        this.handleBridgeHello(ws, msg as unknown as BridgeHello);
       } else if (msg.type === "bridge:detached") {
-        this.handleBridgeDetached(msg as BridgeDetached);
+        this.handleBridgeDetached(msg as unknown as BridgeDetached);
       }
       // Other messages are CDP responses/events handled by CDPClient
     });
@@ -334,7 +343,12 @@ export class ExtensionDriver implements BrowserDriver {
       expression: "JSON.stringify({ url: location.href, title: document.title })",
       returnByValue: true,
     });
-    const info = JSON.parse(result.result.value as string);
+    let info: { url: string; title: string };
+    try {
+      info = JSON.parse(result.result.value as string);
+    } catch {
+      throw new Error("Failed to parse page info from extension");
+    }
     return { currentUrl: info.url, title: info.title };
   }
 }

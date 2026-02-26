@@ -28,8 +28,12 @@ export class ReputationStore {
       const lines = content.trim().split("\n").filter(l => l.length > 0);
       this.reputations.clear();
       for (const line of lines) {
-        const rep = JSON.parse(line) as PeerReputation;
-        this.reputations.set(rep.node_id, rep);
+        try {
+          const rep = JSON.parse(line) as PeerReputation;
+          this.reputations.set(rep.node_id, rep);
+        } catch {
+          // Skip corrupted lines rather than losing all reputations
+        }
       }
     } catch {
       this.reputations.clear();

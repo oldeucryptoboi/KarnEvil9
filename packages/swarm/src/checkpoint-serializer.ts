@@ -22,11 +22,15 @@ export class CheckpointSerializer {
       const lines = content.trim().split("\n").filter(l => l.length > 0);
       this.checkpoints.clear();
       for (const line of lines) {
-        const cp = JSON.parse(line) as TaskCheckpoint;
-        if (!this.checkpoints.has(cp.task_id)) {
-          this.checkpoints.set(cp.task_id, []);
+        try {
+          const cp = JSON.parse(line) as TaskCheckpoint;
+          if (!this.checkpoints.has(cp.task_id)) {
+            this.checkpoints.set(cp.task_id, []);
+          }
+          this.checkpoints.get(cp.task_id)!.push(cp);
+        } catch {
+          // Skip corrupted lines rather than losing all checkpoints
         }
-        this.checkpoints.get(cp.task_id)!.push(cp);
       }
     } catch {
       this.checkpoints.clear();

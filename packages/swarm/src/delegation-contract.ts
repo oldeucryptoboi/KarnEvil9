@@ -44,8 +44,12 @@ export class ContractStore {
       const lines = content.trim().split("\n").filter(l => l.length > 0);
       this.contracts.clear();
       for (const line of lines) {
-        const contract = JSON.parse(line) as DelegationContract;
-        this.contracts.set(contract.contract_id, contract);
+        try {
+          const contract = JSON.parse(line) as DelegationContract;
+          this.contracts.set(contract.contract_id, contract);
+        } catch {
+          // Skip corrupted lines rather than losing all contracts
+        }
       }
     } catch {
       this.contracts.clear();

@@ -17,8 +17,12 @@ export class DisputeStore {
       const lines = content.trim().split("\n").filter((l) => l.length > 0);
       this.disputes.clear();
       for (const line of lines) {
-        const record = JSON.parse(line) as DisputeRecord;
-        this.disputes.set(record.dispute_id, record);
+        try {
+          const record = JSON.parse(line) as DisputeRecord;
+          this.disputes.set(record.dispute_id, record);
+        } catch {
+          // Skip corrupted lines rather than losing all disputes
+        }
       }
     } catch {
       this.disputes.clear();

@@ -953,7 +953,7 @@ export class ApiServer {
       this.sseClients.set(sessionId, clients);
 
       const keepalive = setInterval(() => {
-        if (!client.paused) res.write(":keepalive\n\n");
+        if (!client.paused && !serverRes.destroyed) res.write(":keepalive\n\n");
       }, SSE_KEEPALIVE_INTERVAL_MS);
 
       serverRes.on("drain", () => {

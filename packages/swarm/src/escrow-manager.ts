@@ -33,8 +33,12 @@ export class EscrowManager {
       const lines = content.trim().split("\n").filter(l => l.length > 0);
       this.accounts.clear();
       for (const line of lines) {
-        const account = JSON.parse(line) as EscrowAccount;
-        this.accounts.set(account.node_id, account);
+        try {
+          const account = JSON.parse(line) as EscrowAccount;
+          this.accounts.set(account.node_id, account);
+        } catch {
+          // Skip corrupted lines rather than losing all accounts
+        }
       }
     } catch {
       this.accounts.clear();

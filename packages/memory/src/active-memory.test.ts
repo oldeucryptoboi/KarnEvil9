@@ -169,6 +169,52 @@ describe("ActiveMemory", () => {
   });
 });
 
+describe("ActiveMemory — corrupted line resilience", () => {
+  const TEST_DIR_CORRUPT = resolve(import.meta.dirname ?? ".", "../../.test-memory-corrupt");
+  const TEST_FILE_CORRUPT = resolve(TEST_DIR_CORRUPT, "memory.jsonl");
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR_CORRUPT, { recursive: true }); } catch { /* ok */ }
+    await mkdir(TEST_DIR_CORRUPT, { recursive: true });
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR_CORRUPT, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("skips corrupted lines and loads valid lessons", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    const lesson1 = JSON.stringify({
+      lesson_id: "l1", task_summary: "Task A", outcome: "succeeded",
+      lesson: "Did A", tool_names: ["read-file"],
+      created_at: new Date().toISOString(), session_id: "s1", relevance_count: 0,
+    });
+    const lesson2 = JSON.stringify({
+      lesson_id: "l2", task_summary: "Task B", outcome: "succeeded",
+      lesson: "Did B", tool_names: ["write-file"],
+      created_at: new Date().toISOString(), session_id: "s2", relevance_count: 0,
+    });
+    const corrupted = [lesson1, "NOT VALID JSON{{{", lesson2].join("\n") + "\n";
+    await writeFile(TEST_FILE_CORRUPT, corrupted, "utf-8");
+
+    const mem = new ActiveMemory(TEST_FILE_CORRUPT);
+    await mem.load();
+    const lessons = mem.getLessons();
+    expect(lessons).toHaveLength(2);
+    expect(lessons[0]!.task_summary).toBe("Task A");
+    expect(lessons[1]!.task_summary).toBe("Task B");
+  });
+
+  it("loads empty when all lines are corrupted", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(TEST_FILE_CORRUPT, "bad1\nbad2\nbad3\n", "utf-8");
+
+    const mem = new ActiveMemory(TEST_FILE_CORRUPT);
+    await mem.load();
+    expect(mem.getLessons()).toHaveLength(0);
+  });
+});
+
 describe("extractLesson", () => {
   const makePlan = (toolNames: string[]): Plan => ({
     plan_id: uuid(),

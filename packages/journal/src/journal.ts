@@ -251,8 +251,14 @@ export class Journal {
   async readAll(options?: { limit?: number }): Promise<JournalEvent[]> {
     if (!existsSync(this.filePath)) return [];
     const content = await readFile(this.filePath, "utf-8");
-    const events = content.trim().split("\n").filter(Boolean)
-      .map((line) => JSON.parse(line) as JournalEvent);
+    const events: JournalEvent[] = [];
+    for (const line of content.trim().split("\n").filter(Boolean)) {
+      try {
+        events.push(JSON.parse(line) as JournalEvent);
+      } catch {
+        // Skip corrupted lines rather than crashing the entire read
+      }
+    }
     if (options?.limit !== undefined && options.limit < events.length) {
       return events.slice(events.length - options.limit);
     }

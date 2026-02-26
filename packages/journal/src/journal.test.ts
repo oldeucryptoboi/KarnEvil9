@@ -1189,4 +1189,54 @@ describe("Journal", () => {
     expect(outer.password).toBe("[REDACTED]");
     expect(outer.name).toBe("visible");
   });
+
+  // ─── Corrupted line resilience ────────────────────────────────────
+
+  it("readAll skips corrupted lines instead of crashing", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    await journal.emit("s1", "session.created", { task: "a" });
+    await journal.emit("s1", "session.completed", { task: "b" });
+    await journal.close();
+
+    // Inject a corrupted line in the middle
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    const corrupted = [lines[0], "THIS IS NOT JSON{{{", lines[1]].join("\n") + "\n";
+    await writeFile(TEST_FILE, corrupted, "utf-8");
+
+    // Call readAll directly without init (which validates hash chains)
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    const events = await journal2.readAll();
+    // Should have both valid events, skipping the corrupted line
+    expect(events).toHaveLength(2);
+    expect(events[0]!.payload.task).toBe("a");
+    expect(events[1]!.payload.task).toBe("b");
+  });
+
+  it("readAllStream skips corrupted lines and yields valid ones", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    await journal.emit("s1", "session.created", { task: "first" });
+    await journal.emit("s1", "session.completed", { task: "second" });
+    await journal.close();
+
+    // Inject corrupted line between valid events
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    const corrupted = [lines[0], "{bad json", lines[1]].join("\n") + "\n";
+    await writeFile(TEST_FILE, corrupted, "utf-8");
+
+    // Use a fresh journal with no init (to skip integrity check) — read directly
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false });
+    // Don't init — just test readAllStream directly on the corrupted file
+    const events = [];
+    for await (const event of journal2.readAllStream()) {
+      events.push(event);
+    }
+    expect(events).toHaveLength(2);
+    expect(events[0]!.payload.task).toBe("first");
+    expect(events[1]!.payload.task).toBe("second");
+    await journal2.close();
+  });
 });

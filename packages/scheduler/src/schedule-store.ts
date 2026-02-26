@@ -16,8 +16,12 @@ export class ScheduleStore {
       const lines = content.trim().split("\n").filter(l => l.length > 0);
       this.schedules.clear();
       for (const line of lines) {
-        const schedule = JSON.parse(line) as Schedule;
-        this.schedules.set(schedule.schedule_id, schedule);
+        try {
+          const schedule = JSON.parse(line) as Schedule;
+          this.schedules.set(schedule.schedule_id, schedule);
+        } catch {
+          // Skip corrupted lines rather than losing all schedules
+        }
       }
     } catch {
       this.schedules.clear();

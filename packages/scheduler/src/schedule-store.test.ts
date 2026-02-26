@@ -132,4 +132,27 @@ describe("ScheduleStore", () => {
     const content = await readFile(filePath, "utf-8");
     expect(content).toBe("");
   });
+
+  it("skips corrupted lines and loads valid schedules", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    const sched1 = JSON.stringify(makeSchedule({ schedule_id: "a" }));
+    const sched2 = JSON.stringify(makeSchedule({ schedule_id: "b" }));
+    const corrupted = [sched1, "NOT VALID JSON{{{", sched2].join("\n") + "\n";
+    await writeFile(filePath, corrupted, "utf-8");
+
+    const store = new ScheduleStore(filePath);
+    await store.load();
+    expect(store.size).toBe(2);
+    expect(store.has("a")).toBe(true);
+    expect(store.has("b")).toBe(true);
+  });
+
+  it("loads empty when all lines are corrupted", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(filePath, "bad1\nbad2\n", "utf-8");
+
+    const store = new ScheduleStore(filePath);
+    await store.load();
+    expect(store.size).toBe(0);
+  });
 });

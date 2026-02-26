@@ -154,7 +154,14 @@ export class ActiveMemory {
     try {
       const content = await readFile(this.filePath, "utf-8");
       const lines = content.trim().split("\n").filter(l => l.length > 0);
-      this.lessons = lines.map(line => JSON.parse(line) as MemoryLesson);
+      this.lessons = [];
+      for (const line of lines) {
+        try {
+          this.lessons.push(JSON.parse(line) as MemoryLesson);
+        } catch {
+          // Skip corrupted lines rather than losing all lessons
+        }
+      }
     } catch {
       this.lessons = [];
     }

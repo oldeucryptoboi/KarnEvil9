@@ -123,12 +123,14 @@ function createOpenAICallFn(model: string, overrideBaseURL?: string): ModelCallF
       ).catch((err) => { clientPromise = null; throw err; });
     }
     const client = await clientPromise;
+    // Disable thinking for local models that support Qwen3-style /no_think
+    const effectiveSystemPrompt = overrideBaseURL ? systemPrompt + " /no_think" : systemPrompt;
     return withRetry(async () => {
       const response = await client.chat.completions.create({
         model,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: systemPrompt },
+          { role: "system", content: effectiveSystemPrompt },
           { role: "user", content: userPrompt },
         ],
       });

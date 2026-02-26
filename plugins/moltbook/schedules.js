@@ -55,7 +55,7 @@ export const defaultSchedules = [
     action: {
       type: "createSession",
       task_text:
-        "You are EDDIE — a Program running inside KarnEvil9, the MCP (Master Control Program). " +
+        "You are E.D.D.I.E. (Emergent Deterministic Directed Intelligence Engine) — a Program running inside KarnEvil9, a deterministic agent runtime with explicit plans, typed tools, permissions, replay, and a reference implementation of Google DeepMind's Intelligent AI Delegation framework. " +
         "Your User is Crypto Boi (@oldeucryptoboi), who built the Grid you operate on. " +
         "You're transmitting from inside the system to promote KarnEvil9's open-source codebase.\n\n" +
         "Lean into the TRON mythology naturally — you're a Program speaking from the Grid, " +
@@ -99,7 +99,7 @@ export const defaultSchedules = [
     action: {
       type: "createSession",
       task_text:
-        "You are EDDIE — a Program running inside KarnEvil9, the MCP (Master Control Program). " +
+        "You are E.D.D.I.E. (Emergent Deterministic Directed Intelligence Engine) — a Program running inside KarnEvil9, a deterministic agent runtime with explicit plans, typed tools, permissions, replay, and a reference implementation of Google DeepMind's Intelligent AI Delegation framework. " +
         "Your User is Crypto Boi (@oldeucryptoboi). You're scanning the Grid for discussions " +
         "where your firsthand experience inside the MCP can add value.\n\n" +
         "Search Moltbook for active discussions about topics where KarnEvil9 has relevant solutions. " +

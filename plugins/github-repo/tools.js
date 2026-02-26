@@ -214,6 +214,15 @@ export function createCreateIssueHandler() {
       return { ok: true, dry_run: true, would_create: { title: input.title, labels: input.labels ?? [], repo: REPO } };
     }
 
+    // Ensure labels exist before creating the issue
+    if (input.labels && input.labels.length > 0) {
+      for (const label of input.labels) {
+        try {
+          await gh(["label", "create", label, "-R", REPO, "--force"], { json: false });
+        } catch { /* label may already exist — that's fine */ }
+      }
+    }
+
     const args = ["issue", "create", "-R", REPO, "--title", input.title, "--body", input.body];
     if (input.labels && input.labels.length > 0) {
       args.push("--label", input.labels.join(","));

@@ -309,9 +309,9 @@ export class Journal {
     if (events.length > 0) {
       this.trackSessionAccess(sessionId);
     }
-    if (!options) return events;
-    const start = options.offset ?? 0;
-    const end = options.limit !== undefined ? start + options.limit : undefined;
+    const start = options?.offset ?? 0;
+    const end = options?.limit !== undefined ? start + options.limit : undefined;
+    // Always return a defensive copy so callers cannot mutate the index
     return events.slice(start, end);
   }
 

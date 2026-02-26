@@ -58,14 +58,14 @@ function createClaudeCallFn(model: string): ModelCallFn {
     );
   }
 
-  // Cache client across calls for HTTP connection pooling
+  // Cache client across calls for HTTP connection pooling; clear on failure so next call retries
   let clientPromise: Promise<{ messages: { create: Function } }> | null = null;
 
   return async (systemPrompt: string, userPrompt: string): Promise<ModelCallResult> => {
     if (!clientPromise) {
       clientPromise = import("@anthropic-ai/sdk").then(
         ({ default: Anthropic }) => new Anthropic({ apiKey }) as unknown as { messages: { create: Function } }
-      );
+      ).catch((err) => { clientPromise = null; throw err; });
     }
     const client = await clientPromise;
     return withRetry(async () => {
@@ -104,7 +104,7 @@ function createOpenAICallFn(model: string): ModelCallFn {
     );
   }
 
-  // Cache client across calls for HTTP connection pooling
+  // Cache client across calls for HTTP connection pooling; clear on failure so next call retries
   let clientPromise: Promise<InstanceType<typeof import("openai").default>> | null = null;
 
   return async (systemPrompt: string, userPrompt: string): Promise<ModelCallResult> => {
@@ -114,7 +114,7 @@ function createOpenAICallFn(model: string): ModelCallFn {
           apiKey: apiKey ?? "not-needed",
           ...(baseURL ? { baseURL } : {}),
         })
-      );
+      ).catch((err) => { clientPromise = null; throw err; });
     }
     const client = await clientPromise;
     return withRetry(async () => {

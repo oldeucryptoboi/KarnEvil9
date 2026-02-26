@@ -456,7 +456,10 @@ export class ApiServer {
     const event = data as JournalEvent;
     const seqId = event.seq !== undefined ? `id: ${event.seq}\n` : "";
     const payload = JSON.stringify(data);
-    if (payload.length > SSE_MAX_EVENT_BYTES) return; // Drop oversized events to prevent memory pressure
+    if (payload.length > SSE_MAX_EVENT_BYTES) {
+      logError("SSE broadcast", new Error(`Dropped oversized event (${payload.length} bytes > ${SSE_MAX_EVENT_BYTES}) for session ${sessionId}, type=${event.type}`));
+      return;
+    }
     const msg = `${seqId}data: ${payload}\n\n`;
     const toRemove: SSEClient[] = [];
     for (const client of clients) {

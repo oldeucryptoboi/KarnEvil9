@@ -187,6 +187,10 @@ export class ObjectStore {
     return true;
   }
 
+  getIndexEntry(objectId: string): IndexEntry | undefined {
+    return this.index.get(objectId);
+  }
+
   getBySourceId(source: string, sourceId: string): string | undefined {
     return this.sourceIndex.get(`${source}:${sourceId}`);
   }

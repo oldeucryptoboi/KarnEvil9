@@ -616,3 +616,39 @@ describe("assertCommandAllowed — dangerous flags", () => {
     expect(() => assertCommandAllowed("sed s/foo/bar/ file.txt", ["sed"])).not.toThrow();
   });
 });
+
+describe("isPrivateIP — CGNAT (RFC 6598) 100.64.0.0/10", () => {
+  it("detects 100.64.0.0 as private", () => {
+    expect(isPrivateIP("100.64.0.0")).toBe(true);
+  });
+
+  it("detects 100.64.0.1 as private", () => {
+    expect(isPrivateIP("100.64.0.1")).toBe(true);
+  });
+
+  it("detects 100.100.100.100 as private (mid-range)", () => {
+    expect(isPrivateIP("100.100.100.100")).toBe(true);
+  });
+
+  it("detects 100.127.255.255 as private (top of range)", () => {
+    expect(isPrivateIP("100.127.255.255")).toBe(true);
+  });
+
+  it("does not flag 100.63.255.255 (just below CGNAT)", () => {
+    expect(isPrivateIP("100.63.255.255")).toBe(false);
+  });
+
+  it("does not flag 100.128.0.0 (just above CGNAT)", () => {
+    expect(isPrivateIP("100.128.0.0")).toBe(false);
+  });
+
+  it("blocks CGNAT address in assertEndpointAllowed", () => {
+    expect(() => assertEndpointAllowed("http://100.64.1.1:80/", [])).toThrow(SsrfError);
+    expect(() => assertEndpointAllowed("http://100.100.0.1:80/", [])).toThrow(SsrfError);
+  });
+
+  it("blocks IPv6-mapped CGNAT address", () => {
+    expect(isPrivateIP("::ffff:100.64.0.1")).toBe(true);
+    expect(isPrivateIP("::ffff:100.127.255.255")).toBe(true);
+  });
+});

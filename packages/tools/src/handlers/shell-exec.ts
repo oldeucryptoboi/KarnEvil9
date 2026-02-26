@@ -84,7 +84,7 @@ function sanitizeEnv(): Record<string, string> {
 
 /**
  * Parse a command string into binary + arguments, handling basic quoting.
- * Supports double quotes and single quotes for arguments with spaces.
+ * Supports double quotes, single quotes, and backslash escaping.
  */
 function parseCommand(command: string): string[] {
   const args: string[] = [];
@@ -94,7 +94,10 @@ function parseCommand(command: string): string[] {
 
   for (let i = 0; i < command.length; i++) {
     const c = command[i]!;
-    if (c === '"' && !inSingle) {
+    // Backslash escaping (not inside single quotes, where backslash is literal)
+    if (c === "\\" && !inSingle && i + 1 < command.length) {
+      current += command[++i];
+    } else if (c === '"' && !inSingle) {
       inDouble = !inDouble;
     } else if (c === "'" && !inDouble) {
       inSingle = !inSingle;

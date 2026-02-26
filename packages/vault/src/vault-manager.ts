@@ -554,9 +554,7 @@ export class VaultManager {
     const searchResults: VectorSearchResult[] = [];
 
     for (const r of results) {
-      const entries = this.objectStore.search({ text: r.id, limit: 1 });
-      // Look up by object_id from the index
-      const entry = this.objectStore.search({}).find((e) => e.object_id === r.id);
+      const entry = this.objectStore.getIndexEntry(r.id);
       if (entry) {
         searchResults.push({
           object_id: r.id,

@@ -155,4 +155,34 @@ describe("ScheduleStore", () => {
     await store.load();
     expect(store.size).toBe(0);
   });
+
+  it("concurrent save() calls do not corrupt the file", async () => {
+    const store = new ScheduleStore(filePath);
+    await store.load();
+
+    // Seed with several schedules
+    for (let i = 0; i < 10; i++) {
+      store.set(makeSchedule({ schedule_id: `concurrent-${i}`, name: `Job ${i}` }));
+    }
+
+    // Fire many concurrent saves — the write mutex should serialise them
+    const saves = Array.from({ length: 20 }, () => store.save());
+    await Promise.all(saves);
+
+    // Reload and verify all data is intact
+    const store2 = new ScheduleStore(filePath);
+    await store2.load();
+    expect(store2.size).toBe(10);
+    for (let i = 0; i < 10; i++) {
+      expect(store2.get(`concurrent-${i}`)?.name).toBe(`Job ${i}`);
+    }
+
+    // Verify the file is valid JSONL (each line parses)
+    const content = await readFile(filePath, "utf-8");
+    const lines = content.trim().split("\n");
+    expect(lines.length).toBe(10);
+    for (const line of lines) {
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+  });
 });

@@ -201,7 +201,10 @@ export class Scheduler {
       const nextRunMs = new Date(schedule.next_run_at).getTime();
       if (now >= nextRunMs && this.activeJobs < this.maxConcurrentJobs) {
         this.activeJobs++;
-        const jobPromise = this.executeJob(schedule, schedule.next_run_at!).catch(() => {
+        const scheduledAt = schedule.next_run_at!;
+        // Clear next_run_at synchronously to prevent double-dispatch on subsequent ticks
+        schedule.next_run_at = null;
+        const jobPromise = this.executeJob(schedule, scheduledAt).catch(() => {
           // Job-level errors are already handled inside executeJob;
           // this catch prevents unhandled rejection if executeJob itself throws.
         }).finally(() => {

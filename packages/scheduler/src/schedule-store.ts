@@ -5,6 +5,7 @@ import type { Schedule } from "@karnevil9/schemas";
 export class ScheduleStore {
   private schedules = new Map<string, Schedule>();
   private filePath: string;
+  private writeLock: Promise<void> = Promise.resolve();
 
   constructor(filePath: string) {
     this.filePath = filePath;
@@ -29,18 +30,28 @@ export class ScheduleStore {
   }
 
   async save(): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true });
-    const entries = [...this.schedules.values()];
-    const content = entries.map(s => JSON.stringify(s)).join("\n") + (entries.length > 0 ? "\n" : "");
-    const tmpPath = this.filePath + ".tmp";
-    const fh = await open(tmpPath, "w");
+    let releaseLock: () => void;
+    const acquired = new Promise<void>((resolve) => { releaseLock = resolve; });
+    const prev = this.writeLock;
+    this.writeLock = acquired;
+    await prev;
+
     try {
-      await fh.writeFile(content, "utf-8");
-      await fh.sync();
+      await mkdir(dirname(this.filePath), { recursive: true });
+      const entries = [...this.schedules.values()];
+      const content = entries.map(s => JSON.stringify(s)).join("\n") + (entries.length > 0 ? "\n" : "");
+      const tmpPath = this.filePath + ".tmp";
+      const fh = await open(tmpPath, "w");
+      try {
+        await fh.writeFile(content, "utf-8");
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
+      await rename(tmpPath, this.filePath);
     } finally {
-      await fh.close();
+      releaseLock!();
     }
-    await rename(tmpPath, this.filePath);
   }
 
   get(id: string): Schedule | undefined {

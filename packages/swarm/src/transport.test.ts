@@ -138,6 +138,82 @@ describe("PeerTransport", () => {
     expect(call[1].headers.Authorization).toBeUndefined();
   });
 
+  // ─── SSRF protection tests ─────────────────────────────────────
+  it("rejects private IPv4 peer URLs (127.0.0.1)", async () => {
+    mockFetch(200, {});
+    const result = await transport.fetchIdentity("http://127.0.0.1:3100");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("SSRF");
+    // fetch should NOT have been called
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects 10.x.x.x peer URLs", async () => {
+    mockFetch(200, {});
+    const result = await transport.sendHeartbeat("http://10.0.0.5:3100", {
+      node_id: "local", timestamp: new Date().toISOString(), active_sessions: 0, load: 0,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("SSRF");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects 192.168.x.x peer URLs", async () => {
+    mockFetch(200, {});
+    const result = await transport.fetchIdentity("http://192.168.1.1:3100");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("SSRF");
+  });
+
+  it("rejects 169.254.169.254 (AWS IMDS)", async () => {
+    mockFetch(200, {});
+    const result = await transport.fetchIdentity("http://169.254.169.254");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("SSRF");
+  });
+
+  it("rejects CGNAT 100.64.x.x peer URLs", async () => {
+    mockFetch(200, {});
+    const result = await transport.fetchIdentity("http://100.64.0.1:3100");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("SSRF");
+  });
+
+  it("rejects localhost peer URLs", async () => {
+    mockFetch(200, {});
+    const result = await transport.fetchIdentity("http://localhost:3100");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("SSRF");
+  });
+
+  it("rejects 0.0.0.0 peer URLs", async () => {
+    mockFetch(200, {});
+    const result = await transport.fetchIdentity("http://0.0.0.0:3100");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("SSRF");
+  });
+
+  it("rejects IPv6 loopback peer URLs", async () => {
+    mockFetch(200, {});
+    const result = await transport.fetchIdentity("http://[::1]:3100");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("SSRF");
+  });
+
+  it("rejects non-HTTP protocols (ftp)", async () => {
+    mockFetch(200, {});
+    const result = await transport.fetchIdentity("ftp://remote:3100");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("SSRF");
+  });
+
+  it("allows public IP peer URLs", async () => {
+    mockFetch(200, { node_id: "remote-1" });
+    const result = await transport.fetchIdentity("http://203.0.113.10:3100");
+    expect(result.ok).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalled();
+  });
+
   it("should send join message", async () => {
     mockFetch(200, { ok: true });
     const result = await transport.sendJoin("http://remote:3100", {

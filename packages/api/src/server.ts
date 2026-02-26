@@ -345,6 +345,8 @@ export class ApiServer {
       this.corsOrigins = config.corsOrigins;
       this.trustedProxies = config.trustedProxies;
       this.rateLimiter = new RateLimiter();
+      this.rateLimiterPruneInterval = setInterval(() => this.rateLimiter.prune(), RATE_LIMITER_PRUNE_INTERVAL_MS);
+      this.rateLimiterPruneInterval.unref();
     }
     if (this.metricsCollector) {
       this.metricsCollector.attach(this.journal);
@@ -455,8 +457,6 @@ export class ApiServer {
       const actualPort = typeof addr === "object" && addr ? addr.port : port;
       console.log(`KarnEvil9 API listening on http://localhost:${actualPort}`);
     });
-    this.rateLimiterPruneInterval = setInterval(() => this.rateLimiter.prune(), RATE_LIMITER_PRUNE_INTERVAL_MS);
-    this.rateLimiterPruneInterval.unref();
     this.setupWebSocket(this.httpServer);
     return this.httpServer;
   }
@@ -932,7 +932,9 @@ export class ApiServer {
         const events = await this.journal.readSession(sessionId);
         let replayCount = 0;
         const MAX_REPLAY = 500;
+        const serverResForReplay = res as unknown as ServerResponse;
         for (const event of events) {
+          if (serverResForReplay.destroyed) break;
           if (event.seq !== undefined && event.seq > afterSeq) {
             if (replayCount >= MAX_REPLAY) {
               res.write(`data: ${JSON.stringify({ type: "replay.truncated", remaining: events.length - replayCount })}\n\n`);
@@ -967,7 +969,10 @@ export class ApiServer {
       }, SSE_MAX_LIFETIME_MS);
       maxLifetime.unref();
 
+      let sseCleaned = false;
       const cleanupSse = () => {
+        if (sseCleaned) return;
+        sseCleaned = true;
         clearInterval(keepalive);
         clearTimeout(maxLifetime);
         const remaining = (this.sseClients.get(sessionId) ?? []).filter((c) => c !== client);

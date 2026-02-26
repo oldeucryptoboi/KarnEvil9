@@ -76,7 +76,8 @@ export class DropZoneWatcher {
       }
 
       return null;
-    } catch {
+    } catch (err) {
+      console.warn(`[dropzone] Failed to detect JSON source for ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   }
@@ -90,7 +91,8 @@ export class DropZoneWatcher {
       if (/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(firstLine)) return "whatsapp";
 
       return null;
-    } catch {
+    } catch (err) {
+      console.warn(`[dropzone] Failed to read ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   }

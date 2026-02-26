@@ -109,12 +109,14 @@ export class VectorStore {
     return results.slice(0, k);
   }
 
-  findSimilarPairs(threshold: number = 0.85): SimilarPair[] {
+  findSimilarPairs(threshold: number = 0.85, maxComparisons: number = 500_000): SimilarPair[] {
     const ids = Array.from(this.vectors.keys());
     const pairs: SimilarPair[] = [];
+    let comparisons = 0;
 
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
+        if (++comparisons > maxComparisons) break;
         const vecA = this.vectors.get(ids[i]!);
         const vecB = this.vectors.get(ids[j]!);
         if (!vecA || !vecB) continue;
@@ -123,6 +125,7 @@ export class VectorStore {
           pairs.push({ id_a: ids[i]!, id_b: ids[j]!, score });
         }
       }
+      if (comparisons > maxComparisons) break;
     }
 
     pairs.sort((a, b) => b.score - a.score);

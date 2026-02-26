@@ -62,8 +62,17 @@ export class CDPClient {
       throw new Error("listTargets() is not available in bridge mode");
     }
     const url = `http://${this.host}:${this.port}/json/list`;
-    const response = await fetch(url);
-    return response.json() as Promise<CDPTargetInfo[]>;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(`CDP HTTP ${response.status}: ${response.statusText}`);
+      }
+      return response.json() as Promise<CDPTargetInfo[]>;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Get Chrome version info via /json/version. */
@@ -72,8 +81,17 @@ export class CDPClient {
       throw new Error("getVersion() is not available in bridge mode");
     }
     const url = `http://${this.host}:${this.port}/json/version`;
-    const response = await fetch(url);
-    return response.json() as Promise<CDPVersionInfo>;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(`CDP HTTP ${response.status}: ${response.statusText}`);
+      }
+      return response.json() as Promise<CDPVersionInfo>;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Connect to a CDP WebSocket. Discovers first page target if no wsUrl given. */

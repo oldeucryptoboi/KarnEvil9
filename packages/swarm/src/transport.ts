@@ -93,10 +93,9 @@ export class PeerTransport {
       headers.Authorization = `Bearer ${this.token}`;
     }
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-
       const response = await fetch(url, {
         method,
         headers,
@@ -104,7 +103,6 @@ export class PeerTransport {
         signal: controller.signal,
       });
 
-      clearTimeout(timer);
       const latency_ms = Date.now() - start;
 
       if (!response.ok) {
@@ -130,6 +128,8 @@ export class PeerTransport {
         error: isAbort ? `Request timed out after ${this.timeoutMs}ms` : message,
         latency_ms,
       };
+    } finally {
+      clearTimeout(timer);
     }
   }
 }

@@ -700,8 +700,14 @@ export class VaultManager {
   getVectorStore(): VectorStore { return this.vectorStore; }
 
   async close(): Promise<void> {
-    await this.deduplicator.save();
-    await this.linkStore.save();
-    await this.vectorStore.save();
+    const results = await Promise.allSettled([
+      this.deduplicator.save(),
+      this.linkStore.save(),
+      this.vectorStore.save(),
+    ]);
+    const errors = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (errors.length > 0) {
+      throw new Error(`VaultManager.close() failed: ${errors.map((e) => String(e.reason)).join("; ")}`);
+    }
   }
 }

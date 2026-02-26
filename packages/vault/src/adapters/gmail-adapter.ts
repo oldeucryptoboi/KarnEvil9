@@ -23,6 +23,8 @@ interface GmailMessage {
   internalDate: string;
 }
 
+const ADAPTER_FETCH_TIMEOUT_MS = 30_000;
+
 export class GmailAdapter extends BaseAdapter {
   readonly name = "gmail";
   readonly source = "gmail";
@@ -40,9 +42,17 @@ export class GmailAdapter extends BaseAdapter {
   async *extract(): AsyncGenerator<IngestItem, void, undefined> {
     // List message IDs
     const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(this.query)}&maxResults=${this.maxResults}`;
-    const listRes = await fetch(listUrl, {
-      headers: { Authorization: `Bearer ${this.accessToken}` },
-    });
+    const listController = new AbortController();
+    const listTimer = setTimeout(() => listController.abort(), ADAPTER_FETCH_TIMEOUT_MS);
+    let listRes: Response;
+    try {
+      listRes = await fetch(listUrl, {
+        headers: { Authorization: `Bearer ${this.accessToken}` },
+        signal: listController.signal,
+      });
+    } finally {
+      clearTimeout(listTimer);
+    }
 
     if (!listRes.ok) {
       throw new Error(`Gmail API error: ${listRes.status} ${listRes.statusText}`);
@@ -53,9 +63,17 @@ export class GmailAdapter extends BaseAdapter {
 
     for (const { id } of messageIds) {
       const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`;
-      const msgRes = await fetch(msgUrl, {
-        headers: { Authorization: `Bearer ${this.accessToken}` },
-      });
+      const msgController = new AbortController();
+      const msgTimer = setTimeout(() => msgController.abort(), ADAPTER_FETCH_TIMEOUT_MS);
+      let msgRes: Response;
+      try {
+        msgRes = await fetch(msgUrl, {
+          headers: { Authorization: `Bearer ${this.accessToken}` },
+          signal: msgController.signal,
+        });
+      } finally {
+        clearTimeout(msgTimer);
+      }
 
       if (!msgRes.ok) continue;
 

@@ -92,7 +92,13 @@ export function createBrowserHandler(driver?: BrowserDriverLike): ToolHandler {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
-    return response.json();
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new Error(`Browser relay error: ${response.status} ${response.statusText ?? "non-JSON response"}`);
+    }
+    return body;
   };
 }
 

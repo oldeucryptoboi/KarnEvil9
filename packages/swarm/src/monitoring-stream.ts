@@ -87,7 +87,11 @@ export class MonitoringStream {
     for (const subscriber of this.subscribers.values()) {
       if (this.matchesFilter(event, subscriber.filter)) {
         const sseData = `event: ${event.event_type}\ndata: ${JSON.stringify(event)}\n\n`;
-        subscriber.write(sseData);
+        try {
+          subscriber.write(sseData);
+        } catch {
+          subscriber.cleanup();
+        }
       }
     }
   }
@@ -105,7 +109,11 @@ export class MonitoringStream {
 
       const filtered = filterEventForLevel(event, subscriber.filter?.level ?? "L3_FULL_STATE");
       const sseData = `event: ${filtered.event_type}\ndata: ${JSON.stringify(filtered)}\n\n`;
-      subscriber.write(sseData);
+      try {
+        subscriber.write(sseData);
+      } catch {
+        subscriber.cleanup();
+      }
     }
   }
 
@@ -140,7 +148,11 @@ export class MonitoringStream {
     this.heartbeatTimer = setInterval(() => {
       const heartbeatData = "event: heartbeat\ndata: {}\n\n";
       for (const subscriber of this.subscribers.values()) {
-        subscriber.write(heartbeatData);
+        try {
+          subscriber.write(heartbeatData);
+        } catch {
+          subscriber.cleanup();
+        }
       }
     }, this.config.heartbeat_interval_ms);
     this.heartbeatTimer.unref();

@@ -39,9 +39,9 @@ export class ClassificationPipeline {
         try {
           const result = await this.classifyOne(item.title, item.content);
           results.set(item.objectId, result);
-          await onResult?.(item.objectId, result);
+          try { await onResult?.(item.objectId, result); } catch { /* callback error must not halt batch */ }
         } catch (err) {
-          await onError?.(item.objectId, err instanceof Error ? err : new Error(String(err)));
+          try { await onError?.(item.objectId, err instanceof Error ? err : new Error(String(err))); } catch { /* callback error must not halt batch */ }
         }
       }
     };

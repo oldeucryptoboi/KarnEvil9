@@ -17,6 +17,8 @@ interface DriveFile {
   parents?: string[];
 }
 
+const ADAPTER_FETCH_TIMEOUT_MS = 30_000;
+
 export class GoogleDriveAdapter extends BaseAdapter {
   readonly name = "google-drive";
   readonly source = "google-drive";
@@ -44,9 +46,17 @@ export class GoogleDriveAdapter extends BaseAdapter {
 
     const listUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=${this.maxResults}&fields=files(id,name,mimeType,createdTime,modifiedTime,parents)`;
 
-    const listRes = await fetch(listUrl, {
-      headers: { Authorization: `Bearer ${this.accessToken}` },
-    });
+    const listController = new AbortController();
+    const listTimer = setTimeout(() => listController.abort(), ADAPTER_FETCH_TIMEOUT_MS);
+    let listRes: Response;
+    try {
+      listRes = await fetch(listUrl, {
+        headers: { Authorization: `Bearer ${this.accessToken}` },
+        signal: listController.signal,
+      });
+    } finally {
+      clearTimeout(listTimer);
+    }
 
     if (!listRes.ok) {
       throw new Error(`Google Drive API error: ${listRes.status} ${listRes.statusText}`);
@@ -82,21 +92,35 @@ export class GoogleDriveAdapter extends BaseAdapter {
     // Google Docs — export as plain text
     if (file.mimeType === "application/vnd.google-apps.document") {
       const exportUrl = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/plain`;
-      const res = await fetch(exportUrl, {
-        headers: { Authorization: `Bearer ${this.accessToken}` },
-      });
-      if (!res.ok) return null;
-      return res.text();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ADAPTER_FETCH_TIMEOUT_MS);
+      try {
+        const res = await fetch(exportUrl, {
+          headers: { Authorization: `Bearer ${this.accessToken}` },
+          signal: controller.signal,
+        });
+        if (!res.ok) return null;
+        return res.text();
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     // Plain text / markdown — download directly
     if (file.mimeType === "text/plain" || file.mimeType === "text/markdown") {
       const downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
-      const res = await fetch(downloadUrl, {
-        headers: { Authorization: `Bearer ${this.accessToken}` },
-      });
-      if (!res.ok) return null;
-      return res.text();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ADAPTER_FETCH_TIMEOUT_MS);
+      try {
+        const res = await fetch(downloadUrl, {
+          headers: { Authorization: `Bearer ${this.accessToken}` },
+          signal: controller.signal,
+        });
+        if (!res.ok) return null;
+        return res.text();
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     return null;

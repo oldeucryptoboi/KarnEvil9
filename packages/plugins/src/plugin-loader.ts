@@ -75,6 +75,7 @@ export class PluginLoader {
             () => reject(new Error(`Plugin "${manifest.id}" (${manifest.name}) register() timed out after ${this.registerTimeoutMs}ms`)),
             this.registerTimeoutMs
           );
+          timer.unref();
         }),
       ]).finally(() => clearTimeout(timer!));
     } catch (err) {

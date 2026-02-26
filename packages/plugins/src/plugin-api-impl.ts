@@ -82,6 +82,7 @@ export class PluginApiImpl implements PluginApi {
           handler(req, res),
           new Promise<never>((_, reject) => {
             timer = setTimeout(() => reject(new Error("Route handler timeout")), 30000);
+            timer.unref();
           }),
         ]);
       } catch (err) {

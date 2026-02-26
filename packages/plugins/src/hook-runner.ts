@@ -105,6 +105,7 @@ export class HookRunner {
               () => reject(new Error(`Hook "${hookName}" from plugin "${reg.plugin_id}" timed out after ${hookTimeout}ms`)),
               hookTimeout
             );
+            hookTimer.unref();
           }),
         ]);
         result = validateHookResult(raw, hookName, reg.plugin_id);

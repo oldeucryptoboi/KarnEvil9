@@ -166,10 +166,11 @@ export async function register(api) {
   // ── Auto-schedule default Moltbook tasks ──
   if (config.autoSchedule && config.scheduler) {
     const { defaultSchedules } = await import("./schedules.js");
+    const existing = config.scheduler.listSchedules?.() ?? [];
+    const existingNames = new Set(existing.map((s) => s.name));
     for (const sched of defaultSchedules) {
       try {
-        const exists = config.scheduler.getSchedule?.(sched.name);
-        if (!exists) {
+        if (!existingNames.has(sched.name)) {
           await config.scheduler.createSchedule(sched);
           api.logger.info(`Moltbook schedule created: ${sched.name}`);
         }

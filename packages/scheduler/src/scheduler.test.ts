@@ -489,5 +489,70 @@ describe("Scheduler", () => {
       const updated = scheduler.getSchedule("missed-catchup1")!;
       expect(updated.run_count).toBe(1);
     });
+
+    it("catchup_all policy executes within grace period and advances to future", async () => {
+      const pastSchedule: Schedule = {
+        schedule_id: "missed-catchup-all",
+        name: "missed-catchup-all",
+        trigger: { type: "every", interval: "1m" },
+        action: { type: "createSession", task_text: "test" },
+        options: { missed_policy: "catchup_all" },
+        status: "active",
+        run_count: 0,
+        failure_count: 0,
+        next_run_at: new Date(Date.now() - 60_000).toISOString(), // 1 min ago, within grace
+        last_run_at: null,
+        created_by: "test",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      store.set(pastSchedule);
+      await store.save();
+
+      const factory = makeSessionFactory();
+      const scheduler = createScheduler({ sessionFactory: factory, missedGracePeriodMs: 300_000 });
+      await scheduler.start();
+      await scheduler.stop();
+
+      // Executes at least once (catchup_all enters the loop)
+      expect((factory as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(1);
+      const updated = scheduler.getSchedule("missed-catchup-all")!;
+      expect(updated.run_count).toBeGreaterThanOrEqual(1);
+      // next_run_at should be advanced to the future
+      expect(new Date(updated.next_run_at!).getTime()).toBeGreaterThanOrEqual(Date.now() - 1000);
+    });
+
+    it("catchup_all policy does not execute when outside grace period", async () => {
+      // Missed 10 min ago with 3 min grace — first cursor is outside grace
+      const pastSchedule: Schedule = {
+        schedule_id: "missed-catchup-all-stale",
+        name: "missed-catchup-all-stale",
+        trigger: { type: "every", interval: "1m" },
+        action: { type: "createSession", task_text: "test" },
+        options: { missed_policy: "catchup_all" },
+        status: "active",
+        run_count: 0,
+        failure_count: 0,
+        next_run_at: new Date(Date.now() - 10 * 60_000).toISOString(), // 10 min ago
+        last_run_at: null,
+        created_by: "test",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      store.set(pastSchedule);
+      await store.save();
+
+      const factory = makeSessionFactory();
+      // Grace period 3 minutes — the missed tick at 10 min ago is outside grace
+      const scheduler = createScheduler({ sessionFactory: factory, missedGracePeriodMs: 180_000 });
+      await scheduler.start();
+      await scheduler.stop();
+
+      // cursor (10 min ago) < graceLimit (3 min ago) → loop never enters
+      expect((factory as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+      // next_run_at should still be advanced to the future
+      const updated = scheduler.getSchedule("missed-catchup-all-stale")!;
+      expect(new Date(updated.next_run_at!).getTime()).toBeGreaterThanOrEqual(Date.now() - 1000);
+    });
   });
 });

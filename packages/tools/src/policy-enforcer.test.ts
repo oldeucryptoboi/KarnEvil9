@@ -1,7 +1,11 @@
-import { describe, it, expect, } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { resolve } from "node:path";
+import { mkdtemp, rm, symlink, mkdir, writeFile, realpath } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   assertPathAllowed,
+  assertPathAllowedReal,
   assertCommandAllowed,
   assertEndpointAllowed,
   assertEndpointAllowedAsync,
@@ -457,5 +461,158 @@ describe("assertNotSensitiveFile", () => {
 
   it("allows files with 'key' in the name but wrong extension", () => {
     expect(() => assertNotSensitiveFile("/workspace/keyboard.ts")).not.toThrow();
+  });
+});
+
+describe("assertPathAllowedReal — symlink-resolving path check", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "policy-real-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("allows a real file within the allowed directory", async () => {
+    const file = join(dir, "file.ts");
+    await writeFile(file, "test");
+    await expect(assertPathAllowedReal(file, [dir])).resolves.toBeUndefined();
+  });
+
+  it("rejects a real path outside allowed directories", async () => {
+    const outside = join(tmpdir(), "outside-policy-test-" + Date.now());
+    await mkdir(outside, { recursive: true });
+    const file = join(outside, "secret.txt");
+    await writeFile(file, "secret");
+    try {
+      await expect(assertPathAllowedReal(file, [dir])).rejects.toThrow(PolicyViolationError);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects symlinks that escape allowed directory", async () => {
+    // Create a target outside the allowed dir
+    const outside = join(tmpdir(), "escape-policy-test-" + Date.now());
+    await mkdir(outside, { recursive: true });
+    const secret = join(outside, "secret.txt");
+    await writeFile(secret, "secret");
+    // Create a symlink inside allowed dir pointing outside
+    const link = join(dir, "innocent-link.txt");
+    await symlink(secret, link);
+    try {
+      await expect(assertPathAllowedReal(link, [dir])).rejects.toThrow(PolicyViolationError);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("allows symlinks that resolve within allowed directory", async () => {
+    const real = join(dir, "real-file.ts");
+    await writeFile(real, "test");
+    const link = join(dir, "link-file.ts");
+    await symlink(real, link);
+    await expect(assertPathAllowedReal(link, [dir])).resolves.toBeUndefined();
+  });
+
+  it("skips check when allowedPaths is empty (open policy)", async () => {
+    await expect(assertPathAllowedReal("/anywhere/file.ts", [])).resolves.toBeUndefined();
+  });
+
+  it("handles non-existent paths by resolving closest ancestor", async () => {
+    // Use realpath of dir to avoid macOS /var → /private/var symlink mismatch
+    const realDir = await realpath(dir);
+    const nonExistent = join(realDir, "sub", "deep", "missing.txt");
+    // dir exists but sub/deep doesn't — should still resolve within realDir
+    await expect(assertPathAllowedReal(nonExistent, [realDir])).resolves.toBeUndefined();
+  });
+
+  it("allows with multiple allowed paths", async () => {
+    const dir2 = await mkdtemp(join(tmpdir(), "policy-real-test2-"));
+    const file = join(dir2, "ok.txt");
+    await writeFile(file, "test");
+    try {
+      await expect(assertPathAllowedReal(file, [dir, dir2])).resolves.toBeUndefined();
+    } finally {
+      await rm(dir2, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects directory symlinks that escape allowed paths", async () => {
+    const outside = join(tmpdir(), "dir-escape-policy-" + Date.now());
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, "data.txt"), "secret");
+    // Create a symlink to the outside directory inside allowed dir
+    const dirLink = join(dir, "linked-dir");
+    await symlink(outside, dirLink);
+    try {
+      await expect(
+        assertPathAllowedReal(join(dirLink, "data.txt"), [dir])
+      ).rejects.toThrow(PolicyViolationError);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("assertCommandAllowed — dangerous flags", () => {
+  it("blocks find -delete", () => {
+    expect(() => assertCommandAllowed("find . -name '*.tmp' -delete", ["find"])).toThrow(PolicyViolationError);
+    expect(() => assertCommandAllowed("find . -name '*.tmp' -delete", ["find"])).toThrow("Dangerous flag");
+  });
+
+  it("blocks find -exec", () => {
+    expect(() => assertCommandAllowed("find . -exec rm {} ;", ["find"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks find -execdir", () => {
+    expect(() => assertCommandAllowed("find . -execdir echo {} ;", ["find"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks sed -i (in-place)", () => {
+    expect(() => assertCommandAllowed("sed -i s/foo/bar/ file.txt", ["sed"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks sed --in-place", () => {
+    expect(() => assertCommandAllowed("sed --in-place s/foo/bar/ file.txt", ["sed"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks rm -rf", () => {
+    expect(() => assertCommandAllowed("rm -rf /tmp/dir", ["rm"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks rm --recursive", () => {
+    expect(() => assertCommandAllowed("rm --recursive /tmp/dir", ["rm"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks chmod -R", () => {
+    expect(() => assertCommandAllowed("chmod -R 777 /tmp", ["chmod"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks chown --recursive", () => {
+    expect(() => assertCommandAllowed("chown --recursive user:group /tmp", ["chown"])).toThrow(PolicyViolationError);
+  });
+
+  it("blocks xargs -I", () => {
+    expect(() => assertCommandAllowed("xargs -I {} echo {}", ["xargs"])).toThrow(PolicyViolationError);
+    expect(() => assertCommandAllowed("xargs -I {} echo {}", ["xargs"])).toThrow("Dangerous flag");
+  });
+
+  it("blocks xargs --replace", () => {
+    expect(() => assertCommandAllowed("xargs --replace echo", ["xargs"])).toThrow(PolicyViolationError);
+  });
+
+  it("allows safe find usage", () => {
+    expect(() => assertCommandAllowed("find . -name '*.ts' -type f", ["find"])).not.toThrow();
+  });
+
+  it("allows safe xargs usage", () => {
+    expect(() => assertCommandAllowed("xargs echo", ["xargs"])).not.toThrow();
+  });
+
+  it("allows safe sed without -i", () => {
+    expect(() => assertCommandAllowed("sed s/foo/bar/ file.txt", ["sed"])).not.toThrow();
   });
 });

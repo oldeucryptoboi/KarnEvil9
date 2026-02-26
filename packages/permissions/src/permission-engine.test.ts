@@ -729,6 +729,30 @@ describe("PermissionEngine edge cases", () => {
     // allow_once doesn't cache — second caller still needs its own prompt
     expect(promptCount).toBe(2);
   });
+
+  it("promptLock is released when promptFn throws, allowing subsequent checks", async () => {
+    let callCount = 0;
+    const failingThenSucceeding = async (_req: PermissionRequest): Promise<ApprovalDecision> => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error("Prompt UI crashed");
+      }
+      return "allow_session";
+    };
+    const engine = new PermissionEngine(journal, failingThenSucceeding);
+    const sessionId = "lock-error-session";
+    const scope = "test:lock:cleanup";
+
+    const req1 = makeRequest([scope], { sessionId, stepId: "step-1" });
+    // First check — prompt throws
+    await expect(engine.check(req1)).rejects.toThrow("Prompt UI crashed");
+
+    // Second check — should NOT hang (lock must have been released)
+    const req2 = makeRequest([scope], { sessionId, stepId: "step-2" });
+    const result = await engine.check(req2);
+    expect(result.allowed).toBe(true);
+    expect(callCount).toBe(2);
+  });
 });
 
 // ─── Cache Eviction Tests ─────────────────────────────────────────

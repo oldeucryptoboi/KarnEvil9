@@ -74,13 +74,19 @@ function createClaudeCallFn(model: string): ModelCallFn {
         max_tokens: 4096,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
+        tools: [{
+          name: "submit_plan",
+          description: "Submit the execution plan as structured JSON",
+          input_schema: { type: "object" as const },
+        }],
+        tool_choice: { type: "tool" as const, name: "submit_plan" },
       });
-      const block = response.content[0];
-      if (!block || block.type !== "text") {
-        throw new Error("Claude returned no text content");
+      const block = response.content.find((b: any) => b.type === "tool_use");
+      if (!block) {
+        throw new Error("Claude returned no tool call");
       }
       return {
-        text: block.text,
+        text: JSON.stringify(block.input),
         usage: {
           input_tokens: response.usage.input_tokens,
           output_tokens: response.usage.output_tokens,
@@ -120,6 +126,7 @@ function createOpenAICallFn(model: string): ModelCallFn {
     return withRetry(async () => {
       const response = await client.chat.completions.create({
         model,
+        response_format: { type: "json_object" },
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },

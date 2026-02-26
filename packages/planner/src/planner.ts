@@ -464,8 +464,11 @@ export class LLMPlanner implements Planner {
       jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
     }
     let plan: Plan;
-    try { plan = JSON.parse(jsonStr) as Plan; }
-    catch { throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}...`); }
+    try {
+      plan = JSON.parse(jsonStr) as Plan;
+    } catch {
+      throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}...`);
+    }
     if (!plan.created_at) plan.created_at = new Date().toISOString();
     // Agentic "done" signals have empty steps — skip schema validation for those
     // since PlanSchema requires minItems: 1 for real executable plans

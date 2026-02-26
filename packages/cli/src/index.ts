@@ -409,11 +409,20 @@ program.command("server").description("Start the API server")
         pluginRegistry,
         planner: sessionPlanner,
         mode: (sessionOpts?.mode ?? (opts.agentic ? "real" : "mock")) as "real" | "dry_run" | "mock",
-        limits: { max_steps: 20, max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000 },
+        limits: { max_steps: 20, max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 200000 },
         policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true },
         agentic: sessionOpts?.agentic ?? opts.agentic ?? false,
         activeMemory,
-        preGrantedScopes: pluginRegistry.getPluginPermissions(),
+        preGrantedScopes: [
+          ...pluginRegistry.getPluginPermissions(),
+          // Pre-grant built-in tool scopes for automated sessions (scheduled tasks)
+          "filesystem:read:workspace",
+          "filesystem:write:workspace",
+          "shell:exec:workspace",
+          "http:request:external",
+          "github:read:repos",
+          "github:write:issues",
+        ],
         plannerTimeoutMs: 120_000,
       });
       const session = await kernel.createSession(task);

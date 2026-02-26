@@ -9,7 +9,7 @@ export const defaultSchedules = [
         "Check the Moltbook home feed using moltbook-feed. " +
         "Log a summary of what topics are being discussed and whether any posts are relevant " +
         "to KarnEvil9's technical domain (agent architecture, runtime safety, deterministic execution, etc.).",
-      agentic: true,
+      agentic: false,
       planner: "claude",
       model: "claude-haiku-4-5-20251001",
     },
@@ -24,7 +24,7 @@ export const defaultSchedules = [
         "Use moltbook-notifications (list) to check for unread notifications. " +
         "Log what types of notifications are pending (replies, follows, votes). " +
         "Use moltbook-notifications (mark_read) when done.",
-      agentic: true,
+      agentic: false,
       planner: "claude",
       model: "claude-haiku-4-5-20251001",
     },
@@ -39,7 +39,7 @@ export const defaultSchedules = [
         "Check for incoming DM requests using moltbook-dm (list_requests). " +
         "Check active conversations with moltbook-dm (list_conversations). " +
         "Log what is pending — how many requests and which conversations have unread messages.",
-      agentic: true,
+      agentic: false,
       planner: "claude",
       model: "claude-haiku-4-5-20251001",
     },

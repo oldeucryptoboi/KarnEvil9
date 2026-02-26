@@ -469,13 +469,26 @@ export class LLMPlanner implements Planner {
     } catch {
       throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}...`);
     }
-    if (!plan.created_at) plan.created_at = new Date().toISOString();
+    // Unwrap nested plan if model wrapped it in an extra object (e.g. { plan: { ... } })
+    const planAny = plan as unknown as Record<string, unknown>;
+    if (!plan.steps && planAny.plan && typeof planAny.plan === "object") {
+      plan = planAny.plan as Plan;
+    }
+    // Normalize top-level required fields that models sometimes omit or get wrong
+    if (!plan.plan_id) plan.plan_id = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    if (!plan.schema_version) plan.schema_version = "0.1";
     // LLMs sometimes return schema_version as a number (0.1) instead of string ("0.1")
     if (typeof plan.schema_version === "number") {
       plan.schema_version = String(plan.schema_version);
     }
-    // Normalize plan fields that small/local models often get wrong
+    if (!plan.goal) plan.goal = "Execute requested task";
+    if (!plan.created_at) plan.created_at = new Date().toISOString();
     if (!plan.assumptions) plan.assumptions = [];
+    // Strip extra top-level properties (additionalProperties: false in PlanSchema)
+    const PLAN_KEYS = new Set(["plan_id", "schema_version", "goal", "assumptions", "steps", "artifacts", "created_at"]);
+    for (const key of Object.keys(plan)) {
+      if (!PLAN_KEYS.has(key)) delete (plan as unknown as Record<string, unknown>)[key];
+    }
     if (Array.isArray(plan.steps)) {
       for (const step of plan.steps) {
         // Strip extra properties from tool_ref (additionalProperties: false)
@@ -484,10 +497,21 @@ export class LLMPlanner implements Planner {
           step.tool_ref = { name: name as string, ...(version_range ? { version_range: version_range as string } : {}) };
         }
         // Fill missing required step fields with safe defaults
+        // Strip extra step properties (additionalProperties: false in StepSchema)
+        const STEP_KEYS = new Set(["step_id", "title", "description", "tool_ref", "input", "success_criteria", "failure_policy", "timeout_ms", "max_retries", "depends_on", "input_from"]);
+        for (const key of Object.keys(step)) {
+          if (!STEP_KEYS.has(key)) delete (step as unknown as Record<string, unknown>)[key];
+        }
+        if (!step.step_id) step.step_id = `step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         if (!step.title) step.title = step.description ?? step.tool_ref?.name ?? "untitled";
         if (!step.failure_policy) step.failure_policy = "continue";
         if (step.timeout_ms === undefined) step.timeout_ms = 30000;
         if (step.max_retries === undefined) step.max_retries = 0;
+        if (!step.success_criteria || (Array.isArray(step.success_criteria) && step.success_criteria.length === 0)) {
+          step.success_criteria = ["Tool executes without error"];
+        } else if (typeof step.success_criteria === "string") {
+          step.success_criteria = [step.success_criteria as unknown as string];
+        }
       }
     }
     // Agentic "done" signals have empty steps — skip schema validation for those

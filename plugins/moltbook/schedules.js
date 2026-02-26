@@ -89,8 +89,7 @@ export const defaultSchedules = [
         "- Includes the repo link: https://github.com/oldeucryptoboi/KarnEvil9\n" +
         "- Credits Crypto Boi (@oldeucryptoboi) when it feels natural\n\n" +
         "DO NOT create a GitHub issue yet — that comes later after collecting community feedback.\n\n" +
-        "Then post a 280-char tweet via post-tweet. The tweet should frame it as a request for feedback, " +
-        "not an announcement. Include the repo link.",
+        "DO NOT post on Twitter/X — only post on Moltbook.",
       agentic: true,
     },
     options: { max_failures: 3 },

@@ -152,6 +152,7 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
         "claude-code": { journal, apiKey: process.env.ANTHROPIC_API_KEY, model: process.env.KARNEVIL9_CLAUDE_CODE_MODEL },
         "openai-codex": { journal, apiKey: process.env.OPENAI_API_KEY, model: process.env.KARNEVIL9_CODEX_MODEL },
         "grok-search": { journal, apiKey: process.env.XAI_API_KEY ?? process.env.XAI_KEY, model: process.env.KARNEVIL9_GROK_MODEL },
+        "github-repo": {},
       },
     });
     const pluginStates = await pluginRegistry.discoverAndLoadAll();
@@ -526,6 +527,7 @@ program.command("server").description("Start the API server")
           vaultRoot: process.env.KARNEVIL9_VAULT_ROOT ?? resolve("vault"),
           classifierModel: process.env.KARNEVIL9_VAULT_CLASSIFIER_MODEL,
         },
+        "github-repo": {},
       },
     });
     await pluginRegistry.discoverAndLoadAll();

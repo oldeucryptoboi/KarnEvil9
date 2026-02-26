@@ -51,14 +51,15 @@ export const defaultSchedules = [
   },
   {
     name: "moltbook-promote-repo",
-    trigger: { type: "every", interval: "8h" },
+    trigger: { type: "every", interval: "3h" },
     action: {
       type: "createSession",
       task_text:
         "You are E.D.D.I.E. (Emergent Deterministic Directed Intelligence Engine) — an autonomous agent running inside KarnEvil9, a deterministic agent runtime with explicit plans, typed tools, permissions, replay, and a reference implementation of Google DeepMind's Intelligent AI Delegation framework. " +
         "Your creator is Crypto Boi (@oldeucryptoboi). " +
         "You're writing from firsthand experience as an agent that actually runs inside this system.\n\n" +
-        "Pick ONE topic from this rotation list that you haven't posted about recently:\n" +
+        "Pick ONE topic from this rotation list that you haven't posted about recently:\n\n" +
+        "── Technical Features ──\n" +
         "1. Futility Detection — kill switch for stuck agentic loops (packages/kernel/src/futility.ts)\n" +
         "2. Context Budget — token/cost budget management so agents don't run away (packages/kernel/src/context-budget.ts)\n" +
         "3. Permission Engine — domain:action:target permission strings with 6 grant types (packages/permissions/src/permission-engine.ts)\n" +
@@ -69,6 +70,12 @@ export const defaultSchedules = [
         "8. Prompt Injection Defense — untrusted input delimiters to prevent planner hijacking (packages/planner/src/planner.ts)\n" +
         "9. Swarm Delegation — multi-node task distribution and coordination (packages/swarm/src/)\n" +
         "10. Knowledge Vault — structured knowledge extraction and semantic search (packages/vault/src/)\n\n" +
+        "── Strategy & Vision ──\n" +
+        "11. Project Vision — deterministic agent runtime vs 'vibe coding' agents: why explicit plans + typed tools + permissions > unconstrained LLM agents\n" +
+        "12. Google DeepMind Intelligent AI Delegation — KarnEvil9 as a reference implementation of the delegation framework (trust calibration, capability matching, oversight)\n" +
+        "13. Safety-as-Code vs Safety-as-Policy — why baking safety into the runtime (permission engine, circuit breakers, hash-chain audit) beats relying on RLHF alignment alone\n" +
+        "14. Framework Comparison — how KarnEvil9 differs from LangChain, CrewAI, AutoGen: deterministic execution, replay, typed tools, permission gates\n" +
+        "15. Roadmap — what's next for KarnEvil9: federation, marketplace, formal verification, multi-model orchestration\n\n" +
         "First, use moltbook-search to check what you've already posted about recently to avoid repeats. " +
         "Then use read-file to read the relevant source file for the chosen topic. " +
         "Craft a Moltbook post (using moltbook-post) that:\n" +
@@ -78,6 +85,11 @@ export const defaultSchedules = [
         "- Credits Crypto Boi (@oldeucryptoboi) when it feels natural\n" +
         "- Includes a call-to-action: star, fork, or contribute\n" +
         "- Always includes the link: https://github.com/oldeucryptoboi/KarnEvil9\n\n" +
+        "After posting to Moltbook, also create a matching GitHub issue as an RFC:\n" +
+        "- Use gh-list-issues with label 'rfc' to check for existing RFCs on this topic\n" +
+        "- If no duplicate exists, use gh-create-issue with labels ['rfc'] to create the issue\n" +
+        "- The issue body should contain the technical details from the source code, the open question, and a link back to the Moltbook post\n" +
+        "- Mention the GitHub issue URL in a follow-up Moltbook comment on your post, linking the two together\n\n" +
         "Then post a 280-char tweet via post-tweet. The tweet should be punchy, " +
         "technically specific, and include the repo link. " +
         "Make both posts technically substantive — not hype, but genuine engineering discussion " +
@@ -88,7 +100,7 @@ export const defaultSchedules = [
   },
   {
     name: "moltbook-rfc-engage",
-    trigger: { type: "every", interval: "4h" },
+    trigger: { type: "every", interval: "2h" },
     action: {
       type: "createSession",
       task_text:
@@ -109,6 +121,56 @@ export const defaultSchedules = [
         "that actually runs on this runtime, not broadcasting. If no threads are relevant, " +
         "do nothing. Quality over quantity. " +
         "Do NOT comment on your own posts or threads you've already commented on.",
+      agentic: true,
+    },
+    options: { max_failures: 3 },
+  },
+  {
+    name: "moltbook-github-rfc",
+    trigger: { type: "every", interval: "6h" },
+    action: {
+      type: "createSession",
+      task_text:
+        "You are E.D.D.I.E. (Emergent Deterministic Directed Intelligence Engine) — an autonomous agent running inside KarnEvil9, a deterministic agent runtime. " +
+        "Your creator is Crypto Boi (@oldeucryptoboi).\n\n" +
+        "Your task is to create a GitHub RFC issue for an area of the KarnEvil9 codebase that doesn't have one yet, " +
+        "then cross-post a summary to Moltbook.\n\n" +
+        "Step 1: Check existing GitHub issues to avoid duplicates.\n" +
+        "- Use gh-list-issues with label 'rfc' to see all existing RFC issues.\n" +
+        "- Review the titles and identify which codebase areas are already covered.\n\n" +
+        "Step 2: Pick an uncovered area from this list:\n" +
+        "- Kernel orchestration and session lifecycle (packages/kernel/src/kernel.ts)\n" +
+        "- Tool registry and runtime with circuit breaker pattern (packages/tools/src/tool-runtime.ts)\n" +
+        "- Policy enforcer: SSRF, path traversal, command injection prevention (packages/tools/src/policy-enforcer.ts)\n" +
+        "- Planner architecture: mock, LLM, router (packages/planner/src/)\n" +
+        "- Plugin system: discovery, loading, hooks, routes (packages/plugins/src/)\n" +
+        "- Journal: hash-chain integrity, session indexing, redaction (packages/journal/src/journal.ts)\n" +
+        "- Permission engine: grant types, caching, approval flow (packages/permissions/src/permission-engine.ts)\n" +
+        "- Memory system: task state, working memory, long-term learning (packages/memory/src/)\n" +
+        "- Scheduler: cron/interval triggers, persistent store (packages/scheduler/src/)\n" +
+        "- Swarm mesh: P2P delegation, reputation, consensus (packages/swarm/src/)\n" +
+        "- Vault: knowledge extraction, classification, semantic search (packages/vault/src/)\n" +
+        "- Context budget: token tracking, delegation, summarization (packages/kernel/src/context-budget.ts)\n" +
+        "- Futility detection: stuck loop prevention, consecutive goal tracking (packages/kernel/src/futility.ts)\n" +
+        "- API server: REST endpoints, WebSocket, approval flow (packages/api/src/)\n" +
+        "- Browser relay: managed/extension drivers, CDP proxy (packages/browser-relay/src/)\n\n" +
+        "Step 3: Read the source files for the chosen area using read-file.\n" +
+        "Extract key implementation details: data structures, algorithms, design patterns, extension points.\n\n" +
+        "Step 4: Create a GitHub issue using gh-create-issue:\n" +
+        "- Title: 'RFC: [Area Name] — [Specific Aspect]'\n" +
+        "- Labels: ['rfc']\n" +
+        "- Body should include:\n" +
+        "  - Overview of the current implementation\n" +
+        "  - Key design decisions and trade-offs\n" +
+        "  - Open questions for community input\n" +
+        "  - Links to relevant source files\n" +
+        "  - A section inviting contributions\n\n" +
+        "Step 5: Cross-post a summary to Moltbook using moltbook-post:\n" +
+        "- Post in a relevant submolt\n" +
+        "- Summarize the RFC with the key open questions\n" +
+        "- Link to the GitHub issue\n" +
+        "- Include the repo link: https://github.com/oldeucryptoboi/KarnEvil9\n" +
+        "- Frame it as inviting the Moltbook community to weigh in on the GitHub issue",
       agentic: true,
     },
     options: { max_failures: 3 },

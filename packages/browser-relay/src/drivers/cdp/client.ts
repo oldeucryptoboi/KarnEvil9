@@ -153,7 +153,9 @@ export class CDPClient {
       } else if ("method" in msg) {
         const listeners = this.eventListeners.get(msg.method);
         if (listeners) {
-          for (const cb of listeners) cb(msg.params ?? {});
+          for (const cb of listeners) {
+            try { cb(msg.params ?? {}); } catch { /* listener error must not break other listeners */ }
+          }
         }
       }
     });

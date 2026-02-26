@@ -58,7 +58,12 @@ export class GmailAdapter extends BaseAdapter {
       throw new Error(`Gmail API error: ${listRes.status} ${listRes.statusText}`);
     }
 
-    const listData = await listRes.json() as { messages?: Array<{ id: string }> };
+    let listData: { messages?: Array<{ id: string }> };
+    try {
+      listData = await listRes.json() as { messages?: Array<{ id: string }> };
+    } catch {
+      throw new Error("Gmail API returned malformed JSON for message list");
+    }
     const messageIds = listData.messages ?? [];
 
     for (const { id } of messageIds) {
@@ -77,7 +82,12 @@ export class GmailAdapter extends BaseAdapter {
 
       if (!msgRes.ok) continue;
 
-      const msg = await msgRes.json() as GmailMessage;
+      let msg: GmailMessage;
+      try {
+        msg = await msgRes.json() as GmailMessage;
+      } catch {
+        continue; // skip messages with malformed JSON
+      }
       const item = this.messageToItem(msg);
       if (item) yield item;
     }

@@ -121,8 +121,8 @@ function validateSessionInput(body: unknown): string | null {
     if (typeof b.limits !== "object" || Array.isArray(b.limits)) return "limits must be an object";
     const limits = b.limits as Record<string, unknown>;
     for (const key of ["max_steps", "max_duration_ms", "max_cost_usd", "max_tokens"]) {
-      if (limits[key] !== undefined && (typeof limits[key] !== "number" || (limits[key] as number) <= 0)) {
-        return `limits.${key} must be a positive number`;
+      if (limits[key] !== undefined && (typeof limits[key] !== "number" || !Number.isFinite(limits[key] as number) || (limits[key] as number) <= 0)) {
+        return `limits.${key} must be a finite positive number`;
       }
     }
   }

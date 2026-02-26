@@ -62,7 +62,12 @@ export class GoogleDriveAdapter extends BaseAdapter {
       throw new Error(`Google Drive API error: ${listRes.status} ${listRes.statusText}`);
     }
 
-    const listData = await listRes.json() as { files?: DriveFile[] };
+    let listData: { files?: DriveFile[] };
+    try {
+      listData = await listRes.json() as { files?: DriveFile[] };
+    } catch {
+      throw new Error("Google Drive API returned malformed JSON for file list");
+    }
     const files = listData.files ?? [];
 
     for (const file of files) {

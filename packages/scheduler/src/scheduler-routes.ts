@@ -176,6 +176,19 @@ export function createSchedulerRoutes(scheduler: Scheduler): SchedulerRoute[] {
     }
   };
 
+  const triggerSchedule: RouteHandler = async (req, res) => {
+    const id = req.params.id;
+    if (!id) { res.status(400).json({ error: "Schedule ID is required" }); return; }
+    try {
+      const result = await scheduler.triggerSchedule(id);
+      res.json({ triggered: true, schedule_id: id, session_id: result.session_id });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Internal server error";
+      if (msg.includes("not found")) { res.status(404).json({ error: msg }); return; }
+      res.status(500).json({ error: msg });
+    }
+  };
+
   const resumeSchedule: RouteHandler = async (req, res) => {
     const id = req.params.id;
     if (!id) { res.status(400).json({ error: "Schedule ID is required" }); return; }
@@ -197,5 +210,6 @@ export function createSchedulerRoutes(scheduler: Scheduler): SchedulerRoute[] {
     { method: "DELETE", path: "/schedules/:id", handler: deleteSchedule },
     { method: "POST", path: "/schedules/:id/pause", handler: pauseSchedule },
     { method: "POST", path: "/schedules/:id/resume", handler: resumeSchedule },
+    { method: "POST", path: "/schedules/:id/trigger", handler: triggerSchedule },
   ];
 }

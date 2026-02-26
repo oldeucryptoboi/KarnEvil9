@@ -180,6 +180,13 @@ export class Scheduler {
     return schedule;
   }
 
+  async triggerSchedule(id: string): Promise<{ session_id?: string }> {
+    const schedule = this.store.get(id);
+    if (!schedule) throw new Error(`Schedule not found: ${id}`);
+    await this.executeJob(schedule);
+    return { session_id: schedule.last_session_id };
+  }
+
   getSchedule(id: string): Schedule | undefined {
     return this.store.get(id);
   }

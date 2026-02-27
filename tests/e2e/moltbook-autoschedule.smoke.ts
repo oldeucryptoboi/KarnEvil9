@@ -122,9 +122,12 @@ describe("Moltbook autoSchedule Smoke", () => {
 
     expect(names).toContain("moltbook-check-notifications");
     expect(names).toContain("moltbook-check-dms");
+    expect(names).toContain("moltbook-post-social");
+    expect(names).toContain("moltbook-post-rfc");
     expect(names).toContain("moltbook-karma-engage");
     expect(names).toContain("moltbook-close-loop");
     expect(names).not.toContain("moltbook-check-feed");
+    expect(names).not.toContain("moltbook-promote-repo");
 
     // Verify each schedule is active and has the right trigger
     const notifs = schedules.find((s) => s.name === "moltbook-check-notifications")!;
@@ -134,6 +137,14 @@ describe("Moltbook autoSchedule Smoke", () => {
     const dms = schedules.find((s) => s.name === "moltbook-check-dms")!;
     expect(dms.status).toBe("active");
     expect(dms.trigger).toEqual({ type: "every", interval: "1h" });
+
+    const social = schedules.find((s) => s.name === "moltbook-post-social")!;
+    expect(social.status).toBe("active");
+    expect(social.trigger).toEqual({ type: "every", interval: "3h" });
+
+    const rfc = schedules.find((s) => s.name === "moltbook-post-rfc")!;
+    expect(rfc.status).toBe("active");
+    expect(rfc.trigger).toEqual({ type: "every", interval: "8h" });
 
     const karma = schedules.find((s) => s.name === "moltbook-karma-engage")!;
     expect(karma.status).toBe("active");

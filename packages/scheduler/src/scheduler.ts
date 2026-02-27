@@ -7,13 +7,14 @@ import type {
   JobAction,
   Task,
   ExecutionMode,
+  SessionLimits,
 } from "@karnevil9/schemas";
 import { ScheduleStore } from "./schedule-store.js";
 import { computeNextCron, computeNextInterval } from "./interval.js";
 
 export type SessionFactory = (
   task: Task,
-  options?: { mode?: ExecutionMode; agentic?: boolean; planner?: string; model?: string }
+  options?: { mode?: ExecutionMode; agentic?: boolean; planner?: string; model?: string; limits?: Partial<SessionLimits> }
 ) => Promise<{ session_id: string; status: string }>;
 
 export interface SchedulerConfig {
@@ -251,6 +252,7 @@ export class Scheduler {
           agentic: schedule.action.agentic,
           planner: schedule.action.planner,
           model: schedule.action.model,
+          limits: schedule.action.limits,
         });
         sessionId = result.session_id;
       } else if (schedule.action.type === "emitEvent") {

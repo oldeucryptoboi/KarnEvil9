@@ -709,6 +709,7 @@ export interface JobActionCreateSession {
   agentic?: boolean;
   planner?: string;
   model?: string;
+  limits?: Partial<SessionLimits>;
 }
 
 export interface JobActionEmitEvent {

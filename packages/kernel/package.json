@@ -23,6 +23,11 @@
   "devDependencies": {
     "@karnevil9/planner": "workspace:*"
   },
+  "files": ["dist"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "license": "MIT",
   "repository": {
     "type": "git",

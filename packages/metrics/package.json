@@ -16,6 +16,11 @@
     "@karnevil9/journal": "workspace:*",
     "prom-client": "^15.1.0"
   },
+  "files": ["dist"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "license": "MIT",
   "repository": {
     "type": "git",

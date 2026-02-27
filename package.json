@@ -29,9 +29,7 @@
   "bugs": {
     "url": "https://github.com/oldeucryptoboi/KarnEvil9/issues"
   },
-  "bin": {
-    "karnevil9": "packages/cli/dist/index.js"
-  },
+  "private": true,
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",

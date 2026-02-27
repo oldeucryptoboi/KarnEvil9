@@ -74,7 +74,7 @@ describe("Real Tool Execution Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: makeSingleStepPlanner("read-file", { path: targetFile }),
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 5, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000 },
       policy: { allowed_paths: [testDir], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: false },
     });
@@ -104,7 +104,7 @@ describe("Real Tool Execution Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: makeSingleStepPlanner("shell-exec", { command: "echo hello-e2e" }),
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 5, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000 },
       policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: ["echo"], require_approval_for_writes: false },
     });
@@ -130,7 +130,7 @@ describe("Real Tool Execution Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: makeSingleStepPlanner("read-file", { path: "/tmp/nonexistent" }),
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 5, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000 },
       policy: { allowed_paths: ["/tmp"], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: false },
     });

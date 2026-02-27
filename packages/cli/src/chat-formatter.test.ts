@@ -103,12 +103,12 @@ describe("formatEvent", () => {
       const event = {
         type: "session.created",
         timestamp: "2025-01-01T12:00:00.000Z",
-        payload: { task_text: "Do something", mode: "real" },
+        payload: { task_text: "Do something", mode: "live" },
       };
       const result = formatEvent(sid, event);
       expect(result).toContain("session.created");
       expect(result).toContain("Do something");
-      expect(result).toContain("real");
+      expect(result).toContain("live");
     });
 
     it("suppresses session.started", () => {
@@ -297,11 +297,11 @@ describe("formatEvent", () => {
       const event = {
         type: "tool.started",
         timestamp: "2025-01-01T00:00:00.000Z",
-        payload: { tool_name: "shell-exec", mode: "real" },
+        payload: { tool_name: "shell-exec", mode: "live" },
       };
       const result = formatEvent(sid, event);
       expect(result).toContain("shell-exec");
-      expect(result).toContain("real");
+      expect(result).toContain("live");
     });
 
     it("formats tool.succeeded with name and duration", () => {

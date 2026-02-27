@@ -42,7 +42,7 @@ describe("writeFileHandler — symlink TOCTOU protection", () => {
 
     try {
       await expect(
-        writeFileHandler({ path: link, content: "malicious" }, "real", policy)
+        writeFileHandler({ path: link, content: "malicious" }, "live", policy)
       ).rejects.toThrow(PolicyViolationError);
 
       // Verify original content was NOT overwritten
@@ -60,7 +60,7 @@ describe("writeFileHandler — symlink TOCTOU protection", () => {
     await symlink(target, link);
 
     const result = (await writeFileHandler(
-      { path: link, content: "new content" }, "real", policy
+      { path: link, content: "new content" }, "live", policy
     )) as any;
 
     expect(result.written).toBe(true);
@@ -78,7 +78,7 @@ describe("writeFileHandler — symlink TOCTOU protection", () => {
 
     try {
       await expect(
-        writeFileHandler({ path: targetPath, content: "malicious" }, "real", policy)
+        writeFileHandler({ path: targetPath, content: "malicious" }, "live", policy)
       ).rejects.toThrow(PolicyViolationError);
 
       const content = await readFile(join(outside, "existing.txt"), "utf-8");
@@ -95,7 +95,7 @@ describe("writeFileHandler — symlink TOCTOU protection", () => {
     // If the link name IS sensitive (e.g., .env), it's caught directly.
     const envPath = join(tmpDir, ".env");
     await expect(
-      writeFileHandler({ path: envPath, content: "SECRET=value" }, "real", policy)
+      writeFileHandler({ path: envPath, content: "SECRET=value" }, "live", policy)
     ).rejects.toThrow(PolicyViolationError);
     expect(existsSync(envPath)).toBe(false);
   });

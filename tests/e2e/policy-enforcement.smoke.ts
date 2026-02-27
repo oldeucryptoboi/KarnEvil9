@@ -74,7 +74,7 @@ describe("Policy Enforcement Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: makeSingleStepPlanner("read-file", { path: "/etc/hostname" }),
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 5, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000 },
       policy,
     });
@@ -101,7 +101,7 @@ describe("Policy Enforcement Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: makeSingleStepPlanner("shell-exec", { command: "rm /tmp/something" }),
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 5, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000 },
       policy,
     });
@@ -130,7 +130,7 @@ describe("Policy Enforcement Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: makeSingleStepPlanner("read-file", { path: envPath }),
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 5, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000 },
       policy,
     });
@@ -157,7 +157,7 @@ describe("Policy Enforcement Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: makeSingleStepPlanner("shell-exec", { command: "find /tmp -name '*.log' -delete" }),
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 5, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000 },
       policy,
     });
@@ -184,7 +184,7 @@ describe("Policy Enforcement Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: makeSingleStepPlanner("shell-exec", { command: "echo policy-ok" }),
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 5, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000 },
       policy,
     });

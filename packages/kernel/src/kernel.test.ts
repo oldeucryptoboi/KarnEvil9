@@ -29,7 +29,7 @@ function makeKernelConfig(overrides: Record<string, unknown> = {}) {
   const config: Record<string, unknown> = {
     journal: overrides.journal as Journal,
     toolRegistry: overrides.registry as ToolRegistry,
-    mode: (overrides.mode ?? "mock") as "mock" | "real" | "dry_run",
+    mode: (overrides.mode ?? "mock") as "mock" | "live" | "dry_run",
     limits: (overrides.limits ?? { max_steps: 10, max_duration_ms: 60000, max_cost_usd: 1, max_tokens: 10000 }) as any,
     policy: (overrides.policy ?? { allowed_paths: ["/tmp"], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: false }) as any,
   };
@@ -659,7 +659,7 @@ describe("Kernel E2E", () => {
     const task: Task = { task_id: uuid(), text: "Duration limit test", created_at: new Date().toISOString() };
     const kernel = new Kernel(makeKernelConfig({
       journal, runtime, registry, permissions, planner,
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 20, max_duration_ms: 500, max_cost_usd: 1, max_tokens: 10000 },
     }));
     await kernel.createSession(task);
@@ -788,7 +788,7 @@ describe("Kernel E2E", () => {
     };
 
     const task: Task = { task_id: uuid(), text: "Reentrant test", created_at: new Date().toISOString() };
-    const kernel = new Kernel(makeKernelConfig({ journal, runtime, registry, permissions, planner, mode: "real" }));
+    const kernel = new Kernel(makeKernelConfig({ journal, runtime, registry, permissions, planner, mode: "live" }));
     await kernel.createSession(task);
 
     const firstRun = kernel.run();
@@ -1226,7 +1226,7 @@ export async function register(api) {
     const task: Task = { task_id: uuid(), text: "Duration limit agentic", created_at: new Date().toISOString() };
     const kernel = new Kernel(makeKernelConfig({
       journal, runtime, registry, permissions, planner: neverDonePlanner,
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 50, max_duration_ms: 500, max_cost_usd: 1, max_tokens: 10000, max_iterations: 20 },
     }));
     (kernel as any).config.agentic = true;

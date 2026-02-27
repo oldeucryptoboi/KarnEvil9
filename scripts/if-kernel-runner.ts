@@ -503,7 +503,7 @@ Room: Unknown | Exits: unknown | Items: unknown | Desc: Intermediate game respon
     planner,
     permissions: permEngine,
     pluginRegistry,
-    mode: "real",
+    mode: "live",
     agentic: true,
     limits: {
       max_iterations: MAX_TURNS,

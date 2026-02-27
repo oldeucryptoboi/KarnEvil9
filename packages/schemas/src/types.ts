@@ -17,7 +17,7 @@ export type SessionStatus =
   | "failed"
   | "aborted";
 
-export type ExecutionMode = "real" | "dry_run" | "mock";
+export type ExecutionMode = "live" | "dry_run" | "mock";
 
 export interface SessionLimits {
   max_steps: number;

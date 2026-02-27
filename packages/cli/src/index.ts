@@ -168,7 +168,7 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
       journal, toolRuntime: runtime, toolRegistry: registry, permissions,
       pluginRegistry,
       planner,
-      mode: opts.mode as "real" | "dry_run" | "mock",
+      mode: opts.mode as "live" | "dry_run" | "mock",
       limits: { max_steps: parsePositiveInt(opts.maxSteps, "max-steps", 20), max_duration_ms: 300000, max_cost_usd: 10, max_tokens: 100000, max_iterations: 10 },
       plannerTimeoutMs: 90000,
       policy,
@@ -408,7 +408,7 @@ program.command("server").description("Start the API server")
         journal, toolRuntime: runtime, toolRegistry: registry, permissions,
         pluginRegistry,
         planner: sessionPlanner,
-        mode: (sessionOpts?.mode ?? (opts.agentic ? "real" : "mock")) as "real" | "dry_run" | "mock",
+        mode: (sessionOpts?.mode ?? (opts.agentic ? "live" : "mock")) as "live" | "dry_run" | "mock",
         limits: {
           max_steps: Math.min(sessionOpts?.limits?.max_steps ?? 20, 30),
           max_duration_ms: Math.min(sessionOpts?.limits?.max_duration_ms ?? 300000, 600000),
@@ -608,7 +608,7 @@ program.command("server").description("Start the API server")
 program.command("chat").description("Interactive chat session via WebSocket")
   .option("--url <url>", "WebSocket URL", "ws://localhost:3100/api/ws")
   .option("--token <token>", "API token (defaults to KARNEVIL9_API_TOKEN)")
-  .option("--mode <mode>", "Execution mode: real, dry_run, mock", "real")
+  .option("--mode <mode>", "Execution mode: real, dry_run, mock", "live")
   .action(async (opts: { url: string; token?: string; mode: string }) => {
     const { WebSocket: WS } = await import("ws");
     const { ChatClient, RealTerminalIO } = await import("./chat-client.js");

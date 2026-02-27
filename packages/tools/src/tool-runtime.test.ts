@@ -47,7 +47,7 @@ const noPermTool: ToolManifest = {
   mock_responses: [{}],
 };
 
-function makeRequest(toolName: string, input: Record<string, unknown> = {}, mode: "mock" | "real" | "dry_run" = "mock"): ToolExecutionRequest {
+function makeRequest(toolName: string, input: Record<string, unknown> = {}, mode: "mock" | "live" | "dry_run" = "mock"): ToolExecutionRequest {
   return {
     request_id: uuid(),
     tool_name: toolName,
@@ -122,14 +122,14 @@ describe("ToolRuntime", () => {
     runtime.registerHandler("echo-tool", async (input, _mode, _policy) => {
       return { echo: (input as any).message };
     });
-    const req = makeRequest("echo-tool", { message: "real hello" }, "real");
+    const req = makeRequest("echo-tool", { message: "real hello" }, "live");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(true);
     expect(result.result).toEqual({ echo: "real hello" });
   });
 
   it("fails real mode without handler", async () => {
-    const req = makeRequest("echo-tool", { message: "test" }, "real");
+    const req = makeRequest("echo-tool", { message: "test" }, "live");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("EXECUTION_ERROR");
@@ -159,7 +159,7 @@ describe("ToolRuntime", () => {
     runtime.registerHandler("echo-tool", async (_input, _mode, _policy) => {
       throw new Error("Handler crashed");
     });
-    const req = makeRequest("echo-tool", { message: "test" }, "real");
+    const req = makeRequest("echo-tool", { message: "test" }, "live");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("EXECUTION_ERROR");
@@ -170,7 +170,7 @@ describe("ToolRuntime", () => {
     runtime.registerHandler("echo-tool", async (_input, _mode, _policy) => {
       return { wrong_field: 123 }; // doesn't match output_schema
     });
-    const req = makeRequest("echo-tool", { message: "test" }, "real");
+    const req = makeRequest("echo-tool", { message: "test" }, "live");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("INVALID_OUTPUT");
@@ -194,7 +194,7 @@ describe("ToolRuntime", () => {
       receivedPolicy = policy;
       return { echo: "test" };
     });
-    const req = makeRequest("echo-tool", { message: "test" }, "real");
+    const req = makeRequest("echo-tool", { message: "test" }, "live");
     await policyRuntime.execute(req);
     expect(receivedPolicy).toEqual({
       allowed_paths: ["/safe"],
@@ -216,7 +216,7 @@ describe("ToolRuntime", () => {
       assertPathAllowed("/etc/passwd", policy.allowed_paths);
       return { echo: "should not reach" };
     });
-    const req = makeRequest("echo-tool", { message: "test" }, "real");
+    const req = makeRequest("echo-tool", { message: "test" }, "live");
     const result = await policyRuntime.execute(req);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("POLICY_VIOLATION");
@@ -243,7 +243,7 @@ describe("ToolRuntime", () => {
     runtime.registerHandler("echo-tool", async () => {
       throw new PolicyViolationError("Custom policy violation");
     });
-    const req = makeRequest("echo-tool", { message: "test" }, "real");
+    const req = makeRequest("echo-tool", { message: "test" }, "live");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("POLICY_VIOLATION");
@@ -293,7 +293,7 @@ describe("ToolRuntime graduated permissions", () => {
       return { echo: String((input as any).message) };
     });
 
-    const req = makeRequest("echo-tool", { message: "original" }, "real");
+    const req = makeRequest("echo-tool", { message: "original" }, "live");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(true);
     // The input should have been overridden by constraints
@@ -353,7 +353,7 @@ describe("ToolRuntime graduated permissions", () => {
       return { echo: "too slow" };
     });
 
-    const req = makeRequest("echo-tool", { message: "timeout test" }, "real");
+    const req = makeRequest("echo-tool", { message: "timeout test" }, "live");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("EXECUTION_ERROR");
@@ -447,14 +447,14 @@ describe("ToolRuntime circuit breaker integration", () => {
 
     // Cause 5 failures (default threshold)
     for (let i = 0; i < 5; i++) {
-      const req = makeRequest("fail-tool", {}, "real");
+      const req = makeRequest("fail-tool", {}, "live");
       const result = await runtime.execute(req);
       expect(result.ok).toBe(false);
       expect(result.error?.code).toBe("EXECUTION_ERROR");
     }
 
     // 6th attempt should be blocked by circuit breaker
-    const req = makeRequest("fail-tool", {}, "real");
+    const req = makeRequest("fail-tool", {}, "live");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("CIRCUIT_BREAKER_OPEN");
@@ -466,7 +466,7 @@ describe("ToolRuntime circuit breaker integration", () => {
 
     // Trip circuit breaker for fail-tool
     for (let i = 0; i < 5; i++) {
-      await runtime.execute(makeRequest("fail-tool", {}, "real"));
+      await runtime.execute(makeRequest("fail-tool", {}, "live"));
     }
 
     // free-tool should still work
@@ -601,7 +601,7 @@ describe("ToolRuntime handler registration", () => {
       secret: "hunter2",
     }));
 
-    const req = makeRequest("secret-tool", {}, "real");
+    const req = makeRequest("secret-tool", {}, "live");
     const result = await redactRuntime.execute(req);
     expect(result.ok).toBe(true);
     expect((result.result as any).data).toBe("visible");
@@ -630,7 +630,7 @@ describe("ToolRuntime handler registration", () => {
       return { echo: "test" };
     });
 
-    const req = makeRequest("echo-tool", { message: "test" }, "real");
+    const req = makeRequest("echo-tool", { message: "test" }, "live");
     await pathRuntime.execute(req);
     expect(receivedPolicy.readonly_paths).toEqual(["/safe/readonly"]);
     expect(receivedPolicy.writable_paths).toEqual(["/safe/writable"]);
@@ -650,7 +650,7 @@ describe("ToolRuntime handler registration", () => {
     const badRuntime = new ToolRuntime(registry, badPermissions, journal);
     badRuntime.registerHandler("echo-tool", async (input) => ({ echo: String((input as any).message) }));
 
-    const req = makeRequest("echo-tool", { message: "test" }, "real");
+    const req = makeRequest("echo-tool", { message: "test" }, "live");
     const result = await badRuntime.execute(req);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("INVALID_INPUT");
@@ -675,7 +675,7 @@ describe("ToolRuntime handler registration", () => {
       return { done: true };
     });
 
-    const req = makeRequest("timed-tool", {}, "real");
+    const req = makeRequest("timed-tool", {}, "live");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("EXECUTION_ERROR");
@@ -782,12 +782,12 @@ describe("ToolRuntime non-retriable errors do not trip breaker", () => {
 
     // 10 policy violations should not trip the breaker
     for (let i = 0; i < 10; i++) {
-      const result = await runtime.execute(makeRequest("policy-tool", {}, "real"));
+      const result = await runtime.execute(makeRequest("policy-tool", {}, "live"));
       expect(result.error?.code).toBe("POLICY_VIOLATION");
     }
 
     // Next request should NOT be blocked
-    const result = await runtime.execute(makeRequest("policy-tool", {}, "real"));
+    const result = await runtime.execute(makeRequest("policy-tool", {}, "live"));
     expect(result.error?.code).toBe("POLICY_VIOLATION");
   });
 });
@@ -863,9 +863,9 @@ describe("CircuitBreaker per-category config", () => {
 
     // shell category: threshold=3, cooldown=15s
     for (let i = 0; i < 3; i++) {
-      await rt.execute(makeRequest("shell-cmd", {}, "real"));
+      await rt.execute(makeRequest("shell-cmd", {}, "live"));
     }
-    const result = await rt.execute(makeRequest("shell-cmd", {}, "real"));
+    const result = await rt.execute(makeRequest("shell-cmd", {}, "live"));
     expect(result.error?.code).toBe("CIRCUIT_BREAKER_OPEN");
     await rm(TEST_DIR, { recursive: true }).catch(() => {});
   });
@@ -970,7 +970,7 @@ describe("B3: Timer leak fix in executeWithTimeout", () => {
       return { done: true };
     });
 
-    const req = makeRequest("async-tool", {}, "real");
+    const req = makeRequest("async-tool", {}, "live");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(true);
     // If timers leaked, the process would hang or the test would fail with
@@ -992,7 +992,7 @@ describe("B3: Timer leak fix in executeWithTimeout", () => {
       throw new Error("handler error");
     });
 
-    const req = makeRequest("throw-tool", {}, "real");
+    const req = makeRequest("throw-tool", {}, "live");
     const result = await runtime.execute(req);
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("EXECUTION_ERROR");
@@ -1048,7 +1048,7 @@ describe("ToolRuntime output_allow_fields", () => {
     const runtime = new ToolRuntime(registry, permissions, journal);
     runtime.registerHandler("flex-tool", async () => ({ name: "Alice", secret: "hunter2", balance: 100 }));
 
-    const result = await runtime.execute(makeRequest("flex-tool", {}, "real"));
+    const result = await runtime.execute(makeRequest("flex-tool", {}, "live"));
     expect(result.ok).toBe(true);
     expect(result.result).toEqual({ name: "Alice" });
   });
@@ -1063,7 +1063,7 @@ describe("ToolRuntime output_allow_fields", () => {
     const runtime = new ToolRuntime(registry, permissions, journal);
     runtime.registerHandler("flex-tool", async () => ({ name: "Alice", secret: "x", balance: 1 }));
 
-    const result = await runtime.execute(makeRequest("flex-tool", {}, "real"));
+    const result = await runtime.execute(makeRequest("flex-tool", {}, "live"));
     expect(result.ok).toBe(true);
     expect(result.result).toEqual({});
   });
@@ -1081,7 +1081,7 @@ describe("ToolRuntime output_allow_fields", () => {
     const runtime = new ToolRuntime(registry, permissions, journal);
     runtime.registerHandler("flex-tool", async () => ({ name: "Alice", secret: "hunter2", balance: 100 }));
 
-    const result = await runtime.execute(makeRequest("flex-tool", {}, "real"));
+    const result = await runtime.execute(makeRequest("flex-tool", {}, "live"));
     expect(result.ok).toBe(true);
     expect(result.result).toEqual({ name: "Alice", secret: "[REDACTED]" });
   });
@@ -1109,7 +1109,7 @@ describe("ToolRuntime output_allow_fields", () => {
     const runtime = new ToolRuntime(registry, permissions, journal);
     runtime.registerHandler("string-tool", async () => "just a string");
 
-    const result = await runtime.execute(makeRequest("string-tool", {}, "real"));
+    const result = await runtime.execute(makeRequest("string-tool", {}, "live"));
     expect(result.ok).toBe(true);
     expect(result.result).toBe("just a string");
   });
@@ -1124,7 +1124,7 @@ describe("ToolRuntime output_allow_fields", () => {
     const runtime = new ToolRuntime(registry, permissions, journal);
     runtime.registerHandler("flex-tool", async () => ({ name: "Alice", secret: "x", balance: 1 }));
 
-    const result = await runtime.execute(makeRequest("flex-tool", {}, "real"));
+    const result = await runtime.execute(makeRequest("flex-tool", {}, "live"));
     expect(result.ok).toBe(true);
     expect(result.result).toEqual({ name: "Alice" });
   });

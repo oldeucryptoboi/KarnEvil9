@@ -106,7 +106,7 @@ describe("browserHandler — real mode (fetch to relay)", () => {
   it("calls fetch with correct URL and body for navigate", async () => {
     mockFetch({ success: true, url: "https://example.com", title: "Example" });
     const result = (await browserHandler(
-      { action: "navigate", url: "https://example.com" }, "real", openPolicy
+      { action: "navigate", url: "https://example.com" }, "live", openPolicy
     )) as any;
     expect(result.success).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -122,7 +122,7 @@ describe("browserHandler — real mode (fetch to relay)", () => {
   it("calls fetch with correct body for click", async () => {
     mockFetch({ success: true, element_found: true });
     const input = { action: "click", target: { role: "button", name: "Submit" } };
-    const result = (await browserHandler(input, "real", openPolicy)) as any;
+    const result = (await browserHandler(input, "live", openPolicy)) as any;
     expect(result.success).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "http://localhost:9222/actions",
@@ -135,7 +135,7 @@ describe("browserHandler — real mode (fetch to relay)", () => {
   it("returns relay error response for 4xx", async () => {
     mockFetch({ success: false, error: "Element not found" }, 422);
     const result = (await browserHandler(
-      { action: "click", target: { selector: "#missing" } }, "real", openPolicy
+      { action: "click", target: { selector: "#missing" } }, "live", openPolicy
     )) as any;
     expect(result.success).toBe(false);
     expect(result.error).toBe("Element not found");
@@ -144,7 +144,7 @@ describe("browserHandler — real mode (fetch to relay)", () => {
   it("throws on 5xx relay server error", async () => {
     mockFetch("Internal Server Error", 500);
     await expect(
-      browserHandler({ action: "snapshot" }, "real", openPolicy)
+      browserHandler({ action: "snapshot" }, "live", openPolicy)
     ).rejects.toThrow(/Browser relay server error: 500/);
   });
 });
@@ -159,7 +159,7 @@ describe("browserHandler — policy enforcement", () => {
     };
     await expect(
       browserHandler(
-        { action: "navigate", url: "https://evil.com" }, "real", restrictedPolicy
+        { action: "navigate", url: "https://evil.com" }, "live", restrictedPolicy
       ),
     ).rejects.toThrow();
   });
@@ -184,7 +184,7 @@ describe("browserHandler — policy enforcement", () => {
     };
     try {
       await browserHandler(
-        { action: "navigate", url: "https://evil.com" }, "real", restrictedPolicy
+        { action: "navigate", url: "https://evil.com" }, "live", restrictedPolicy
       );
     } catch { /* expected */ }
     expect(spy).not.toHaveBeenCalled();
@@ -206,7 +206,7 @@ describe("createBrowserHandler — with driver", () => {
 
   it("calls driver.execute() directly for navigate", async () => {
     const result = (await handler(
-      { action: "navigate", url: "https://example.com" }, "real", openPolicy
+      { action: "navigate", url: "https://example.com" }, "live", openPolicy
     )) as any;
     expect(result.success).toBe(true);
     expect(mockDriver.execute).toHaveBeenCalledWith({ action: "navigate", url: "https://example.com" });
@@ -215,7 +215,7 @@ describe("createBrowserHandler — with driver", () => {
   it("calls driver.execute() for snapshot", async () => {
     (mockDriver.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, snapshot: "<tree>" });
     const result = (await handler(
-      { action: "snapshot" }, "real", openPolicy
+      { action: "snapshot" }, "live", openPolicy
     )) as any;
     expect(result.success).toBe(true);
     expect(result.snapshot).toBe("<tree>");
@@ -225,7 +225,7 @@ describe("createBrowserHandler — with driver", () => {
   it("does NOT call fetch when driver is provided", async () => {
     const fetchSpy = vi.fn();
     globalThis.fetch = fetchSpy;
-    await handler({ action: "click", target: { role: "button", name: "Go" } }, "real", openPolicy);
+    await handler({ action: "click", target: { role: "button", name: "Go" } }, "live", openPolicy);
     expect(fetchSpy).not.toHaveBeenCalled();
     globalThis.fetch = originalFetch;
   });
@@ -254,14 +254,14 @@ describe("createBrowserHandler — with driver", () => {
       allowed_endpoints: ["https://api.allowed.com"],
     };
     await expect(
-      handler({ action: "navigate", url: "https://evil.com" }, "real", restrictedPolicy),
+      handler({ action: "navigate", url: "https://evil.com" }, "live", restrictedPolicy),
     ).rejects.toThrow();
     expect(mockDriver.execute).not.toHaveBeenCalled();
   });
 
   it("rejects unknown actions even with driver", async () => {
     const result = (await handler(
-      { action: "destroy" }, "real", openPolicy
+      { action: "destroy" }, "live", openPolicy
     )) as any;
     expect(result.success).toBe(false);
     expect(result.error).toContain("Unknown action");
@@ -274,7 +274,7 @@ describe("createBrowserHandler — without driver (relay fallback)", () => {
     const handler = createBrowserHandler();
     mockFetch({ success: true, url: "https://example.com", title: "Example" });
     const result = (await handler(
-      { action: "navigate", url: "https://example.com" }, "real", openPolicy
+      { action: "navigate", url: "https://example.com" }, "live", openPolicy
     )) as any;
     expect(result.success).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -291,7 +291,7 @@ describe("browserHandler — evaluate action gate", () => {
   it("blocks evaluate without browser_evaluate in allowed_commands", async () => {
     mockFetch({ success: true });
     const result = (await browserHandler(
-      { action: "evaluate", expression: "document.title" }, "real", openPolicy
+      { action: "evaluate", expression: "document.title" }, "live", openPolicy
     )) as any;
     expect(result.success).toBe(false);
     expect(result.error).toContain("browser_evaluate");
@@ -306,7 +306,7 @@ describe("browserHandler — evaluate action gate", () => {
       allowed_commands: ["browser_evaluate"],
     };
     const result = (await browserHandler(
-      { action: "evaluate", expression: "document.title" }, "real", evalPolicy
+      { action: "evaluate", expression: "document.title" }, "live", evalPolicy
     )) as any;
     expect(result.success).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalled();
@@ -335,7 +335,7 @@ describe("backward-compatible browserHandler export", () => {
   it("uses relay fallback (no driver)", async () => {
     mockFetch({ success: true, snapshot: "<tree>" });
     const result = (await browserHandler(
-      { action: "snapshot" }, "real", openPolicy
+      { action: "snapshot" }, "live", openPolicy
     )) as any;
     expect(result.success).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalledWith(

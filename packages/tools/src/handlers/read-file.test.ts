@@ -41,7 +41,7 @@ describe("readFileHandler — symlink TOCTOU protection", () => {
     await symlink(envFile, link);
 
     await expect(
-      readFileHandler({ path: link }, "real", policy)
+      readFileHandler({ path: link }, "live", policy)
     ).rejects.toThrow(PolicyViolationError);
   });
 
@@ -55,7 +55,7 @@ describe("readFileHandler — symlink TOCTOU protection", () => {
 
     try {
       await expect(
-        readFileHandler({ path: link }, "real", policy)
+        readFileHandler({ path: link }, "live", policy)
       ).rejects.toThrow(PolicyViolationError);
     } finally {
       await rm(outside, { recursive: true, force: true });
@@ -68,7 +68,7 @@ describe("readFileHandler — symlink TOCTOU protection", () => {
     const link = join(tmpDir, "link.txt");
     await symlink(real, link);
 
-    const result = (await readFileHandler({ path: link }, "real", policy)) as any;
+    const result = (await readFileHandler({ path: link }, "live", policy)) as any;
     expect(result.exists).toBe(true);
     expect(result.content).toBe("safe content");
   });
@@ -82,7 +82,7 @@ describe("readFileHandler — symlink TOCTOU protection", () => {
     await symlink(keyFile, link);
 
     await expect(
-      readFileHandler({ path: link }, "real", policy)
+      readFileHandler({ path: link }, "live", policy)
     ).rejects.toThrow(PolicyViolationError);
   });
 });

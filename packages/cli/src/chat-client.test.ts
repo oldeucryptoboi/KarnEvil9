@@ -112,7 +112,7 @@ function createClient(overrides?: {
 
   const client = new ChatClient({
     wsUrl: "ws://test:3100/api/ws",
-    mode: "real",
+    mode: "live",
     wsFactory: factory,
     terminal,
     process: proc,
@@ -301,7 +301,7 @@ describe("ChatClient", () => {
       expect(submitMsg).toBeDefined();
       const parsed = JSON.parse(submitMsg!);
       expect(parsed.text).toBe("hello world");
-      expect(parsed.mode).toBe("real");
+      expect(parsed.mode).toBe("live");
     });
 
     it("empty input is ignored", () => {

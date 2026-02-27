@@ -54,7 +54,7 @@ describe("schedule tool", () => {
         trigger: { type: "every", interval: "10m" },
         action: { type: "createSession", task_text: "do stuff" },
       },
-      "real",
+      "live",
       mockPolicy,
     ) as { schedule: { schedule_id: string; name: string; status: string } };
     expect(result.schedule.schedule_id).toBeTruthy();
@@ -70,10 +70,10 @@ describe("schedule tool", () => {
         trigger: { type: "every", interval: "5m" },
         action: { type: "createSession", task_text: "a" },
       },
-      "real",
+      "live",
       mockPolicy,
     );
-    const result = await handler({ operation: "list" }, "real", mockPolicy) as { schedules: unknown[] };
+    const result = await handler({ operation: "list" }, "live", mockPolicy) as { schedules: unknown[] };
     expect(result.schedules.length).toBe(1);
   });
 
@@ -103,7 +103,7 @@ describe("schedule tool", () => {
         trigger: { type: "every", interval: "5m" },
         action: { type: "createSession", task_text: "original" },
       },
-      "real",
+      "live",
       mockPolicy,
     ) as { schedule: { schedule_id: string; name: string } };
 
@@ -113,7 +113,7 @@ describe("schedule tool", () => {
         schedule_id: created.schedule.schedule_id,
         name: "updated-name",
       },
-      "real",
+      "live",
       mockPolicy,
     ) as { schedule: { schedule_id: string; name: string } };
     expect(result.schedule.name).toBe("updated-name");
@@ -121,7 +121,7 @@ describe("schedule tool", () => {
   });
 
   it("update throws without schedule_id", async () => {
-    await expect(handler({ operation: "update", name: "x" }, "real", mockPolicy)).rejects.toThrow("schedule_id is required");
+    await expect(handler({ operation: "update", name: "x" }, "live", mockPolicy)).rejects.toThrow("schedule_id is required");
   });
 
   it("returns mock response for update in mock mode", async () => {
@@ -134,6 +134,6 @@ describe("schedule tool", () => {
   });
 
   it("throws on unknown operation", async () => {
-    await expect(handler({ operation: "explode" }, "real", mockPolicy)).rejects.toThrow("Unknown operation");
+    await expect(handler({ operation: "explode" }, "live", mockPolicy)).rejects.toThrow("Unknown operation");
   });
 });

@@ -122,7 +122,7 @@ describe("Context Budget Enforcement Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner,
-      mode: "real",
+      mode: "live",
       // Very short duration limit — likely exceeded before step completes
       limits: { max_steps: 10, max_duration_ms: 50, max_cost_usd: 10, max_tokens: 100000 },
       policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: false },

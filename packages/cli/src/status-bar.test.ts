@@ -185,19 +185,19 @@ describe("StatusBar", () => {
         connection: "connected",
         sessionState: "idle",
         wsUrl: "ws://localhost:3100/api/ws",
-        mode: "real",
+        mode: "live",
       });
       bar.setup();
       const out = writer.output();
       expect(out).toContain("ws://localhost:3100/api/ws");
-      expect(out).toContain("real");
+      expect(out).toContain("live");
     });
 
     it("strips token from wsUrl in display", () => {
       const bar = new StatusBar(writer, {
         sessionState: "idle",
         wsUrl: "ws://localhost:3100/api/ws?token=secret123",
-        mode: "real",
+        mode: "live",
       });
       bar.setup();
       const out = writer.output();
@@ -211,7 +211,7 @@ describe("StatusBar", () => {
         sessionState: "running",
         sessionId: "abcdef123456789",
         model: "claude-sonnet-4-5-20250929",
-        mode: "real",
+        mode: "live",
         totalTokens: 15432,
         costUsd: 0.03,
       });

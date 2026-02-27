@@ -33,7 +33,7 @@ describe("readFileHandler", () => {
   it("reads an existing file", async () => {
     const filePath = join(tmpDir, "test.txt");
     await writeFile(filePath, "hello world", "utf-8");
-    const result = (await readFileHandler({ path: filePath }, "real", policy)) as any;
+    const result = (await readFileHandler({ path: filePath }, "live", policy)) as any;
     expect(result.exists).toBe(true);
     expect(result.content).toBe("hello world");
     expect(result.size_bytes).toBeGreaterThan(0);
@@ -41,7 +41,7 @@ describe("readFileHandler", () => {
 
   it("returns exists=false for missing file", async () => {
     const filePath = join(tmpDir, "missing.txt");
-    const result = (await readFileHandler({ path: filePath }, "real", policy)) as any;
+    const result = (await readFileHandler({ path: filePath }, "live", policy)) as any;
     expect(result.exists).toBe(false);
     expect(result.content).toBe("");
   });
@@ -56,7 +56,7 @@ describe("readFileHandler", () => {
   it("rejects paths outside policy", async () => {
     const restrictedPolicy: PolicyProfile = { ...openPolicy, allowed_paths: ["/safe-only"] };
     await expect(
-      readFileHandler({ path: "/etc/passwd" }, "real", restrictedPolicy)
+      readFileHandler({ path: "/etc/passwd" }, "live", restrictedPolicy)
     ).rejects.toThrow(PolicyViolationError);
   });
 });
@@ -77,7 +77,7 @@ describe("writeFileHandler", () => {
   it("writes content to a file", async () => {
     const filePath = join(tmpDir, "output.txt");
     const result = (await writeFileHandler(
-      { path: filePath, content: "written content" }, "real", policy
+      { path: filePath, content: "written content" }, "live", policy
     )) as any;
     expect(result.written).toBe(true);
     expect(result.bytes_written).toBe(Buffer.byteLength("written content", "utf-8"));
@@ -88,7 +88,7 @@ describe("writeFileHandler", () => {
   it("creates nested directories", async () => {
     const filePath = join(tmpDir, "sub", "dir", "file.txt");
     const result = (await writeFileHandler(
-      { path: filePath, content: "nested" }, "real", policy
+      { path: filePath, content: "nested" }, "live", policy
     )) as any;
     expect(result.written).toBe(true);
     expect(existsSync(filePath)).toBe(true);
@@ -107,7 +107,7 @@ describe("writeFileHandler", () => {
   it("rejects paths outside policy", async () => {
     const restrictedPolicy: PolicyProfile = { ...openPolicy, allowed_paths: ["/safe-only"] };
     await expect(
-      writeFileHandler({ path: "/tmp/evil.txt", content: "bad" }, "real", restrictedPolicy)
+      writeFileHandler({ path: "/tmp/evil.txt", content: "bad" }, "live", restrictedPolicy)
     ).rejects.toThrow(PolicyViolationError);
   });
 });
@@ -127,7 +127,7 @@ describe("shellExecHandler", () => {
 
   it("executes a command and returns output", async () => {
     const result = (await shellExecHandler(
-      { command: "echo hello", cwd: tmpDir }, "real", policy
+      { command: "echo hello", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout.trim()).toBe("hello");
     expect(result.exit_code).toBe(0);
@@ -148,14 +148,14 @@ describe("shellExecHandler", () => {
       allowed_commands: ["ls"],
     };
     await expect(
-      shellExecHandler({ command: "rm -rf /" }, "real", restrictedPolicy)
+      shellExecHandler({ command: "rm -rf /" }, "live", restrictedPolicy)
     ).rejects.toThrow(PolicyViolationError);
   });
 
   it("rejects cwd outside policy paths", async () => {
     const restrictedPolicy: PolicyProfile = { ...openPolicy, allowed_paths: ["/safe-only"] };
     await expect(
-      shellExecHandler({ command: "echo hi", cwd: "/tmp" }, "real", restrictedPolicy)
+      shellExecHandler({ command: "echo hi", cwd: "/tmp" }, "live", restrictedPolicy)
     ).rejects.toThrow(PolicyViolationError);
   });
 
@@ -166,14 +166,14 @@ describe("shellExecHandler", () => {
       allowed_commands: ["echo"],
     };
     const result = (await shellExecHandler(
-      { command: "echo allowed", cwd: tmpDir }, "real", restrictedPolicy
+      { command: "echo allowed", cwd: tmpDir }, "live", restrictedPolicy
     )) as any;
     expect(result.stdout.trim()).toBe("allowed");
   });
 
   it("handles command failure", async () => {
     const result = (await shellExecHandler(
-      { command: "false", cwd: tmpDir }, "real", policy
+      { command: "false", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.exit_code).not.toBe(0);
   });
@@ -197,7 +197,7 @@ describe("shellExecHandler environment sanitization", () => {
     process.env.AWS_SECRET_ACCESS_KEY = "test-secret-key-123";
     try {
       const result = (await shellExecHandler(
-        { command: "env", cwd: tmpDir }, "real", policy
+        { command: "env", cwd: tmpDir }, "live", policy
       )) as any;
       expect(result.stdout).not.toContain("AWS_SECRET_ACCESS_KEY");
     } finally {
@@ -211,7 +211,7 @@ describe("shellExecHandler environment sanitization", () => {
     process.env.GITHUB_TOKEN = "ghp_test123";
     try {
       const result = (await shellExecHandler(
-        { command: "env", cwd: tmpDir }, "real", policy
+        { command: "env", cwd: tmpDir }, "live", policy
       )) as any;
       expect(result.stdout).not.toContain("GITHUB_TOKEN");
     } finally {
@@ -222,7 +222,7 @@ describe("shellExecHandler environment sanitization", () => {
 
   it("preserves PATH in environment", async () => {
     const result = (await shellExecHandler(
-      { command: "env", cwd: tmpDir }, "real", policy
+      { command: "env", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout).toContain("PATH=");
   });
@@ -248,7 +248,7 @@ describe("readFileHandler — file size cap", () => {
     const tenMBPlus = Buffer.alloc(10 * 1024 * 1024 + 1, "a");
     await writeFile(filePath, tenMBPlus);
     await expect(
-      readFileHandler({ path: filePath }, "real", policy)
+      readFileHandler({ path: filePath }, "live", policy)
     ).rejects.toThrow(/exceeding the .* byte limit/);
   });
 
@@ -256,7 +256,7 @@ describe("readFileHandler — file size cap", () => {
     const filePath = join(tmpDir, "exact.txt");
     const exactTenMB = Buffer.alloc(10 * 1024 * 1024, "b");
     await writeFile(filePath, exactTenMB);
-    const result = (await readFileHandler({ path: filePath }, "real", policy)) as any;
+    const result = (await readFileHandler({ path: filePath }, "live", policy)) as any;
     expect(result.exists).toBe(true);
     expect(result.size_bytes).toBe(10 * 1024 * 1024);
   });
@@ -277,7 +277,7 @@ describe("shellExecHandler — timeout configuration", () => {
 
   it("accepts custom timeout_ms", async () => {
     const result = (await shellExecHandler(
-      { command: "echo timeout_test", cwd: tmpDir, timeout_ms: 5000 }, "real", policy
+      { command: "echo timeout_test", cwd: tmpDir, timeout_ms: 5000 }, "live", policy
     )) as any;
     expect(result.stdout.trim()).toBe("timeout_test");
     expect(result.exit_code).toBe(0);
@@ -286,21 +286,21 @@ describe("shellExecHandler — timeout configuration", () => {
   it("clamps timeout_ms to maximum of 300000ms", async () => {
     // Should not throw — the timeout is clamped, not rejected
     const result = (await shellExecHandler(
-      { command: "echo hi", cwd: tmpDir, timeout_ms: 999999 }, "real", policy
+      { command: "echo hi", cwd: tmpDir, timeout_ms: 999999 }, "live", policy
     )) as any;
     expect(result.exit_code).toBe(0);
   });
 
   it("clamps timeout_ms to minimum of 1000ms", async () => {
     const result = (await shellExecHandler(
-      { command: "echo hi", cwd: tmpDir, timeout_ms: 100 }, "real", policy
+      { command: "echo hi", cwd: tmpDir, timeout_ms: 100 }, "live", policy
     )) as any;
     expect(result.exit_code).toBe(0);
   });
 
   it("uses default timeout when timeout_ms not provided", async () => {
     const result = (await shellExecHandler(
-      { command: "echo default", cwd: tmpDir }, "real", policy
+      { command: "echo default", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.exit_code).toBe(0);
   });
@@ -324,7 +324,7 @@ describe("shellExecHandler — KARNEVIL9_ env prefix filtering", () => {
     process.env.KARNEVIL9_API_TOKEN = "secret-token-123";
     try {
       const result = (await shellExecHandler(
-        { command: "env", cwd: tmpDir }, "real", policy
+        { command: "env", cwd: tmpDir }, "live", policy
       )) as any;
       expect(result.stdout).not.toContain("KARNEVIL9_API_TOKEN");
     } finally {
@@ -338,7 +338,7 @@ describe("shellExecHandler — KARNEVIL9_ env prefix filtering", () => {
     process.env.DATABASE_URL = "postgres://user:pass@host/db";
     try {
       const result = (await shellExecHandler(
-        { command: "env", cwd: tmpDir }, "real", policy
+        { command: "env", cwd: tmpDir }, "live", policy
       )) as any;
       expect(result.stdout).not.toContain("DATABASE_URL");
     } finally {
@@ -352,7 +352,7 @@ describe("shellExecHandler — KARNEVIL9_ env prefix filtering", () => {
     process.env.MY_APP_SECRET = "supersecret";
     try {
       const result = (await shellExecHandler(
-        { command: "env", cwd: tmpDir }, "real", policy
+        { command: "env", cwd: tmpDir }, "live", policy
       )) as any;
       expect(result.stdout).not.toContain("MY_APP_SECRET");
     } finally {
@@ -378,7 +378,7 @@ describe("httpRequestHandler", () => {
     };
     await expect(
       httpRequestHandler(
-        { url: "https://evil.com/steal", method: "GET" }, "real", restrictedPolicy
+        { url: "https://evil.com/steal", method: "GET" }, "live", restrictedPolicy
       )
     ).rejects.toThrow(PolicyViolationError);
   });
@@ -423,7 +423,7 @@ describe("httpRequestHandler", () => {
     // We test with a non-routable IP to force a timeout.
     await expect(
       httpRequestHandler(
-        { url: "http://192.0.2.1:80/slow", method: "GET", timeout_ms: 1000 }, "real", openPolicy
+        { url: "http://192.0.2.1:80/slow", method: "GET", timeout_ms: 1000 }, "live", openPolicy
       )
     ).rejects.toThrow(); // Should throw abort or connection error
   }, 10000);
@@ -431,7 +431,7 @@ describe("httpRequestHandler", () => {
   it("rejects private IP addresses via SSRF protection", async () => {
     await expect(
       httpRequestHandler(
-        { url: "http://127.0.0.1/admin", method: "GET" }, "real", openPolicy
+        { url: "http://127.0.0.1/admin", method: "GET" }, "live", openPolicy
       )
     ).rejects.toThrow();
   });
@@ -466,7 +466,7 @@ describe("writeFileHandler — write size cap", () => {
     const filePath = join(tmpDir, "huge.txt");
     const bigContent = "a".repeat(10 * 1024 * 1024 + 1);
     await expect(
-      writeFileHandler({ path: filePath, content: bigContent }, "real", policy)
+      writeFileHandler({ path: filePath, content: bigContent }, "live", policy)
     ).rejects.toThrow(/exceeding the .* byte write limit/);
   });
 
@@ -474,7 +474,7 @@ describe("writeFileHandler — write size cap", () => {
     const filePath = join(tmpDir, "exact.txt");
     const exactContent = "a".repeat(10 * 1024 * 1024);
     const result = (await writeFileHandler(
-      { path: filePath, content: exactContent }, "real", policy
+      { path: filePath, content: exactContent }, "live", policy
     )) as any;
     expect(result.written).toBe(true);
     expect(result.bytes_written).toBe(10 * 1024 * 1024);
@@ -484,7 +484,7 @@ describe("writeFileHandler — write size cap", () => {
     const filePath = join(tmpDir, "should-not-exist.txt");
     const bigContent = "a".repeat(10 * 1024 * 1024 + 100);
     try {
-      await writeFileHandler({ path: filePath, content: bigContent }, "real", policy);
+      await writeFileHandler({ path: filePath, content: bigContent }, "live", policy);
     } catch {
       // Expected to throw
     }
@@ -508,13 +508,13 @@ describe("shellExecHandler — command injection hardening", () => {
 
   it("rejects empty command string", async () => {
     await expect(
-      shellExecHandler({ command: "" }, "real", policy)
+      shellExecHandler({ command: "" }, "live", policy)
     ).rejects.toThrow();
   });
 
   it("rejects non-string command input", async () => {
     await expect(
-      shellExecHandler({ command: 123 }, "real", policy)
+      shellExecHandler({ command: 123 }, "live", policy)
     ).rejects.toThrow("input.command must be a string");
   });
 
@@ -526,22 +526,22 @@ describe("shellExecHandler — command injection hardening", () => {
     };
     // Dangerous binaries rejected
     await expect(
-      shellExecHandler({ command: "rm -rf /", cwd: tmpDir }, "real", restrictedPolicy)
+      shellExecHandler({ command: "rm -rf /", cwd: tmpDir }, "live", restrictedPolicy)
     ).rejects.toThrow(PolicyViolationError);
     await expect(
-      shellExecHandler({ command: "curl http://evil.com", cwd: tmpDir }, "real", restrictedPolicy)
+      shellExecHandler({ command: "curl http://evil.com", cwd: tmpDir }, "live", restrictedPolicy)
     ).rejects.toThrow(PolicyViolationError);
     await expect(
-      shellExecHandler({ command: "wget http://evil.com", cwd: tmpDir }, "real", restrictedPolicy)
+      shellExecHandler({ command: "wget http://evil.com", cwd: tmpDir }, "live", restrictedPolicy)
     ).rejects.toThrow(PolicyViolationError);
     await expect(
-      shellExecHandler({ command: "nc -l 4444", cwd: tmpDir }, "real", restrictedPolicy)
+      shellExecHandler({ command: "nc -l 4444", cwd: tmpDir }, "live", restrictedPolicy)
     ).rejects.toThrow(PolicyViolationError);
   });
 
   it("handles commands with quoted arguments containing spaces", async () => {
     const result = (await shellExecHandler(
-      { command: 'echo "hello world"', cwd: tmpDir }, "real", policy
+      { command: 'echo "hello world"', cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout.trim()).toBe("hello world");
     expect(result.exit_code).toBe(0);
@@ -549,7 +549,7 @@ describe("shellExecHandler — command injection hardening", () => {
 
   it("handles commands with single-quoted arguments", async () => {
     const result = (await shellExecHandler(
-      { command: "echo 'hello world'", cwd: tmpDir }, "real", policy
+      { command: "echo 'hello world'", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout.trim()).toBe("hello world");
     expect(result.exit_code).toBe(0);
@@ -560,7 +560,7 @@ describe("shellExecHandler — command injection hardening", () => {
     // So "echo hello; echo world" should NOT execute two commands.
     // Instead, it passes "; echo world" as args to echo.
     const result = (await shellExecHandler(
-      { command: "echo hello; echo world", cwd: tmpDir }, "real", policy
+      { command: "echo hello; echo world", cwd: tmpDir }, "live", policy
     )) as any;
     // execFile will pass the semicolon as literal text to echo
     expect(result.stdout).toContain(";");
@@ -570,7 +570,7 @@ describe("shellExecHandler — command injection hardening", () => {
   it("does not pass pipe operator to shell", async () => {
     // With execFile, pipe is not interpreted as shell pipe
     const result = (await shellExecHandler(
-      { command: "echo hello | cat", cwd: tmpDir }, "real", policy
+      { command: "echo hello | cat", cwd: tmpDir }, "live", policy
     )) as any;
     // execFile passes "| cat" as literal args to echo
     expect(result.stdout).toContain("|");
@@ -578,7 +578,7 @@ describe("shellExecHandler — command injection hardening", () => {
 
   it("handles non-existent binary gracefully", async () => {
     const result = (await shellExecHandler(
-      { command: "nonexistent_binary_xyz", cwd: tmpDir }, "real", policy
+      { command: "nonexistent_binary_xyz", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.exit_code).not.toBe(0);
   });
@@ -587,7 +587,7 @@ describe("shellExecHandler — command injection hardening", () => {
     // Generate output larger than maxBuffer — the command should still complete
     // but the output might be truncated or the command killed
     const result = (await shellExecHandler(
-      { command: "yes | head -100", cwd: tmpDir }, "real", policy
+      { command: "yes | head -100", cwd: tmpDir }, "live", policy
     )) as any;
     // yes | head won't work with execFile (no shell), so it should fail
     expect(result.exit_code).not.toBe(undefined);
@@ -615,7 +615,7 @@ describe("writeFileHandler — writable_paths enforcement", () => {
     };
     await expect(
       writeFileHandler(
-        { path: join(readonlyDir, "file.txt"), content: "bad" }, "real", policy
+        { path: join(readonlyDir, "file.txt"), content: "bad" }, "live", policy
       )
     ).rejects.toThrow(PolicyViolationError);
   });
@@ -628,7 +628,7 @@ describe("writeFileHandler — writable_paths enforcement", () => {
       writable_paths: [writableDir],
     };
     const result = (await writeFileHandler(
-      { path: join(writableDir, "file.txt"), content: "ok" }, "real", policy
+      { path: join(writableDir, "file.txt"), content: "ok" }, "live", policy
     )) as any;
     expect(result.written).toBe(true);
   });
@@ -642,7 +642,7 @@ describe("writeFileHandler — writable_paths enforcement", () => {
     };
     await expect(
       writeFileHandler(
-        { path: join(readonlyDir, "file.txt"), content: "bad" }, "real", policy
+        { path: join(readonlyDir, "file.txt"), content: "bad" }, "live", policy
       )
     ).rejects.toThrow(PolicyViolationError);
   });
@@ -658,7 +658,7 @@ describe("writeFileHandler — writable_paths enforcement", () => {
     };
     await expect(
       writeFileHandler(
-        { path: join(readonlyDir, "key.pem"), content: "secret" }, "real", policy
+        { path: join(readonlyDir, "key.pem"), content: "secret" }, "live", policy
       )
     ).rejects.toThrow(PolicyViolationError);
   });
@@ -682,13 +682,13 @@ describe("writeFileHandler — writable_paths enforcement", () => {
 describe("writeFileHandler — input validation", () => {
   it("rejects non-string path", async () => {
     await expect(
-      writeFileHandler({ path: 123, content: "data" }, "real", openPolicy)
+      writeFileHandler({ path: 123, content: "data" }, "live", openPolicy)
     ).rejects.toThrow("input.path must be a string");
   });
 
   it("rejects non-string content", async () => {
     await expect(
-      writeFileHandler({ path: "/tmp/test.txt", content: 123 }, "real", openPolicy)
+      writeFileHandler({ path: "/tmp/test.txt", content: 123 }, "live", openPolicy)
     ).rejects.toThrow("input.content must be a string");
   });
 });
@@ -696,7 +696,7 @@ describe("writeFileHandler — input validation", () => {
 describe("readFileHandler — input validation", () => {
   it("rejects non-string path", async () => {
     await expect(
-      readFileHandler({ path: 123 }, "real", openPolicy)
+      readFileHandler({ path: 123 }, "live", openPolicy)
     ).rejects.toThrow("input.path must be a string");
   });
 });
@@ -704,13 +704,13 @@ describe("readFileHandler — input validation", () => {
 describe("httpRequestHandler — input validation", () => {
   it("rejects non-string url", async () => {
     await expect(
-      httpRequestHandler({ url: 123, method: "GET" }, "real", openPolicy)
+      httpRequestHandler({ url: 123, method: "GET" }, "live", openPolicy)
     ).rejects.toThrow("input.url must be a string");
   });
 
   it("rejects non-string method", async () => {
     await expect(
-      httpRequestHandler({ url: "https://example.com", method: 123 }, "real", openPolicy)
+      httpRequestHandler({ url: "https://example.com", method: 123 }, "live", openPolicy)
     ).rejects.toThrow("input.method must be a string");
   });
 
@@ -774,7 +774,7 @@ describe("httpRequestHandler — headers and methods", () => {
   it("rejects request to link-local IPv6 address", async () => {
     await expect(
       httpRequestHandler(
-        { url: "http://[::1]/admin", method: "GET" }, "real", openPolicy
+        { url: "http://[::1]/admin", method: "GET" }, "live", openPolicy
       )
     ).rejects.toThrow();
   });
@@ -785,14 +785,14 @@ describe("browserHandler — DNS rebinding protection", () => {
     // Verify the browser handler rejects private IPs (proves it uses assertEndpointAllowedAsync)
     const { browserHandler } = await import("./browser.js");
     await expect(
-      browserHandler({ action: "navigate", url: "http://127.0.0.1/admin" }, "real", openPolicy)
+      browserHandler({ action: "navigate", url: "http://127.0.0.1/admin" }, "live", openPolicy)
     ).rejects.toThrow();
   });
 
   it("H2: browser handler rejects navigate to private IP in real mode", async () => {
     const { browserHandler } = await import("./browser.js");
     await expect(
-      browserHandler({ action: "navigate", url: "http://10.0.0.1/internal" }, "real", openPolicy)
+      browserHandler({ action: "navigate", url: "http://10.0.0.1/internal" }, "live", openPolicy)
     ).rejects.toThrow();
   });
 
@@ -907,7 +907,7 @@ describe("readFileHandler — sensitive file protection", () => {
     const envPath = join(tmpDir, ".env");
     await writeFile(envPath, "SECRET=value", "utf-8");
     await expect(
-      readFileHandler({ path: envPath }, "real", policy)
+      readFileHandler({ path: envPath }, "live", policy)
     ).rejects.toThrow(PolicyViolationError);
   });
 
@@ -915,7 +915,7 @@ describe("readFileHandler — sensitive file protection", () => {
     const envPath = join(tmpDir, ".env.local");
     await writeFile(envPath, "SECRET=value", "utf-8");
     await expect(
-      readFileHandler({ path: envPath }, "real", policy)
+      readFileHandler({ path: envPath }, "live", policy)
     ).rejects.toThrow(PolicyViolationError);
   });
 
@@ -923,7 +923,7 @@ describe("readFileHandler — sensitive file protection", () => {
     const pemPath = join(tmpDir, "server.pem");
     await writeFile(pemPath, "-----BEGIN CERTIFICATE-----", "utf-8");
     await expect(
-      readFileHandler({ path: pemPath }, "real", policy)
+      readFileHandler({ path: pemPath }, "live", policy)
     ).rejects.toThrow(PolicyViolationError);
   });
 
@@ -931,7 +931,7 @@ describe("readFileHandler — sensitive file protection", () => {
     const keyPath = join(tmpDir, "private.key");
     await writeFile(keyPath, "-----BEGIN PRIVATE KEY-----", "utf-8");
     await expect(
-      readFileHandler({ path: keyPath }, "real", policy)
+      readFileHandler({ path: keyPath }, "live", policy)
     ).rejects.toThrow(PolicyViolationError);
   });
 });
@@ -952,21 +952,21 @@ describe("writeFileHandler — sensitive file protection", () => {
   it("blocks writing to .env files", async () => {
     const envPath = join(tmpDir, ".env");
     await expect(
-      writeFileHandler({ path: envPath, content: "SECRET=value" }, "real", policy)
+      writeFileHandler({ path: envPath, content: "SECRET=value" }, "live", policy)
     ).rejects.toThrow(PolicyViolationError);
   });
 
   it("blocks writing to .key files", async () => {
     const keyPath = join(tmpDir, "private.key");
     await expect(
-      writeFileHandler({ path: keyPath, content: "key data" }, "real", policy)
+      writeFileHandler({ path: keyPath, content: "key data" }, "live", policy)
     ).rejects.toThrow(PolicyViolationError);
   });
 
   it("blocks writing to credentials.json", async () => {
     const credPath = join(tmpDir, "credentials.json");
     await expect(
-      writeFileHandler({ path: credPath, content: "{}" }, "real", policy)
+      writeFileHandler({ path: credPath, content: "{}" }, "live", policy)
     ).rejects.toThrow(PolicyViolationError);
   });
 });

@@ -121,7 +121,7 @@ function filterSafeHeaders(headers: Record<string, string | string[] | undefined
 
 // ─── Input Validation ──────────────────────────────────────────────
 
-const VALID_MODES = new Set(["mock", "dry_run", "real"]);
+const VALID_MODES = new Set(["mock", "dry_run", "live"]);
 const MAX_TEXT_LENGTH = 10000;
 const MAX_SUBMITTED_BY_LENGTH = 200;
 
@@ -337,7 +337,7 @@ export class ApiServer {
       this.toolRegistry = toolRegistry;
       this.journal = journal;
       // toolRuntime, permissions, planner remain undefined (optional)
-      this.defaultMode = "mock";
+      this.defaultMode = "live";
       this.defaultLimits = { max_steps: 30, max_duration_ms: 300000, max_cost_usd: 5, max_tokens: 200000, max_iterations: 15 };
       this.defaultPolicy = { allowed_paths: [], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
       this.maxConcurrentSessions = 50;
@@ -357,7 +357,7 @@ export class ApiServer {
       this.permissions = config.permissions;
       this.planner = config.planner;
       this.pluginRegistry = config.pluginRegistry;
-      this.defaultMode = config.defaultMode ?? "mock";
+      this.defaultMode = config.defaultMode ?? "live";
       this.defaultLimits = config.defaultLimits ?? { max_steps: 30, max_duration_ms: 300000, max_cost_usd: 5, max_tokens: 200000, max_iterations: 15 };
       this.defaultPolicy = config.defaultPolicy ?? { allowed_paths: [], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
       this.maxConcurrentSessions = config.maxConcurrentSessions ?? 50;

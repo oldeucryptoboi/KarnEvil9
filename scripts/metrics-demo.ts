@@ -88,7 +88,7 @@ async function main() {
     toolRegistry: registry,
     permissions,
     planner,
-    mode: "real",
+    mode: "live",
     limits: { max_steps: 5, max_duration_ms: 60000, max_cost_usd: 1, max_tokens: 50000 },
     policy,
   });

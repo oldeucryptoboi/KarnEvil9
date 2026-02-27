@@ -105,7 +105,7 @@ export class StatusBar implements StatusBarLike {
       sessionState: "idle",
       sessionId: null,
       model: null,
-      mode: "real",
+      mode: "live",
       totalTokens: 0,
       costUsd: 0,
       wsUrl: "",

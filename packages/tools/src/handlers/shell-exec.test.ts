@@ -241,7 +241,7 @@ describe("shellExecHandler — sanitizeEnv additional prefixes", () => {
   it("filters out AZURE_ prefixed vars", async () => {
     saveAndSet("AZURE_STORAGE_KEY", "azure-secret-123");
     const result = (await shellExecHandler(
-      { command: "env", cwd: tmpDir }, "real", policy
+      { command: "env", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout).not.toContain("AZURE_STORAGE_KEY");
   });
@@ -249,7 +249,7 @@ describe("shellExecHandler — sanitizeEnv additional prefixes", () => {
   it("filters out GCP_ prefixed vars", async () => {
     saveAndSet("GCP_PROJECT_ID", "my-gcp-project");
     const result = (await shellExecHandler(
-      { command: "env", cwd: tmpDir }, "real", policy
+      { command: "env", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout).not.toContain("GCP_PROJECT_ID");
   });
@@ -257,7 +257,7 @@ describe("shellExecHandler — sanitizeEnv additional prefixes", () => {
   it("filters out GOOGLE_ prefixed vars", async () => {
     saveAndSet("GOOGLE_APPLICATION_CREDENTIALS", "/path/to/creds.json");
     const result = (await shellExecHandler(
-      { command: "env", cwd: tmpDir }, "real", policy
+      { command: "env", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout).not.toContain("GOOGLE_APPLICATION_CREDENTIALS");
   });
@@ -265,7 +265,7 @@ describe("shellExecHandler — sanitizeEnv additional prefixes", () => {
   it("filters out DOCKER_ prefixed vars", async () => {
     saveAndSet("DOCKER_AUTH_CONFIG", "docker-config-secret");
     const result = (await shellExecHandler(
-      { command: "env", cwd: tmpDir }, "real", policy
+      { command: "env", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout).not.toContain("DOCKER_AUTH_CONFIG");
   });
@@ -273,7 +273,7 @@ describe("shellExecHandler — sanitizeEnv additional prefixes", () => {
   it("filters out GITLAB_ prefixed vars", async () => {
     saveAndSet("GITLAB_TOKEN", "glpat-test-token");
     const result = (await shellExecHandler(
-      { command: "env", cwd: tmpDir }, "real", policy
+      { command: "env", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout).not.toContain("GITLAB_TOKEN");
   });
@@ -281,7 +281,7 @@ describe("shellExecHandler — sanitizeEnv additional prefixes", () => {
   it("filters out vars ending with _TOKEN suffix", async () => {
     saveAndSet("CUSTOM_SERVICE_TOKEN", "service-token-abc");
     const result = (await shellExecHandler(
-      { command: "env", cwd: tmpDir }, "real", policy
+      { command: "env", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout).not.toContain("CUSTOM_SERVICE_TOKEN");
   });
@@ -289,7 +289,7 @@ describe("shellExecHandler — sanitizeEnv additional prefixes", () => {
   it("filters out vars ending with _KEY suffix", async () => {
     saveAndSet("STRIPE_KEY", "sk_test_stripe_key");
     const result = (await shellExecHandler(
-      { command: "env", cwd: tmpDir }, "real", policy
+      { command: "env", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout).not.toContain("STRIPE_KEY");
   });
@@ -297,7 +297,7 @@ describe("shellExecHandler — sanitizeEnv additional prefixes", () => {
   it("filters out vars ending with _PASSWORD suffix", async () => {
     saveAndSet("REDIS_PASSWORD", "redis-secret-pw");
     const result = (await shellExecHandler(
-      { command: "env", cwd: tmpDir }, "real", policy
+      { command: "env", cwd: tmpDir }, "live", policy
     )) as any;
     expect(result.stdout).not.toContain("REDIS_PASSWORD");
   });

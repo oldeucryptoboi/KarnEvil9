@@ -68,7 +68,7 @@ describe("swarm-distribute tool", () => {
   });
 
   it("should throw for missing task_text", async () => {
-    await expect(handler({}, "real", emptyPolicy)).rejects.toThrow("task_text is required");
+    await expect(handler({}, "live", emptyPolicy)).rejects.toThrow("task_text is required");
   });
 
   it("should distribute task in real mode", async () => {
@@ -82,7 +82,7 @@ describe("swarm-distribute tool", () => {
 
     vi.spyOn(mesh, "delegateTask").mockResolvedValue({ accepted: true, taskId: "task-1" });
 
-    const promise = handler({ task_text: "analyze logs" }, "real", emptyPolicy);
+    const promise = handler({ task_text: "analyze logs" }, "live", emptyPolicy);
     await new Promise((r) => setTimeout(r, 10));
 
     distributor.resolveTask({
@@ -137,7 +137,7 @@ describe("swarm-peers tool", () => {
       version: "0.1.0",
     });
 
-    const result = await handler({}, "real", emptyPolicy) as Record<string, unknown>;
+    const result = await handler({}, "live", emptyPolicy) as Record<string, unknown>;
     expect(result.total).toBe(1);
     expect((result.self as Record<string, unknown>).node_id).toBeTruthy();
   });
@@ -152,7 +152,7 @@ describe("swarm-peers tool", () => {
     });
     mesh.handleLeave("peer-1");
 
-    const result = await handler({ status_filter: "active" }, "real", emptyPolicy) as Record<string, unknown>;
+    const result = await handler({ status_filter: "active" }, "live", emptyPolicy) as Record<string, unknown>;
     expect(result.total).toBe(0);
   });
 });

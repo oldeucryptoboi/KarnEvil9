@@ -321,7 +321,7 @@ async function main() {
     toolRuntime: runtime,
     permissions,
     planner,
-    mode: "real",
+    mode: "live",
     limits: {
       max_steps: 20,
       max_duration_ms: 30000,

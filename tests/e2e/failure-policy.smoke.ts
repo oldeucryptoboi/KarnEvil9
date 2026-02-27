@@ -79,7 +79,7 @@ describe("Failure Policy Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: makeMultiStepPlanner([step]),
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 10, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000 },
       policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: false },
     });
@@ -135,7 +135,7 @@ describe("Failure Policy Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: makeMultiStepPlanner([failStep, succeedStep]),
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 10, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000 },
       policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: ["echo"], require_approval_for_writes: false },
     });
@@ -194,7 +194,7 @@ describe("Failure Policy Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: makeMultiStepPlanner([parentStep, childStep]),
-      mode: "real",
+      mode: "live",
       limits: { max_steps: 10, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000 },
       policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: ["echo"], require_approval_for_writes: false },
     });
@@ -265,7 +265,7 @@ describe("Failure Policy Smoke", () => {
       toolRuntime: runtime,
       permissions,
       planner: replanPlanner,
-      mode: "real",
+      mode: "live",
       agentic: true,
       limits: { max_steps: 10, max_duration_ms: 10000, max_cost_usd: 10, max_tokens: 100000, max_iterations: 5 },
       policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: false },

@@ -54,7 +54,7 @@ describe("httpRequestHandler — redirect chaining", () => {
       .mockResolvedValueOnce(new Response("final content", { status: 200 }));
 
     const result = (await httpRequestHandler(
-      { url: "https://example.com/start", method: "GET" }, "real", openPolicy
+      { url: "https://example.com/start", method: "GET" }, "live", openPolicy
     )) as any;
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -75,7 +75,7 @@ describe("httpRequestHandler — redirect chaining", () => {
       .mockResolvedValueOnce(new Response("done", { status: 200 }));
 
     const result = (await httpRequestHandler(
-      { url: "https://example.com/start", method: "GET" }, "real", openPolicy
+      { url: "https://example.com/start", method: "GET" }, "live", openPolicy
     )) as any;
 
     expect(mockFetch).toHaveBeenCalledTimes(3);
@@ -92,7 +92,7 @@ describe("httpRequestHandler — redirect chaining", () => {
     }
 
     const result = (await httpRequestHandler(
-      { url: "https://example.com/start", method: "GET" }, "real", openPolicy
+      { url: "https://example.com/start", method: "GET" }, "live", openPolicy
     )) as any;
 
     expect(mockFetch).toHaveBeenCalledTimes(6); // initial + 5 redirect fetches
@@ -112,7 +112,7 @@ describe("httpRequestHandler — redirect chaining", () => {
 
     await expect(
       httpRequestHandler(
-        { url: "https://example.com/start", method: "GET" }, "real", openPolicy
+        { url: "https://example.com/start", method: "GET" }, "live", openPolicy
       )
     ).rejects.toThrow(SsrfError);
   });
@@ -124,7 +124,7 @@ describe("httpRequestHandler — redirect chaining", () => {
     }));
 
     const result = (await httpRequestHandler(
-      { url: "https://example.com/start", method: "GET" }, "real", openPolicy
+      { url: "https://example.com/start", method: "GET" }, "live", openPolicy
     )) as any;
 
     expect(result.error).toContain("Malformed redirect URL");
@@ -135,7 +135,7 @@ describe("httpRequestHandler — redirect chaining", () => {
     mockFetch.mockResolvedValueOnce(new Response("no redirect", { status: 302 }));
 
     const result = (await httpRequestHandler(
-      { url: "https://example.com/start", method: "GET" }, "real", openPolicy
+      { url: "https://example.com/start", method: "GET" }, "live", openPolicy
     )) as any;
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -151,7 +151,7 @@ describe("httpRequestHandler — redirect chaining", () => {
       .mockResolvedValueOnce(new Response("resolved", { status: 200 }));
 
     const result = (await httpRequestHandler(
-      { url: "https://example.com/start", method: "GET" }, "real", openPolicy
+      { url: "https://example.com/start", method: "GET" }, "live", openPolicy
     )) as any;
 
     expect(result.status).toBe(200);
@@ -188,7 +188,7 @@ describe("httpRequestHandler — response body size limit", () => {
 
     await expect(
       httpRequestHandler(
-        { url: "https://example.com/big", method: "GET" }, "real", openPolicy
+        { url: "https://example.com/big", method: "GET" }, "live", openPolicy
       )
     ).rejects.toThrow(/exceeds.*byte limit/);
   });
@@ -204,7 +204,7 @@ describe("httpRequestHandler — response body size limit", () => {
     mockFetch.mockResolvedValueOnce(new Response(stream, { status: 200 }));
 
     const result = (await httpRequestHandler(
-      { url: "https://example.com/exact", method: "GET" }, "real", openPolicy
+      { url: "https://example.com/exact", method: "GET" }, "live", openPolicy
     )) as any;
 
     expect(result.status).toBe(200);
@@ -214,7 +214,7 @@ describe("httpRequestHandler — response body size limit", () => {
     mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     const result = (await httpRequestHandler(
-      { url: "https://example.com/empty", method: "DELETE" }, "real", openPolicy
+      { url: "https://example.com/empty", method: "DELETE" }, "live", openPolicy
     )) as any;
 
     expect(result.status).toBe(204);

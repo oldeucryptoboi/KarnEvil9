@@ -1,5 +1,5 @@
-import { MockPlanner, LLMPlanner, RouterPlanner } from "@karnevil9/planner";
-import type { ModelCallFn, ModelCallResult } from "@karnevil9/planner";
+import { MockPlanner, LLMPlanner, RouterPlanner, IFPlanner, bfsPath } from "@karnevil9/planner";
+import type { ModelCallFn, ModelCallResult, IFModelCallFn } from "@karnevil9/planner";
 import type { Planner } from "@karnevil9/schemas";
 
 const MAX_RETRIES = 3;
@@ -98,6 +98,52 @@ function createClaudeCallFn(model: string): ModelCallFn {
   };
 }
 
+/**
+ * Raw Claude call function for IFPlanner — returns plain text (no tool_use forcing).
+ * IFPlanner calls the model directly and parses freeform text output.
+ */
+function createClaudeRawCallFn(model: string): IFModelCallFn {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "ANTHROPIC_API_KEY environment variable is required for the IF planner.\n" +
+      "Set it with: export ANTHROPIC_API_KEY=sk-ant-..."
+    );
+  }
+
+  let clientPromise: Promise<{ messages: { create: Function } }> | null = null;
+
+  return async (systemPrompt: string, userPrompt: string) => {
+    if (!clientPromise) {
+      clientPromise = import("@anthropic-ai/sdk").then(
+        ({ default: Anthropic }) => new Anthropic({ apiKey }) as unknown as { messages: { create: Function } }
+      ).catch((err) => { clientPromise = null; throw err; });
+    }
+    const client = await clientPromise;
+    return withRetry(async () => {
+      const response = await client.messages.create({
+        model,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }],
+      });
+      const textBlock = response.content.find((b: any) => b.type === "text");
+      if (!textBlock) {
+        throw new Error("Claude returned no text content");
+      }
+      return {
+        text: (textBlock as { text: string }).text,
+        usage: {
+          input_tokens: response.usage.input_tokens,
+          output_tokens: response.usage.output_tokens,
+          total_tokens: response.usage.input_tokens + response.usage.output_tokens,
+          model,
+        },
+      };
+    });
+  };
+}
+
 function createOpenAICallFn(model: string, overrideBaseURL?: string): ModelCallFn {
   const apiKey = process.env.OPENAI_API_KEY;
   const baseURL = overrideBaseURL ?? process.env.OPENAI_BASE_URL;
@@ -170,9 +216,13 @@ export function createPlanner(opts: { planner?: string; model?: string; agentic?
       const underlying = new LLMPlanner(createClaudeCallFn(model), { agentic: opts.agentic });
       return new RouterPlanner({ delegate: underlying });
     }
+    case "if": {
+      const ifCallModel: IFModelCallFn = createClaudeRawCallFn(model);
+      return new IFPlanner({ callModel: ifCallModel, bfsPathFinder: bfsPath });
+    }
     default:
       throw new Error(
-        `Unknown planner type: "${provider}". Valid options: mock, claude, openai, router`
+        `Unknown planner type: "${provider}". Valid options: mock, claude, openai, router, if`
       );
   }
 }

@@ -1,0 +1,48 @@
+name: game-take-all
+version: "1.0.0"
+description: Take multiple items from the current room in one step
+runner: internal
+input_schema:
+  type: object
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        type: string
+      description: Items to take
+  additionalProperties: false
+output_schema:
+  type: object
+  required:
+    - taken
+    - failed
+    - final_screen
+    - screen_text
+  properties:
+    taken:
+      type: array
+      items:
+        type: string
+    failed:
+      type: array
+      items:
+        type: string
+    final_screen:
+      type: string
+    screen_text:
+      type: string
+  additionalProperties: false
+permissions:
+  - "game:execute:take"
+timeout_ms: 60000
+supports:
+  mock: true
+  dry_run: true
+mock_responses:
+  - taken:
+      - item
+    failed: []
+    final_screen: ">mock"
+    screen_text: ">mock"

@@ -2,15 +2,16 @@
 import "dotenv/config";
 import { Command } from "commander";
 import { v4 as uuid } from "uuid";
-import { resolve } from "node:path";
-import { hostname } from "node:os";
+import { resolve, join } from "node:path";
+import { hostname, homedir } from "node:os";
 import * as readline from "node:readline";
 import { Journal } from "@karnevil9/journal";
-import { ToolRegistry, ToolRuntime, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, createBrowserHandler } from "@karnevil9/tools";
-import type { BrowserDriverLike } from "@karnevil9/tools";
+import { ToolRegistry, ToolRuntime, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, createBrowserHandler, executeGameCommandHandler, parseGameScreenHandler, gameCombatHandler, gameTakeAllHandler, gameNavigateHandler, setEmulator, setCartographerFn } from "@karnevil9/tools";
+import type { BrowserDriverLike, EmulatorLike } from "@karnevil9/tools";
 import { PermissionEngine } from "@karnevil9/permissions";
 import { Kernel } from "@karnevil9/kernel";
 import { createPlanner } from "./llm-adapters.js";
+import { GameSessionManager } from "./game-session-manager.js";
 import { ApiServer } from "@karnevil9/api";
 import { MetricsCollector } from "@karnevil9/metrics";
 import { PluginRegistry } from "@karnevil9/plugins";
@@ -344,7 +345,10 @@ program.command("server").description("Start the API server")
   .option("--swarm-mdns", "Enable mDNS discovery (default: true)")
   .option("--swarm-gossip", "Enable gossip protocol (default: true)")
   .option("--auto-approve", "Auto-approve all permission requests for the session")
-  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean; browser: string; swarm?: boolean; swarmToken?: string; swarmSeeds?: string; swarmName?: string; swarmMdns?: boolean; swarmGossip?: boolean; autoApprove?: boolean }) => {
+  .option("--game <path>", "Path to Z-machine game file (e.g., scripts/zork1.z3)")
+  .option("--game-checkpoint-dir <dir>", "Game checkpoint directory", "~/.zork-checkpoints")
+  .option("--game-turns <n>", "Max turns per game session", "20")
+  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean; browser: string; swarm?: boolean; swarmToken?: string; swarmSeeds?: string; swarmName?: string; swarmMdns?: boolean; swarmGossip?: boolean; autoApprove?: boolean; game?: string; gameCheckpointDir: string; gameTurns: string }) => {
     // Late-binding ref: set after ApiServer is constructed
     let apiServerRef: ApiServer | null = null;
     const serverApprovalPrompt = opts.autoApprove
@@ -372,6 +376,43 @@ program.command("server").description("Start the API server")
       await activeMemory.load();
     }
 
+    // ── Game session manager (--game flag) ─────────────────────────────────────
+    let gameManager: GameSessionManager | undefined;
+    if (opts.game) {
+      const checkpointDir = opts.gameCheckpointDir.startsWith("~")
+        ? join(homedir(), opts.gameCheckpointDir.slice(2))
+        : resolve(opts.gameCheckpointDir);
+      const gamePath = resolve(opts.game);
+      gameManager = new GameSessionManager({
+        gamePath,
+        checkpointDir,
+        maxTurns: parsePositiveInt(opts.gameTurns, "game-turns", 20),
+        createEmulator: () => {
+          // Lazy-import the emulator from scripts/ — avoids hard dependency at module level
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { ZorkFrotzEmulator } = require("../../../scripts/apple2-zork-frotz.js") as { ZorkFrotzEmulator: new () => any };
+          return new ZorkFrotzEmulator();
+        },
+      });
+
+      // Register game tool handlers
+      runtime.registerHandler("execute-game-command", executeGameCommandHandler);
+      runtime.registerHandler("parse-game-screen", parseGameScreenHandler);
+      runtime.registerHandler("game-combat", gameCombatHandler);
+      runtime.registerHandler("game-take-all", gameTakeAllHandler);
+      runtime.registerHandler("game-navigate", gameNavigateHandler);
+
+      // Register compound game tool manifests (execute-game-command and parse-game-screen
+      // are already loaded from tools/examples/ by registry.loadFromDirectory)
+      for (const toolName of ["game-combat", "game-take-all", "game-navigate"]) {
+        if (!registry.get(toolName)) {
+          console.warn(`[game] Tool manifest for "${toolName}" not found in ${TOOLS_DIR} — ensure tool.yaml exists`);
+        }
+      }
+      console.log(`[game] Game mode enabled: ${gamePath}`);
+      console.log(`[game] Checkpoints: ${checkpointDir}, max turns: ${opts.gameTurns}`);
+    }
+
     // Bootstrap scheduler before plugins so the scheduler-tool plugin can access it
     const planner = createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic });
     const scheduleStore = new ScheduleStore(SCHEDULER_PATH);
@@ -386,6 +427,18 @@ program.command("server").description("Start the API server")
 
     // Shared session factory used by scheduler and slack plugins
     const sharedSessionFactory = async (task: Task, sessionOpts?: { mode?: string; agentic?: boolean; planner?: string; model?: string; limits?: Partial<SessionLimits> }) => {
+      // ── Game session handling ──────────────────────────────────────────────
+      const isGameSession = task.text.includes("[GAME_SESSION]");
+      if (isGameSession && gameManager) {
+        if (gameManager.isLocked()) {
+          console.log("[game] Skipping — emulator busy");
+          return { session_id: "skipped-busy", status: "skipped" };
+        }
+        const { checkpoint } = await gameManager.acquireSession();
+        // Strip marker from task text
+        task.text = task.text.replace("[GAME_SESSION]\n\n", "");
+      }
+
       let sessionPlanner = planner;
       if (sessionOpts?.planner || sessionOpts?.model) {
         const provider = sessionOpts.planner ?? opts.planner ?? "mock";
@@ -404,6 +457,15 @@ program.command("server").description("Start the API server")
         sessionPlanner = cached;
       }
 
+      // Game permission scopes
+      const gameScopes = gameManager ? [
+        "game:execute:command",
+        "game:read:screen",
+        "game:execute:combat",
+        "game:execute:take",
+        "game:execute:navigate",
+      ] : [];
+
       const kernel = new Kernel({
         journal, toolRuntime: runtime, toolRegistry: registry, permissions,
         pluginRegistry,
@@ -414,7 +476,7 @@ program.command("server").description("Start the API server")
           max_duration_ms: Math.min(sessionOpts?.limits?.max_duration_ms ?? 300000, 600000),
           max_cost_usd: Math.min(sessionOpts?.limits?.max_cost_usd ?? 10, 20),
           max_tokens: Math.min(sessionOpts?.limits?.max_tokens ?? 200000, 500000),
-          max_iterations: Math.min(sessionOpts?.limits?.max_iterations ?? 15, 20),
+          max_iterations: Math.min(sessionOpts?.limits?.max_iterations ?? 15, 25),
         },
         policy: { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true },
         agentic: sessionOpts?.agentic ?? opts.agentic ?? false,
@@ -428,14 +490,32 @@ program.command("server").description("Start the API server")
           "http:request:external",
           "github:read:repos",
           "github:write:issues",
+          ...gameScopes,
         ],
         plannerTimeoutMs: Number(process.env.KARNEVIL9_PLANNER_TIMEOUT_MS) || 180_000,
       });
       const session = await kernel.createSession(task);
-      // Run in background — don't block the caller
-      void kernel.run().catch((err) => {
-        console.error(`[session] Session ${session.session_id} failed:`, err);
-      });
+
+      if (isGameSession && gameManager) {
+        // Game sessions must be awaited so we can release the emulator on completion
+        const gm = gameManager;
+        void kernel.run()
+          .catch((err) => {
+            console.error(`[game] Game session ${session.session_id} failed:`, err);
+          })
+          .finally(async () => {
+            try {
+              await gm.releaseSession();
+            } catch (err) {
+              console.error("[game] Failed to release session:", err);
+            }
+          });
+      } else {
+        // Run in background — don't block the caller
+        void kernel.run().catch((err) => {
+          console.error(`[session] Session ${session.session_id} failed:`, err);
+        });
+      }
       return { session_id: session.session_id, status: session.status };
     };
 
@@ -565,6 +645,27 @@ program.command("server").description("Start the API server")
           classifierModel: process.env.KARNEVIL9_VAULT_CLASSIFIER_MODEL,
         },
         "github-repo": {},
+        // Swarm-delegation plugin: wire emulator proxy for game sessions
+        ...(gameManager ? {
+          "swarm-delegation": (() => {
+            const checkpointDir = opts.gameCheckpointDir.startsWith("~")
+              ? join(homedir(), opts.gameCheckpointDir.slice(2))
+              : resolve(opts.gameCheckpointDir);
+            // Proxy delegates to the live emulator — swapped in/out by GameSessionManager
+            const emulatorProxy = new Proxy({} as EmulatorLike, {
+              get(_, prop) {
+                if (!gameManager!.currentEmulator) throw new Error("No active game session");
+                return (gameManager!.currentEmulator as unknown as Record<string, unknown>)[prop as string];
+              },
+            });
+            const checkpoint = gameManager!.loadCheckpoint();
+            return {
+              tmpBase: join(checkpointDir, "swarm"),
+              emulator: emulatorProxy,
+              checkpoint: checkpoint?.swarmState,
+            };
+          })(),
+        } : {}),
       },
     });
     await pluginRegistry.discoverAndLoadAll();
@@ -596,6 +697,9 @@ program.command("server").description("Start the API server")
     // Graceful shutdown
     const shutdown = async () => {
       console.log("\nShutting down...");
+      if (gameManager) {
+        await gameManager.cleanup();
+      }
       await apiServer.shutdown();
       process.exit(0);
     };

@@ -1,0 +1,55 @@
+name: game-combat
+version: "1.0.0"
+description: Loop attack rounds until combat resolves (victory, death, fled, weapon lost, or max rounds)
+runner: internal
+input_schema:
+  type: object
+  required:
+    - target
+    - weapon
+  properties:
+    target:
+      type: string
+      description: Enemy to attack
+    weapon:
+      type: string
+      description: Weapon to use
+  additionalProperties: false
+output_schema:
+  type: object
+  required:
+    - outcome
+    - rounds
+    - final_screen
+    - delta
+    - screen_text
+  properties:
+    outcome:
+      type: string
+      enum:
+        - victory
+        - death
+        - fled
+        - weapon_lost
+        - max_rounds
+    rounds:
+      type: number
+    final_screen:
+      type: string
+    delta:
+      type: string
+    screen_text:
+      type: string
+  additionalProperties: false
+permissions:
+  - "game:execute:combat"
+timeout_ms: 120000
+supports:
+  mock: true
+  dry_run: true
+mock_responses:
+  - outcome: victory
+    rounds: 1
+    final_screen: ">mock"
+    delta: defeated
+    screen_text: ">mock"

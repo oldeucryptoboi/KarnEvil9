@@ -1,0 +1,66 @@
+name: game-navigate
+version: "1.0.0"
+description: Execute a multi-step navigation path in one step
+runner: internal
+input_schema:
+  type: object
+  required:
+    - steps
+  properties:
+    steps:
+      type: array
+      items:
+        type: object
+        required:
+          - direction
+          - destination
+        properties:
+          direction:
+            type: string
+          destination:
+            type: string
+        additionalProperties: false
+      description: Navigation steps to execute
+  additionalProperties: false
+output_schema:
+  type: object
+  required:
+    - completed
+    - final_room
+    - final_screen
+    - screen_text
+    - steps_taken
+  properties:
+    completed:
+      type: number
+    final_room:
+      type: string
+    final_screen:
+      type: string
+    screen_text:
+      type: string
+    steps_taken:
+      type: array
+      items:
+        type: object
+        properties:
+          direction:
+            type: string
+          destination:
+            type: string
+          actual_room:
+            type: string
+        additionalProperties: false
+  additionalProperties: false
+permissions:
+  - "game:execute:navigate"
+timeout_ms: 120000
+supports:
+  mock: true
+  dry_run: true
+mock_responses:
+  - completed: 1
+    final_room: "Mock"
+    final_screen: ">mock"
+    screen_text: ">mock"
+    steps_taken: []

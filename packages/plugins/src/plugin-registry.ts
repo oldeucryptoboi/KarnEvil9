@@ -215,6 +215,11 @@ export class PluginRegistry {
     return this.plugins.get(id);
   }
 
+  /** Get the PluginApi instance for a loaded plugin. Used to access plugin-internal state. */
+  getPluginApi(id: string): Record<string, unknown> | undefined {
+    return this.pluginApis.get(id) as Record<string, unknown> | undefined;
+  }
+
   listPlugins(): PluginState[] {
     return [...this.plugins.values()];
   }

@@ -387,12 +387,6 @@ program.command("server").description("Start the API server")
         gamePath,
         checkpointDir,
         maxTurns: parsePositiveInt(opts.gameTurns, "game-turns", 20),
-        createEmulator: () => {
-          // Lazy-import the emulator from scripts/ — avoids hard dependency at module level
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { ZorkFrotzEmulator } = require("../../../scripts/apple2-zork-frotz.js") as { ZorkFrotzEmulator: new () => any };
-          return new ZorkFrotzEmulator();
-        },
       });
 
       // Register game tool handlers
@@ -538,7 +532,9 @@ Room: Unknown | Exits: unknown | Items: unknown | Desc: Intermediate game respon
       const session = await kernel.createSession(task);
 
       if (isGameSession && gameManager) {
-        // Game sessions must be awaited so we can release the emulator on completion
+        // Game sessions must be awaited so we can release the emulator on completion.
+        // On completion, extract game state from swarm-delegation plugin's exposed
+        // fields (_commandHistory, _gameMemory, _cartState) and persist to meta.json.
         const gm = gameManager;
         void kernel.run()
           .catch((err) => {
@@ -546,7 +542,9 @@ Room: Unknown | Exits: unknown | Items: unknown | Desc: Intermediate game respon
           })
           .finally(async () => {
             try {
-              await gm.releaseSession();
+              // The swarm-delegation plugin exposes game state on its api object
+              const swarmApi = pluginRegistry.getPluginApi("swarm-delegation");
+              await gm.releaseSession(swarmApi);
             } catch (err) {
               console.error("[game] Failed to release session:", err);
             }

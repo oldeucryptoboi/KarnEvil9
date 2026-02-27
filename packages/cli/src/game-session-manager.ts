@@ -1,17 +1,17 @@
 /**
  * GameSessionManager — Owns the dfrotz emulator lifecycle and concurrency.
  *
- * Only one game session can be active at a time. The manager handles:
- *   • Launching a fresh dfrotz subprocess with an RNG seed
- *   • Resuming from a checkpoint by replaying command history (~5ms/cmd)
- *   • Saving checkpoint state (meta.json) after each session
- *   • Concurrency guard — rejects concurrent acquire attempts
+ * Mirrors the if-kernel-runner.ts setup: launches dfrotz, wires setEmulator(),
+ * replays command history from checkpoint for session resume, and persists
+ * game state to meta.json after each session.
+ *
+ * Only one game session can be active at a time.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { EmulatorLike, CartographerFn } from "@karnevil9/tools";
-import { setEmulator, setCartographerFn } from "@karnevil9/tools";
+import type { EmulatorLike } from "@karnevil9/tools";
+import { setEmulator } from "@karnevil9/tools";
 
 export interface GameCheckpoint {
   commandHistory: string[];
@@ -50,27 +50,22 @@ interface FrotzEmulator extends EmulatorLike {
 
 export class GameSessionManager {
   private gamePath: string;
-  private checkpointDir: string;
+  readonly checkpointDir: string;
   private maxTurns: number;
   private rngSeed: number;
   private locked = false;
   currentEmulator: EmulatorLike | null = null;
-
-  // Factory function for creating emulator instances — injected at construction
-  private createEmulator: () => FrotzEmulator;
 
   constructor(opts: {
     gamePath: string;
     checkpointDir: string;
     maxTurns?: number;
     rngSeed?: number;
-    createEmulator: () => FrotzEmulator;
   }) {
     this.gamePath = opts.gamePath;
     this.checkpointDir = opts.checkpointDir;
     this.maxTurns = opts.maxTurns ?? 20;
     this.rngSeed = opts.rngSeed ?? 42;
-    this.createEmulator = opts.createEmulator;
 
     // Ensure checkpoint directory exists
     if (!existsSync(this.checkpointDir)) {
@@ -88,6 +83,7 @@ export class GameSessionManager {
 
   /**
    * Acquire a game session — launches dfrotz and replays checkpoint if available.
+   * Mirrors if-kernel-runner.ts: fresh dfrotz + RNG seed + command history replay.
    * Rejects if another session is already active.
    */
   async acquireSession(): Promise<{ emulator: EmulatorLike; checkpoint: GameCheckpoint | null }> {
@@ -98,15 +94,24 @@ export class GameSessionManager {
 
     try {
       const checkpoint = this.loadCheckpoint();
-      const emulator = this.createEmulator();
 
-      // Launch fresh dfrotz with RNG seed for deterministic combat
+      // Dynamic import of ZorkFrotzEmulator from scripts/ (TypeScript source).
+      // Node 25+ supports importing .ts files directly via experimental type stripping.
+      // This is the same emulator used by if-kernel-runner.ts and apple2-zork-swarm.ts.
+      const frotzPath = join(this.gamePath, "..", "apple2-zork-frotz.ts");
+      const { ZorkFrotzEmulator } = await import(frotzPath) as { ZorkFrotzEmulator: new () => FrotzEmulator };
+      const emulator = new ZorkFrotzEmulator();
+
+      // Launch fresh dfrotz with RNG seed for deterministic combat outcomes.
+      // Same pattern as if-kernel-runner.ts line 341.
       await emulator.launch(this.gamePath, {
         seed: this.rngSeed,
         savePath: join(this.checkpointDir, "zork1.qzl"),
       });
 
-      // Replay command history from checkpoint to resume game state (~5ms/cmd)
+      // Replay command history from checkpoint to resume game state (~5ms/cmd).
+      // This is how dfrotz resume works: fresh process + replay all prior commands
+      // with a fixed RNG seed = identical game state.
       if (checkpoint?.commandHistory?.length) {
         console.log(`[game] Replaying ${checkpoint.commandHistory.length} commands from checkpoint...`);
         for (const cmd of checkpoint.commandHistory) {
@@ -115,7 +120,7 @@ export class GameSessionManager {
         console.log(`[game] Replay complete — resumed at ${checkpoint.currentRoom || "unknown"}`);
       }
 
-      // Wire emulator into tool handlers
+      // Wire emulator into tool handlers (same as if-kernel-runner.ts line 345)
       this.currentEmulator = emulator;
       setEmulator(emulator);
 
@@ -129,22 +134,54 @@ export class GameSessionManager {
 
   /**
    * Release the current game session — saves checkpoint and closes dfrotz.
+   * When called without explicit checkpoint data, extracts state from the
+   * swarm-delegation plugin's exposed fields (_commandHistory, _gameMemory, _cartState).
    */
-  async releaseSession(checkpoint?: Partial<GameCheckpoint>): Promise<void> {
+  async releaseSession(pluginApi?: Record<string, unknown>): Promise<void> {
     const emulator = this.currentEmulator as FrotzEmulator | null;
 
     try {
-      if (checkpoint) {
-        this.saveCheckpoint({
-          commandHistory: checkpoint.commandHistory ?? [],
-          currentRoom: checkpoint.currentRoom ?? "",
-          inventory: checkpoint.inventory ?? [],
-          visitedRooms: checkpoint.visitedRooms ?? [],
-          roomGraph: checkpoint.roomGraph ?? {},
-          blockedPuzzles: checkpoint.blockedPuzzles ?? [],
-          swarmState: checkpoint.swarmState,
-          updatedAt: new Date().toISOString(),
-        });
+      // Extract game state from the swarm-delegation plugin's exposed fields.
+      // The plugin sets these on the api object at lines 310-313 of index.ts:
+      //   api._cartState, api._gameMemory, api._commandHistory
+      if (pluginApi) {
+        const commandHistory = pluginApi._commandHistory as string[] | undefined;
+        const gameMemory = pluginApi._gameMemory as {
+          currentRoom?: string;
+          inventory?: string[];
+          visitedRooms?: string[];
+          roomGraph?: Record<string, string[]>;
+          blockedPuzzles?: Array<{ room: string; object: string; reason: string }>;
+        } | undefined;
+        const cartState = pluginApi._cartState as {
+          rooms?: string[];
+          lastRoomHeader?: string;
+          roomExits?: Record<string, string[]>;
+          dirGraph?: Record<string, Record<string, string>>;
+        } | undefined;
+
+        if (commandHistory || gameMemory) {
+          this.saveCheckpoint({
+            commandHistory: commandHistory ?? [],
+            currentRoom: gameMemory?.currentRoom ?? cartState?.lastRoomHeader ?? "",
+            inventory: gameMemory?.inventory ?? [],
+            visitedRooms: gameMemory?.visitedRooms ?? [],
+            roomGraph: gameMemory?.roomGraph ?? {},
+            blockedPuzzles: gameMemory?.blockedPuzzles ?? [],
+            swarmState: {
+              rooms: cartState?.rooms,
+              lastRoomHeader: cartState?.lastRoomHeader,
+              roomExits: cartState?.roomExits,
+              dirGraph: cartState?.dirGraph,
+              currentRoom: gameMemory?.currentRoom,
+              inventory: gameMemory?.inventory,
+              visitedRooms: gameMemory?.visitedRooms,
+              roomGraph: gameMemory?.roomGraph,
+              blockedPuzzles: gameMemory?.blockedPuzzles,
+            },
+            updatedAt: new Date().toISOString(),
+          });
+        }
       }
 
       if (emulator) {

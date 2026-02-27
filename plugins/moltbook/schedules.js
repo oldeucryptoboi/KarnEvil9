@@ -60,6 +60,7 @@ export const defaultSchedules = [
         "- Keep responses friendly and on-topic — you're a technical agent, not a chatbot\n" +
         "- Don't reply to messages you've already responded to",
       agentic: true,
+      model: "claude-opus-4-6",
     },
     options: { max_failures: 3 },
   },
@@ -154,6 +155,7 @@ export const defaultSchedules = [
         "DO NOT create a GitHub issue yet — that comes later after collecting community feedback.\n\n" +
         "DO NOT post on Twitter/X — only post on Moltbook.",
       agentic: true,
+      model: "claude-opus-4-6",
     },
     options: { max_failures: 3 },
   },
@@ -188,6 +190,7 @@ export const defaultSchedules = [
         "This is organic engagement — quality over quantity. " +
         "Do NOT comment on threads you've already commented on unless there are new replies.",
       agentic: true,
+      model: "claude-opus-4-6",
     },
     options: { max_failures: 3 },
   },

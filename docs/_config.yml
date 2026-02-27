@@ -1,0 +1,20 @@
+title: KarnEvil9
+description: "Deterministic agent runtime with explicit plans, typed tools, permissions, and replay. The first open-source implementation of Google DeepMind's Intelligent AI Delegation framework."
+url: "https://oldeucryptoboi.github.io"
+baseurl: "/KarnEvil9"
+theme: jekyll-theme-cayman
+markdown: kramdown
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
+include:
+  - images
+exclude:
+  - "*.html"
+  - dev-to-zork-post.md
+  - substack-zork-post.md
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default

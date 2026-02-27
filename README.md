@@ -1,10 +1,23 @@
 # KarnEvil9
 
-Deterministic agent runtime with explicit plans, typed tools, permissions, replay, and a reference implementation of Google DeepMind's [Intelligent AI Delegation](docs/intelligent-delegation-whitepaper.md) framework.
+## What is KarnEvil9?
 
-KarnEvil9 converts a natural-language task into a structured execution plan, runs each step under fine-grained permission control, and records every event in a tamper-evident journal. It supports single-shot execution, an agentic feedback loop with iterative re-planning, and P2P task delegation across a swarm mesh with nine safety mechanisms derived from the [Tomasev, Franklin & Osindero (2026)](https://arxiv.org/abs/2503.02116) framework: cognitive friction, liability firebreaks, graduated authority, escrow bonds, outcome verification, consensus verification, reputation tracking, delegatee routing, and re-delegation.
+KarnEvil9 is an open-source deterministic agent runtime that converts natural-language tasks into structured execution plans with typed tools, fine-grained permissions, and tamper-evident replay. It is the first public implementation of Google DeepMind's [Intelligent AI Delegation](docs/intelligent-delegation-whitepaper.md) framework ([Tomasev, Franklin & Osindero, 2026](https://arxiv.org/abs/2503.02116)) — translating all five pillars of the paper into runnable TypeScript.
 
-> **[Intelligent AI Delegation: From Theory to Working Code](docs/intelligent-delegation-whitepaper.md)** — KarnEvil9 serves as the foundation for a complete, working implementation of Google DeepMind's *Intelligent AI Delegation* framework. The whitepaper details how every pillar of the Tomasev et al. paper is translated into runnable code within the `@karnevil9/swarm` package, demonstrated through a controlled experiment comparing naive vs. intelligent delegation across a three-node P2P mesh.
+Every step runs under permission gates, every event is recorded in a SHA-256 hash-chain journal, and multi-agent delegation is governed by nine safety mechanisms: cognitive friction, liability firebreaks, graduated authority, escrow bonds, outcome verification, consensus verification, reputation tracking, delegatee routing, and re-delegation.
+
+### Why use KarnEvil9 instead of other agent frameworks?
+
+- **Deterministic execution** — Plans are explicit data structures, not opaque prompt chains. Every run is replayable and auditable.
+- **Accountability by design** — Implements Google DeepMind's full delegation framework with trust scores, escrow bonds, and automatic re-delegation on failure.
+- **Domain-ignorant governance** — Safety layers own trust and chain depth, not domain knowledge. The same framework governs a code refactor, a text adventure, or a financial workflow with zero code changes.
+- **Tamper-evident journal** — SHA-256 hash-chain event log detects post-hoc modification of execution history.
+
+> **[Intelligent AI Delegation: From Theory to Working Code](docs/intelligent-delegation-whitepaper.md)** — The whitepaper details how every pillar of the Tomasev et al. paper is translated into runnable code within the `@karnevil9/swarm` package, demonstrated through a controlled experiment comparing naive vs. intelligent delegation across a three-node P2P mesh.
+
+### Demonstrated: AI agent plays Zork I through governed delegation
+
+We tested KarnEvil9 by building a three-node AI swarm to play Zork I. A Strategist (Claude Sonnet) decides moves, a Tactician executes them against a Z-machine emulator, and a Cartographer independently verifies game state. The DeepMind governance framework initially blocked the agent from attacking a troll — classifying "attack" as high-risk — even though the troll fight is mandatory. The fix: make governance trust-aware instead of command-aware. [Full experiment writeup](docs/zork-swarm-experiment.md).
 
 ## Quick Start
 
@@ -90,7 +103,7 @@ karnevil9 server --port 3100 --planner claude --agentic
 
 Connect to `ws://localhost:3100/api/ws` for interactive sessions. The chat CLI uses this endpoint. Messages: `submit`, `abort`, `approve`, `ping`/`pong`. Server pushes `session.created`, `event`, `approve.needed`, `error`.
 
-## Architecture
+## How is KarnEvil9 architected?
 
 KarnEvil9 is a pnpm monorepo with 15 packages under `packages/`, all scoped as `@karnevil9/*`:
 
@@ -180,7 +193,7 @@ The entry module exports a `register(api)` function that can call `registerTool(
 
 See the [Claude Code Hello World tutorial](https://oldeucryptoboi.github.io/KarnEvil9/claude-code-hello-world.html) for a full walkthrough.
 
-## Intelligent AI Delegation
+## How does KarnEvil9 implement Google DeepMind's Intelligent AI Delegation?
 
 The `@karnevil9/swarm` package is a complete implementation of Google DeepMind's [Intelligent AI Delegation](https://arxiv.org/abs/2503.02116) framework (Tomasev, Franklin & Osindero, 2026). Nine safety mechanisms translate the paper's five pillars — dynamic assessment, adaptive execution, structural transparency, scalable market coordination, and systemic resilience — into runnable code:
 
@@ -200,7 +213,7 @@ The framework forms a closed loop: delegation failure triggers bond slashing, re
 
 See the full [whitepaper](docs/intelligent-delegation-whitepaper.md) for component deep dives, quantitative results, and a controlled naive-vs-intelligent demonstration.
 
-## Knowledge Vault
+## What is the Knowledge Vault?
 
 The `@karnevil9/vault` package is a Palantir-inspired ontology knowledge store with Obsidian-native markdown storage:
 
@@ -241,7 +254,7 @@ DELETE /api/schedules/:id
 
 Missed schedule policies: `skip`, `catchup_one`, `catchup_all`.
 
-## Security
+## How does KarnEvil9 handle AI safety and security?
 
 - **Permission gates** on every tool invocation with multi-level caching
 - **Policy enforcement** — path allowlisting, SSRF protection (private IP blocking, port whitelist), command filtering

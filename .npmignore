@@ -1,0 +1,49 @@
+# Source code (publish dist only)
+packages/*/src
+packages/*/*.test.ts
+packages/*/tsconfig*.json
+packages/*/vitest.config.ts
+packages/.test-*.jsonl
+*.tsbuildinfo
+
+# Dev files
+.github
+.claude
+.env
+.env.*
+.biomelintrc.json
+biome.json
+tests
+scripts
+/plugins
+docs
+/tools
+coverage
+sessions
+/journal
+.husky
+.dockerignore
+Dockerfile
+docker-compose*.yml
+ecosystem.config.cjs
+extensions
+infra
+hello.txt
+CONTRIBUTING.md
+SECURITY.md
+CHANGELOG.md
+CLAUDE.md
+tsconfig.base.json
+tsconfig.json
+vitest.e2e.config.ts
+pnpm-workspace.yaml
+pnpm-lock.yaml
+
+# Source maps (keep .d.ts but drop maps)
+*.js.map
+*.d.ts.map
+
+# Build artifacts
+node_modules
+.turbo
+*.tgz

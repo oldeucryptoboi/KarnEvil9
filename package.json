@@ -1,8 +1,34 @@
 {
-  "name": "karnevil9-monorepo",
+  "name": "karnevil9",
   "version": "0.1.0",
-  "private": true,
-  "description": "KarnEvil9 — Deterministic agent runtime with explicit plans, typed tools, permissions, and replay",
+  "description": "Deterministic agent runtime with explicit plans, typed tools, permissions, and replay. Implements Google DeepMind's Intelligent AI Delegation framework.",
+  "keywords": [
+    "ai-agents",
+    "llm",
+    "agent-framework",
+    "deterministic-execution",
+    "ai-safety",
+    "multi-agent-systems",
+    "typescript",
+    "deepmind",
+    "ai-delegation",
+    "text-adventure",
+    "interactive-fiction",
+    "agent-runtime",
+    "permissions",
+    "replay",
+    "audit-trail"
+  ],
+  "license": "MIT",
+  "author": "Laurent DeSegur (https://twitter.com/oldeucryptoboi)",
+  "homepage": "https://oldeucryptoboi.github.io/KarnEvil9",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oldeucryptoboi/KarnEvil9.git"
+  },
+  "bugs": {
+    "url": "https://github.com/oldeucryptoboi/KarnEvil9/issues"
+  },
   "bin": {
     "karnevil9": "packages/cli/dist/index.js"
   },

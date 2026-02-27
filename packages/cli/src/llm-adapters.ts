@@ -42,7 +42,7 @@ const PROVIDER_DEFAULTS: Record<string, string> = {
 };
 
 function resolveProvider(opts: { planner?: string }): string {
-  return opts.planner ?? process.env.KARNEVIL9_PLANNER ?? "mock";
+  return opts.planner ?? process.env.KARNEVIL9_PLANNER ?? (process.env.ANTHROPIC_API_KEY ? "claude" : "mock");
 }
 
 function resolveModel(provider: string, opts: { model?: string }): string {

@@ -5,7 +5,7 @@ description: >
   DeepMind-inspired delegation framework for interactive fiction.
   Provides escrow, reputation, firebreak, consensus, anomaly detection,
   behavioral scoring, and re-delegation monitoring as kernel hooks.
-entry: index.ts
+entry: index.js
 permissions: []
 provides:
   hooks:

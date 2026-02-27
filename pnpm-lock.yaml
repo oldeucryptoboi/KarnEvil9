@@ -153,6 +153,9 @@ importers:
       '@karnevil9/tools':
         specifier: workspace:*
         version: link:../tools
+      '@karnevil9/vault':
+        specifier: workspace:*
+        version: link:../vault
       express:
         specifier: ^5.0.0
         version: 5.2.1

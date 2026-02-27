@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": false,
+    "sourceMap": false,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "outDir": ".",
+    "rootDir": "."
+  },
+  "include": ["index.ts"],
+  "exclude": []
+}

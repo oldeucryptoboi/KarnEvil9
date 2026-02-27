@@ -177,6 +177,13 @@ const baseMonitoring = {
 
 export async function register(api: PluginApi): Promise<void> {
   const config = api.config as unknown as SwarmDelegationConfig;
+
+  // Guard: requires emulator and tmpBase to function
+  if (!config?.tmpBase || !config?.emulator) {
+    api.logger.warn("No tmpBase/emulator provided — swarm-delegation plugin will not load (interactive fiction only)");
+    return;
+  }
+
   const log = config.log ?? console.log;
   const ckpt = config.checkpoint;
 

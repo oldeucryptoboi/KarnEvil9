@@ -35,12 +35,12 @@ provides:
   commands:
     - vault-sync
   routes:
-    - vault-status
-    - vault-objects
-    - vault-links
-    - vault-search
-    - vault-context
-    - vault-dashboard
-    - vault-insights
+    - vault/status
+    - vault/objects
+    - vault/links
+    - vault/search
+    - vault/context
+    - vault/dashboard
+    - vault/insights
   services:
     - vault-engine

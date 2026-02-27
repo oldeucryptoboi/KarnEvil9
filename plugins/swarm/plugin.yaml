@@ -36,23 +36,38 @@ provides:
     - leave
     - gossip
     - task
+    - task/:taskId/status
+    - task/:taskId/cancel
+    - task/:taskId/checkpoints
     - result
     - status
     - reputation
     - contracts
+    - contracts/:contractId/renegotiate
+    - contracts/:contractId/renegotiations
+    - contracts/:contractId/renegotiations/:requestId/accept
+    - contracts/:contractId/renegotiations/:requestId/reject
     - events
     - anomalies
     - quarantine
+    - quarantine/:nodeId
     - credentials
+    - credentials/:nodeId
     - tokens
+    - tokens/:dctId/revoke
     - sybil-reports
     - pow-verify
     - rfq
     - bid
     - auctions
     - escrow
+    - escrow/:nodeId
+    - escrow/deposit
     - consensus
     - renegotiations
     - checkpoints
+    - trigger
+    - verify/:taskId/consensus
+    - verify/:taskId/vote
   services:
     - swarm-mesh

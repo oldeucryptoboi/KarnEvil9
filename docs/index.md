@@ -96,6 +96,7 @@ karnevil9 run "list all TypeScript files" --planner claude --mode real
 ## Documentation
 
 - [Architecture Reference](ARCHITECTURE)
+- [Roadmap: KarnEvil9 Computer](roadmap-computer)
 - [Intelligent AI Delegation Whitepaper](intelligent-delegation-whitepaper)
 - [Three Laws Safety Whitepaper](three-laws-whitepaper)
 - [Zork Swarm Experiment](zork-swarm-experiment)

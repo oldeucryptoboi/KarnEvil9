@@ -78,6 +78,13 @@ Steps execute with max 5 concurrency. Each step goes through: input validation â
 
 Plugins are discovered from a directory, each containing a `plugin.yaml` manifest and a JS entry module that exports a `register(api)` function. The PluginAPI provides `registerTool()`, `registerHook()`, `registerRoute()`, `registerCommand()`, `registerService()`. See `plugins/example-logger/` for reference.
 
+## Git Workflow
+
+- **Never push directly to master.** Create a feature branch and open a PR via `gh pr create`.
+- Branch naming: `feat/<short-description>`, `fix/<short-description>`, `refactor/<short-description>`
+- PRs should include a summary of changes and a test plan.
+- After PR approval/merge, delete the stale schedule entries from `sessions/schedules.jsonl` (or via `DELETE /api/schedules/:id`) and restart the server so updated schedules get auto-created.
+
 ## Conventions
 
 - All packages use ESM (`"type": "module"`) with `tsc -b` for building

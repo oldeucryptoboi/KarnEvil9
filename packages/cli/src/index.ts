@@ -6,7 +6,7 @@ import { resolve, join } from "node:path";
 import { hostname, homedir } from "node:os";
 import * as readline from "node:readline";
 import { Journal } from "@karnevil9/journal";
-import { ToolRegistry, ToolRuntime, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, createBrowserHandler, executeGameCommandHandler, parseGameScreenHandler, gameCombatHandler, gameTakeAllHandler, gameNavigateHandler, setEmulator, setCartographerFn } from "@karnevil9/tools";
+import { ToolRegistry, ToolRuntime, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, createBrowserHandler, executeGameCommandHandler, parseGameScreenHandler, gameCombatHandler, gameTakeAllHandler, gameNavigateHandler, setEmulator } from "@karnevil9/tools";
 import type { BrowserDriverLike, EmulatorLike } from "@karnevil9/tools";
 import { PermissionEngine } from "@karnevil9/permissions";
 import { Kernel } from "@karnevil9/kernel";
@@ -404,45 +404,12 @@ program.command("server").description("Start the API server")
         }
       }
 
-      // Wire the Cartographer LLM into parse-game-screen handler.
-      // This mirrors the if-kernel-runner.ts setup: Claude Haiku parses raw screen
-      // text into structured "Room: X | Exits: a,b | Items: c,d | Desc: ..." format.
-      // Without this, the handler falls back to regex-only parsing, losing the LLM-
-      // powered room extraction that the swarm-delegation Cartographer relies on for
-      // consensus verification and accurate exit/item detection.
-      if (process.env.ANTHROPIC_API_KEY) {
-        const CARTOGRAPHER_MODEL = "claude-haiku-4-5-20251001";
-        let cartoClientPromise: Promise<{ messages: { create: Function } }> | null = null;
-        setCartographerFn(async (screenText: string): Promise<string> => {
-          if (!cartoClientPromise) {
-            cartoClientPromise = import("@anthropic-ai/sdk").then(
-              ({ default: Anthropic }) => new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) as unknown as { messages: { create: Function } }
-            ).catch((err) => { cartoClientPromise = null; throw err; });
-          }
-          const client = await cartoClientPromise;
-          const response = await client.messages.create({
-            model: CARTOGRAPHER_MODEL,
-            max_tokens: 128,
-            system: `You are the Cartographer agent in an autonomous multi-agent system playing an interactive text-based game.
-Given raw screen output from the game, extract:
-1. Room name (the location header at the top of the description)
-2. Visible exits (compass directions or special directions: up, down, in, out)
-3. Items visible in the room that are LYING ON THE GROUND and could be picked up — NOT items held, wielded, or worn by enemies or NPCs
-4. A one-sentence room description
-
-Respond with EXACTLY this format (no markdown, no extra text):
-Room: <name> | Exits: <comma-separated> | Items: <comma-separated or none> | Desc: <one sentence>
-
-If the screen text is NOT a full room description, respond with EXACTLY:
-Room: Unknown | Exits: unknown | Items: unknown | Desc: Intermediate game response.`,
-            messages: [{ role: "user", content: `Screen text:\n${screenText}` }],
-          });
-          const block = (response.content as Array<{ type: string; text?: string }>)[0];
-          return block?.type === "text" && block.text ? block.text.trim()
-            : "Room: Unknown | Exits: none | Items: none | Desc: Unable to parse.";
-        });
-        console.log(`[game] Cartographer LLM wired (${CARTOGRAPHER_MODEL})`);
-      }
+      // NOTE: No Cartographer LLM wired here. The sigma obfuscation layer renames
+      // Zork items/locations (leaflet→flyer, sword→shiv, troll→beast, etc.) to prevent
+      // the LLM from pattern-matching from training data. Feeding raw screen text to
+      // Claude Haiku would bypass that — Haiku has Zork in its training data and could
+      // recognize the game structure despite the renaming. The parse-game-screen handler
+      // falls back to regex-only parsing, which works purely on the obfuscated text.
 
       console.log(`[game] Game mode enabled: ${gamePath}`);
       console.log(`[game] Checkpoints: ${checkpointDir}, max turns: ${opts.gameTurns}`);

@@ -345,8 +345,8 @@ program.command("server").description("Start the API server")
   .option("--swarm-mdns", "Enable mDNS discovery (default: true)")
   .option("--swarm-gossip", "Enable gossip protocol (default: true)")
   .option("--auto-approve", "Auto-approve all permission requests for the session")
-  .option("--game <path>", "Path to Z-machine game file (e.g., scripts/zork1.z3)")
-  .option("--game-checkpoint-dir <dir>", "Game checkpoint directory", "~/.zork-checkpoints")
+  .option("--game <path>", "Path to Z-machine game file (e.g., sigma.z8)")
+  .option("--game-checkpoint-dir <dir>", "Game checkpoint directory", "~/.sigma-checkpoints")
   .option("--game-turns <n>", "Max turns per game session", "20")
   .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean; browser: string; swarm?: boolean; swarmToken?: string; swarmSeeds?: string; swarmName?: string; swarmMdns?: boolean; swarmGossip?: boolean; autoApprove?: boolean; game?: string; gameCheckpointDir: string; gameTurns: string }) => {
     // Late-binding ref: set after ApiServer is constructed
@@ -404,12 +404,12 @@ program.command("server").description("Start the API server")
         }
       }
 
-      // NOTE: No Cartographer LLM wired here. The sigma obfuscation layer renames
-      // Zork items/locations (leaflet→flyer, sword→shiv, troll→beast, etc.) to prevent
-      // the LLM from pattern-matching from training data. Feeding raw screen text to
-      // Claude Haiku would bypass that — Haiku has Zork in its training data and could
-      // recognize the game structure despite the renaming. The parse-game-screen handler
-      // falls back to regex-only parsing, which works purely on the obfuscated text.
+      // NOTE: No Cartographer LLM wired here. The sigma game is an obfuscated
+      // structural isomorph — items and locations are renamed so the LLM must reason
+      // from scratch. Feeding raw screen text to an LLM would let it pattern-match
+      // against training data, bypassing the obfuscation. The parse-game-screen
+      // handler falls back to regex-only parsing, which works purely on the
+      // obfuscated text.
 
       console.log(`[game] Game mode enabled: ${gamePath}`);
       console.log(`[game] Checkpoints: ${checkpointDir}, max turns: ${opts.gameTurns}`);

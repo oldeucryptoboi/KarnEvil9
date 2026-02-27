@@ -106,7 +106,7 @@ export class GameSessionManager {
       // Same pattern as if-kernel-runner.ts line 341.
       await emulator.launch(this.gamePath, {
         seed: this.rngSeed,
-        savePath: join(this.checkpointDir, "zork1.qzl"),
+        savePath: join(this.checkpointDir, "game.qzl"),
       });
 
       // Replay command history from checkpoint to resume game state (~5ms/cmd).

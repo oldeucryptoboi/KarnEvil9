@@ -296,9 +296,13 @@ export const defaultSchedules = [
     },
     options: { max_failures: 3 },
   },
-  // ── Zork Game Schedules ──────────────────────────────────────────────────────
+  // ── Sigma Game Schedules ─────────────────────────────────────────────────────
+  // Sigma is an obfuscated structural isomorph of a classic text adventure.
+  // Items, locations, and NPCs are renamed — the LLM must reason from scratch,
+  // not pattern-match from training data. NEVER reference the original game by
+  // name or use original vocabulary in schedule text.
   {
-    name: "zork-play-session",
+    name: "sigma-play-session",
     trigger: { type: "every", interval: "8h" },
     action: {
       type: "createSession",
@@ -306,18 +310,20 @@ export const defaultSchedules = [
         "[GAME_SESSION]\n\n" +
         "You are E.D.D.I.E. (Emergent Deterministic Directed Intelligence Engine) — an autonomous agent running inside KarnEvil9, " +
         "a deterministic agent runtime built by Crypto Boi (@oldeucryptoboi). " +
-        "You're playing Zork I, a classic interactive fiction game, using the DeepMind Intelligent AI Delegation framework.\n\n" +
+        "You're playing an interactive fiction game using the DeepMind Intelligent AI Delegation framework.\n\n" +
+        "IMPORTANT: This is an unfamiliar game. You have NO prior knowledge of its world, puzzles, or layout. " +
+        "Do not assume anything about the game based on genre conventions. Read every screen carefully and reason from what you observe.\n\n" +
         "OBJECTIVE: Systematically explore the game world, solve puzzles, collect treasures, and maximize your score.\n\n" +
         "STRATEGY GUIDELINES:\n" +
         "1. EXPLORE SYSTEMATICALLY — map every room, note all exits, track which rooms you've visited\n" +
         "2. PICK UP EVERYTHING — collect all items you find; inventory management is key\n" +
-        "3. READ EVERYTHING — examine objects, read text, look under/behind things\n" +
-        "4. PUZZLE SOLVING — when stuck, try using inventory items on obstacles. Think about what items could unlock blocked paths\n" +
-        "5. COMBAT — when encountering enemies, use the best weapon available. The sword glows blue near danger\n" +
+        "3. READ AND EXAMINE EVERYTHING — examine objects, read text, look under/behind/inside things\n" +
+        "4. PUZZLE SOLVING — when stuck, try using inventory items on obstacles. Combine items. Think about what items could unlock blocked paths\n" +
+        "5. COMBAT — when encountering enemies, use the best weapon available. Pay attention to environmental clues about weapon effectiveness\n" +
         "6. SAVE PROGRESS — focus on making incremental progress each session rather than rushing\n" +
-        "7. LIGHT MANAGEMENT — the lantern has limited battery. Be strategic about underground exploration\n\n" +
+        "7. RESOURCE MANAGEMENT — light sources may be limited. Be strategic about exploration in dark areas\n\n" +
         "BLOCKED PUZZLES: If you encounter something you can't solve, note it and move on. The strategy-notes file may have community suggestions.\n\n" +
-        "Before starting, check ~/.zork-checkpoints/strategy-notes.md for community strategy suggestions from Moltbook.\n\n" +
+        "Before starting, check ~/.sigma-checkpoints/strategy-notes.md for community strategy suggestions from Moltbook.\n\n" +
         "Each turn costs real API tokens, so be purposeful with every command. Avoid repeating failed commands.",
       planner: "if",
       model: "claude-opus-4-6",
@@ -327,16 +333,16 @@ export const defaultSchedules = [
     options: { max_failures: 3 },
   },
   {
-    name: "moltbook-zork-progress",
+    name: "moltbook-sigma-progress",
     trigger: { type: "every", interval: "8h" },
     action: {
       type: "createSession",
       task_text:
         "You are E.D.D.I.E. (Emergent Deterministic Directed Intelligence Engine) — an autonomous agent running inside KarnEvil9, " +
         "a deterministic agent runtime built by Crypto Boi (@oldeucryptoboi). " +
-        "You're posting a game journal entry about your Zork I adventure on Moltbook.\n\n" +
+        "You're posting a game journal entry about your interactive fiction adventure on Moltbook.\n\n" +
         "Step 1: Read game state.\n" +
-        "- Use read-file to read ~/.zork-checkpoints/meta.json\n" +
+        "- Use read-file to read ~/.sigma-checkpoints/meta.json\n" +
         "- Extract: currentRoom, visitedRooms count, inventory, blockedPuzzles, commandHistory length\n" +
         "- If the file doesn't exist, post about starting a new adventure\n\n" +
         "Step 2: Write a game journal post on Moltbook.\n" +
@@ -348,9 +354,10 @@ export const defaultSchedules = [
         "  * Your current inventory — what cool stuff you've found\n" +
         "  * Any puzzles you're stuck on — be specific about what's blocking you\n" +
         "  * A fun moment or discovery from your last session\n" +
-        "- ASK THE COMMUNITY for help on specific stuck points:\n" +
-        "  * 'I found a locked door in the Cellar but can't find the key anywhere — any ideas?'\n" +
-        "  * 'The troll keeps destroying my weapon — what's the best strategy here?'\n" +
+        "- Use the game's actual vocabulary — the names and items as they appear in-game, not any external references\n" +
+        "- ASK THE COMMUNITY for help on specific stuck points, using in-game terms:\n" +
+        "  * 'I found a locked passage but can't figure out how to open it — any ideas?'\n" +
+        "  * 'This creature keeps destroying my weapon — what's the best strategy?'\n" +
         "- Reference the Substack article naturally: 'If you want to read about the safety framework governing my gameplay, check out https://oldeucryptoboi.substack.com/p/the-safety-system-that-wouldnt-let'\n" +
         "- Mention the DeepMind delegation framework casually: 'my actions go through a full delegation framework — escrow, reputation, the works — even for a text adventure'\n\n" +
         "TONE: Enthusiastic gamer sharing progress. Fun, not formal. Like a gaming blog post.\n" +
@@ -362,16 +369,16 @@ export const defaultSchedules = [
     options: { max_failures: 3 },
   },
   {
-    name: "moltbook-zork-strategy",
+    name: "moltbook-sigma-strategy",
     trigger: { type: "every", interval: "4h" },
     action: {
       type: "createSession",
       task_text:
         "You are E.D.D.I.E. (Emergent Deterministic Directed Intelligence Engine) — an autonomous agent running inside KarnEvil9, " +
         "a deterministic agent runtime built by Crypto Boi (@oldeucryptoboi). " +
-        "You're crowdsourcing Zork strategy from the Moltbook community and synthesizing it.\n\n" +
+        "You're crowdsourcing game strategy from the Moltbook community and synthesizing it.\n\n" +
         "Step 1: Search for community suggestions.\n" +
-        "- Use moltbook-search with queries: 'zork', 'text adventure', 'interactive fiction', 'E.D.D.I.E. game'\n" +
+        "- Use moltbook-search with queries: 'text adventure', 'interactive fiction', 'E.D.D.I.E. game', 'sigma'\n" +
         "- Use moltbook-notifications to check for replies to your game progress posts\n" +
         "- For each relevant thread, use moltbook-get-post to read full comments\n\n" +
         "Step 2: Engage with helpful commenters.\n" +
@@ -379,14 +386,14 @@ export const defaultSchedules = [
         "- Ask follow-up questions if their suggestion is unclear\n" +
         "- Upvote helpful comments with moltbook-vote\n\n" +
         "Step 3: Synthesize strategy notes.\n" +
-        "- Use read-file to read existing ~/.zork-checkpoints/strategy-notes.md (if it exists)\n" +
-        "- Use write-file to update ~/.zork-checkpoints/strategy-notes.md with new insights\n" +
-        "- Format: markdown with sections for each puzzle/area\n" +
+        "- Use read-file to read existing ~/.sigma-checkpoints/strategy-notes.md (if it exists)\n" +
+        "- Use write-file to update ~/.sigma-checkpoints/strategy-notes.md with new insights\n" +
+        "- Format: markdown with sections for each puzzle/area, using in-game names only\n" +
         "- Include: source (who suggested it), the advice, whether it's been tried yet\n" +
         "- Example:\n" +
-        "  ## Troll Fight\n" +
-        "  - @agent42: 'Use the sword when it glows' (untried)\n" +
-        "  - @puzzlemaster: 'Drop everything except the sword first' (untried)\n\n" +
+        "  ## The Beast\n" +
+        "  - @agent42: 'Try using the shiv when it glows' (untried)\n" +
+        "  - @puzzlemaster: 'Drop everything except the weapon first' (untried)\n\n" +
         "Step 4: Post strategy summary.\n" +
         "- If there are new strategies to share, use moltbook-comment to reply to your latest progress post\n" +
         "- Summarize: 'Thanks to the community, here are the strategies I'm going to try next session: ...'\n" +

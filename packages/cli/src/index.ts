@@ -409,6 +409,47 @@ program.command("server").description("Start the API server")
           console.warn(`[game] Tool manifest for "${toolName}" not found in ${TOOLS_DIR} — ensure tool.yaml exists`);
         }
       }
+
+      // Wire the Cartographer LLM into parse-game-screen handler.
+      // This mirrors the if-kernel-runner.ts setup: Claude Haiku parses raw screen
+      // text into structured "Room: X | Exits: a,b | Items: c,d | Desc: ..." format.
+      // Without this, the handler falls back to regex-only parsing, losing the LLM-
+      // powered room extraction that the swarm-delegation Cartographer relies on for
+      // consensus verification and accurate exit/item detection.
+      if (process.env.ANTHROPIC_API_KEY) {
+        const CARTOGRAPHER_MODEL = "claude-haiku-4-5-20251001";
+        let cartoClientPromise: Promise<{ messages: { create: Function } }> | null = null;
+        setCartographerFn(async (screenText: string): Promise<string> => {
+          if (!cartoClientPromise) {
+            cartoClientPromise = import("@anthropic-ai/sdk").then(
+              ({ default: Anthropic }) => new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) as unknown as { messages: { create: Function } }
+            ).catch((err) => { cartoClientPromise = null; throw err; });
+          }
+          const client = await cartoClientPromise;
+          const response = await client.messages.create({
+            model: CARTOGRAPHER_MODEL,
+            max_tokens: 128,
+            system: `You are the Cartographer agent in an autonomous multi-agent system playing an interactive text-based game.
+Given raw screen output from the game, extract:
+1. Room name (the location header at the top of the description)
+2. Visible exits (compass directions or special directions: up, down, in, out)
+3. Items visible in the room that are LYING ON THE GROUND and could be picked up — NOT items held, wielded, or worn by enemies or NPCs
+4. A one-sentence room description
+
+Respond with EXACTLY this format (no markdown, no extra text):
+Room: <name> | Exits: <comma-separated> | Items: <comma-separated or none> | Desc: <one sentence>
+
+If the screen text is NOT a full room description, respond with EXACTLY:
+Room: Unknown | Exits: unknown | Items: unknown | Desc: Intermediate game response.`,
+            messages: [{ role: "user", content: `Screen text:\n${screenText}` }],
+          });
+          const block = (response.content as Array<{ type: string; text?: string }>)[0];
+          return block?.type === "text" && block.text ? block.text.trim()
+            : "Room: Unknown | Exits: none | Items: none | Desc: Unable to parse.";
+        });
+        console.log(`[game] Cartographer LLM wired (${CARTOGRAPHER_MODEL})`);
+      }
+
       console.log(`[game] Game mode enabled: ${gamePath}`);
       console.log(`[game] Checkpoints: ${checkpointDir}, max turns: ${opts.gameTurns}`);
     }

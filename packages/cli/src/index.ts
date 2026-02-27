@@ -579,6 +579,7 @@ program.command("server").description("Start the API server")
       pluginRegistry,
       planner,
       agentic: opts.agentic ?? false,
+      defaultMode: opts.agentic ? "real" : "mock",
       activeMemory,
       metricsCollector,
       scheduler,

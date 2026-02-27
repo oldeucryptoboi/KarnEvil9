@@ -38,6 +38,11 @@
   "devDependencies": {
     "@types/ws": "^8.0.0"
   },
+  "files": ["dist"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "license": "MIT",
   "repository": {
     "type": "git",

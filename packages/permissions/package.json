@@ -17,6 +17,11 @@
     "cron-parser": "^4.9.0",
     "uuid": "^11.0.0"
   },
+  "files": ["dist"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "license": "MIT",
   "repository": {
     "type": "git",

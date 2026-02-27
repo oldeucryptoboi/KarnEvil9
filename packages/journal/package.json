@@ -15,6 +15,11 @@
     "@karnevil9/schemas": "workspace:*",
     "uuid": "^11.0.0"
   },
+  "files": ["dist"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -314,6 +314,14 @@ pnpm --filter @karnevil9/kernel test
 
 Create a `.env` file in the project root (gitignored).
 
+## Blog
+
+Deep dives, experiment writeups, and development notes are published on the [oldeucryptoboi Substack](https://oldeucryptoboi.substack.com):
+
+- [Intelligent AI Delegation: From Theory to Working Code](https://oldeucryptoboi.substack.com/p/intelligent-ai-delegation-from-theory-to-working-code) — Reference implementation of the Tomasev et al. (2026) framework
+- [The Three Laws of Safe AI Agents](https://oldeucryptoboi.substack.com/p/the-three-laws-of-safe-ai-agents) — How KarnEvil9 implements Asimov's framework as runtime-enforced guardrails
+- [The Safety System That Wouldn't Let My AI Win at Zork](https://oldeucryptoboi.substack.com/p/the-safety-system-that-wouldnt-let) — What happens when delegation governance meets a text adventure
+
 ## License
 
 Private

@@ -12,8 +12,9 @@
     "lint": "biome lint src"
   },
   "dependencies": {
-    "@karnevil9/schemas": "workspace:*",
     "@karnevil9/journal": "workspace:*",
+    "@karnevil9/schemas": "workspace:*",
+    "cron-parser": "^4.9.0",
     "uuid": "^11.0.0"
   },
   "license": "MIT",

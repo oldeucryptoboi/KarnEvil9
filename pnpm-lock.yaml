@@ -332,6 +332,9 @@ importers:
       '@karnevil9/schemas':
         specifier: workspace:*
         version: link:../schemas
+      cron-parser:
+        specifier: ^4.9.0
+        version: 4.9.0
       uuid:
         specifier: ^11.0.0
         version: 11.1.0

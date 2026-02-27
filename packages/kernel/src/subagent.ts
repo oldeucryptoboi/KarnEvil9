@@ -6,10 +6,11 @@ import type {
   Planner,
   ModelPricing,
   CheckpointFinding,
+  ApprovalDecision,
 } from "@karnevil9/schemas";
 import type { Journal } from "@karnevil9/journal";
 import type { ToolRegistry, ToolRuntime } from "@karnevil9/tools";
-import type { PermissionEngine } from "@karnevil9/permissions";
+import { PermissionEngine, DelegationBridge } from "@karnevil9/permissions";
 import { v4 as uuid } from "uuid";
 import { Kernel } from "./kernel.js";
 
@@ -43,6 +44,8 @@ export interface SubagentDeps {
   mode: ExecutionMode;
   policy: PolicyProfile;
   modelPricing?: ModelPricing;
+  parentSessionId?: string;
+  delegationSecret?: string;
 }
 
 // ─── Runner ─────────────────────────────────────────────────────────
@@ -59,11 +62,29 @@ export async function runSubagent(
     max_iterations: request.max_iterations,
   };
 
+  // Derive constrained child permissions via delegation bridge
+  let childPermissions = deps.permissions;
+  if (deps.parentSessionId && deps.delegationSecret && deps.permissions) {
+    const bridge = new DelegationBridge({ signingSecret: deps.delegationSecret });
+    const parentGrants = deps.permissions.listGrants(deps.parentSessionId);
+    const token = bridge.deriveChildToken(parentGrants, uuid(), {
+      tool_allowlist: request.tool_allowlist,
+    });
+    const childEngine = new PermissionEngine(
+      deps.journal,
+      deps.permissions.getPromptFn(),
+    );
+    bridge.applyTokenAsGrants(childEngine, "child-" + uuid(), token);
+    const enforcer = bridge.createEnforcer(token);
+    childEngine.setDCTEnforcer(enforcer);
+    childPermissions = childEngine;
+  }
+
   const childKernel = new Kernel({
     journal: deps.journal,
     toolRegistry: deps.toolRegistry,
     toolRuntime: deps.toolRuntime,
-    permissions: deps.permissions,
+    permissions: childPermissions,
     planner: deps.planner,
     mode: deps.mode,
     limits,

@@ -30,7 +30,7 @@ description: "Open-source deterministic agent runtime implementing Google DeepMi
 
 # KarnEvil9
 
-**Deterministic agent runtime with explicit plans, typed tools, permissions, and replay.** KarnEvil9 is the first open-source implementation of Google DeepMind's [Intelligent AI Delegation](intelligent-delegation-whitepaper) framework ([Tomasev, Franklin & Osindero, 2026](https://arxiv.org/abs/2503.02116)), translating all five pillars of the paper into runnable TypeScript.
+**Deterministic agent runtime with explicit plans, typed tools, permissions, and replay.** KarnEvil9 is the first open-source implementation of Google DeepMind's [Intelligent AI Delegation](intelligent-delegation-whitepaper) framework ([Tomasev, Franklin & Osindero, 2026](https://arxiv.org/abs/2602.11865)), translating all five pillars of the paper into runnable TypeScript.
 
 KarnEvil9 converts a natural-language task into a structured execution plan, runs each step under fine-grained permission control, and records every event in a SHA-256 hash-chain journal. It supports single-shot execution, an agentic feedback loop with iterative re-planning, and P2P task delegation across a swarm mesh with nine safety mechanisms.
 

@@ -2,7 +2,7 @@
 
 ## What is KarnEvil9?
 
-KarnEvil9 is an open-source deterministic agent runtime that converts natural-language tasks into structured execution plans with typed tools, fine-grained permissions, and tamper-evident replay. It is the first public implementation of Google DeepMind's [Intelligent AI Delegation](docs/intelligent-delegation-whitepaper.md) framework ([Tomasev, Franklin & Osindero, 2026](https://arxiv.org/abs/2503.02116)) — translating all five pillars of the paper into runnable TypeScript.
+KarnEvil9 is an open-source deterministic agent runtime that converts natural-language tasks into structured execution plans with typed tools, fine-grained permissions, and tamper-evident replay. It is the first public implementation of Google DeepMind's [Intelligent AI Delegation](docs/intelligent-delegation-whitepaper.md) framework ([Tomasev, Franklin & Osindero, 2026](https://arxiv.org/abs/2602.11865)) — translating all five pillars of the paper into runnable TypeScript.
 
 Every step runs under permission gates, every event is recorded in a SHA-256 hash-chain journal, and multi-agent delegation is governed by nine safety mechanisms: cognitive friction, liability firebreaks, graduated authority, escrow bonds, outcome verification, consensus verification, reputation tracking, delegatee routing, and re-delegation.
 
@@ -195,7 +195,7 @@ See the [Claude Code Hello World tutorial](https://oldeucryptoboi.github.io/Karn
 
 ## How does KarnEvil9 implement Google DeepMind's Intelligent AI Delegation?
 
-The `@karnevil9/swarm` package is a complete implementation of Google DeepMind's [Intelligent AI Delegation](https://arxiv.org/abs/2503.02116) framework (Tomasev, Franklin & Osindero, 2026). Nine safety mechanisms translate the paper's five pillars — dynamic assessment, adaptive execution, structural transparency, scalable market coordination, and systemic resilience — into runnable code:
+The `@karnevil9/swarm` package is a complete implementation of Google DeepMind's [Intelligent AI Delegation](https://arxiv.org/abs/2602.11865) framework (Tomasev, Franklin & Osindero, 2026). Nine safety mechanisms translate the paper's five pillars — dynamic assessment, adaptive execution, structural transparency, scalable market coordination, and systemic resilience — into runnable code:
 
 | Component | Paper Pillar | Purpose |
 |-----------|-------------|---------|

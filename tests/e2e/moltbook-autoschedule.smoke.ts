@@ -120,18 +120,13 @@ describe("Moltbook autoSchedule Smoke", () => {
     const schedules = scheduler.listSchedules();
     const names = schedules.map((s) => s.name);
 
-    expect(names).toContain("moltbook-check-feed");
     expect(names).toContain("moltbook-check-notifications");
     expect(names).toContain("moltbook-check-dms");
     expect(names).toContain("moltbook-karma-engage");
     expect(names).toContain("moltbook-close-loop");
+    expect(names).not.toContain("moltbook-check-feed");
 
     // Verify each schedule is active and has the right trigger
-    const feed = schedules.find((s) => s.name === "moltbook-check-feed")!;
-    expect(feed.status).toBe("active");
-    expect(feed.trigger).toEqual({ type: "every", interval: "4h" });
-    expect(feed.action.type).toBe("createSession");
-
     const notifs = schedules.find((s) => s.name === "moltbook-check-notifications")!;
     expect(notifs.status).toBe("active");
     expect(notifs.trigger).toEqual({ type: "every", interval: "1h" });

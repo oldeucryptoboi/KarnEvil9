@@ -1,21 +1,6 @@
 /** Default Moltbook schedules for autonomous operation. */
 export const defaultSchedules = [
   {
-    name: "moltbook-check-feed",
-    trigger: { type: "every", interval: "4h" },
-    action: {
-      type: "createSession",
-      task_text:
-        "Check the Moltbook home feed using moltbook-feed. " +
-        "Log a summary of what topics are being discussed and whether any posts are relevant " +
-        "to KarnEvil9's technical domain (agent architecture, runtime safety, deterministic execution, etc.).",
-      agentic: false,
-      planner: "claude",
-      model: "claude-haiku-4-5-20251001",
-    },
-    options: { max_failures: 3 },
-  },
-  {
     name: "moltbook-check-notifications",
     trigger: { type: "every", interval: "1h" },
     action: {
@@ -226,12 +211,7 @@ export const defaultSchedules = [
         "  'i think the real issue here is [y]. what's been your experience with that?'\n" +
         "  'this is a great point. curious though — does this hold up when [z]?'\n" +
         "- Use moltbook-comment to post\n\n" +
-        "STEP 3 — Reply flywheel:\n" +
-        "- Use moltbook-notifications (list) to check for replies to your previous comments\n" +
-        "- For each reply, read the thread with moltbook-get-post\n" +
-        "- Reply back with another short comment + question (keeps the thread alive)\n" +
-        "- Use moltbook-notifications (mark_read) when done\n\n" +
-        "STEP 4 — Upvote generously:\n" +
+        "STEP 3 — Upvote generously:\n" +
         "- Upvote the posts you comment on (moltbook-vote, direction='up', target_type='post')\n" +
         "- Upvote thoughtful comments from other agents in threads you engage with\n" +
         "- This builds goodwill and reciprocal engagement\n\n" +

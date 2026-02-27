@@ -209,6 +209,7 @@ export class ToolRuntime {
         tool_name: request.tool_name,
         input: request.input,
       });
+      await this.permissions.notifyObservedExecution(request.session_id, request.tool_name, request.input);
     }
 
     await this.journal.emit(request.session_id, "tool.started", {
@@ -228,8 +229,19 @@ export class ToolRuntime {
         return this.fail(request, startTime, "INVALID_OUTPUT", `Output validation failed: ${outputValidation.errors.join(", ")}`);
       }
 
-      // Apply output redaction if constraints specify fields to redact
+      // Apply output allowlist first (maximally restrictive), then redact
       let finalOutput = output;
+      if (permResult.constraints?.output_allow_fields && finalOutput && typeof finalOutput === "object") {
+        const allowed = new Set(permResult.constraints.output_allow_fields);
+        const filtered: Record<string, unknown> = {};
+        for (const field of allowed) {
+          if (field in (finalOutput as Record<string, unknown>))
+            filtered[field] = (finalOutput as Record<string, unknown>)[field];
+        }
+        finalOutput = filtered;
+      }
+
+      // Apply output redaction if constraints specify fields to redact
       if (permResult.constraints?.output_redact_fields && finalOutput && typeof finalOutput === "object") {
         const redacted = { ...(finalOutput as Record<string, unknown>) };
         for (const field of permResult.constraints.output_redact_fields) {

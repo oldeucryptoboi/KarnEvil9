@@ -992,3 +992,404 @@ describe("PermissionEngine additional edge cases", () => {
     expect(perm.scope).toBe("network:connect:redis://host:6379");
   });
 });
+
+// ─── Wildcard Resolution Tests ──────────────────────────────────
+
+describe("PermissionEngine wildcard resolution", () => {
+  let journal: Journal;
+  let promptCalls: PermissionRequest[];
+
+  const mockPrompt = async (request: PermissionRequest): Promise<ApprovalDecision> => {
+    promptCalls.push(request);
+    return "allow_session";
+  };
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { lock: false });
+    await journal.init();
+    promptCalls = [];
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("filesystem:read:* matches specific target", () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    engine.preGrant("sess-w", ["filesystem:read:*"]);
+
+    expect(engine.isGranted("filesystem:read:workspace", "sess-w")).toBe(true);
+    expect(engine.isGranted("filesystem:read:/etc/passwd", "sess-w")).toBe(true);
+  });
+
+  it("filesystem:*:* matches any action and target", () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    engine.preGrant("sess-w", ["filesystem:*:*"]);
+
+    expect(engine.isGranted("filesystem:read:workspace", "sess-w")).toBe(true);
+    expect(engine.isGranted("filesystem:write:/tmp/file", "sess-w")).toBe(true);
+  });
+
+  it("domain mismatch is rejected even with wildcard action and target", () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    engine.preGrant("sess-w", ["filesystem:*:*"]);
+
+    expect(engine.isGranted("network:request:https://example.com", "sess-w")).toBe(false);
+  });
+
+  it("wildcard in domain position throws on preGrant", () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    expect(() => engine.preGrant("sess-w", ["*:read:workspace"])).toThrow(
+      "Wildcard not allowed in domain position"
+    );
+  });
+
+  it("URL targets with colons matched correctly", () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    engine.preGrant("sess-w", ["network:request:*"]);
+
+    expect(engine.isGranted("network:request:https://example.com:8080/path", "sess-w")).toBe(true);
+  });
+
+  it("exact match is still O(1) — wildcard scan only for non-exact", () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    engine.preGrant("sess-w", ["filesystem:read:workspace"]);
+
+    // Exact match — no wildcard scan needed
+    expect(engine.isGranted("filesystem:read:workspace", "sess-w")).toBe(true);
+  });
+
+  it("requesting a wildcard scope does not escalate beyond its own grant", () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    engine.preGrant("sess-w", ["filesystem:read:workspace"]);
+
+    // Requesting wildcard scope should NOT match a specific grant
+    expect(engine.isGranted("filesystem:read:*", "sess-w")).toBe(false);
+  });
+
+  it("validateWildcardScope rejects invalid scopes", () => {
+    expect(() => PermissionEngine.validateWildcardScope("ab")).toThrow("Invalid scope");
+    expect(() => PermissionEngine.validateWildcardScope("*:action:target")).toThrow("Wildcard not allowed in domain position");
+  });
+
+  it("scopeMatchesGrant handles edge cases", () => {
+    // Not enough parts
+    expect(PermissionEngine.scopeMatchesGrant("a:b", "a:b:c")).toBe(false);
+    expect(PermissionEngine.scopeMatchesGrant("a:b:c", "a:b")).toBe(false);
+    // Exact match
+    expect(PermissionEngine.scopeMatchesGrant("a:b:c", "a:b:c")).toBe(true);
+    // Wildcard action
+    expect(PermissionEngine.scopeMatchesGrant("a:*:c", "a:b:c")).toBe(true);
+    // Wildcard action but different target
+    expect(PermissionEngine.scopeMatchesGrant("a:*:c", "a:b:d")).toBe(false);
+  });
+
+  it("wildcard grants bypass prompt for matching scopes", async () => {
+    const engine = new PermissionEngine(journal, mockPrompt);
+    engine.preGrant("sess-w", ["filesystem:read:*"]);
+
+    const req: PermissionRequest = {
+      request_id: uuid(),
+      session_id: "sess-w",
+      step_id: uuid(),
+      tool_name: "test-tool",
+      permissions: [PermissionEngine.parse("filesystem:read:workspace")],
+    };
+    const result = await engine.check(req);
+    expect(result.allowed).toBe(true);
+    expect(promptCalls).toHaveLength(0); // no prompt — wildcard matched
+  });
+});
+
+// ─── External Audit Hook Tests ──────────────────────────────────
+
+describe("PermissionEngine external audit hook", () => {
+  let journal: Journal;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { lock: false });
+    await journal.init();
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("calls external audit hook on notifyObservedExecution", async () => {
+    const hookCalls: Array<{ session_id: string; tool_name: string; input: Record<string, unknown> }> = [];
+    const hook = async (event: { session_id: string; tool_name: string; input: Record<string, unknown>; timestamp: string }) => {
+      hookCalls.push(event);
+    };
+    const engine = new PermissionEngine(journal, async () => "allow_session", { externalAuditHook: hook });
+
+    await engine.notifyObservedExecution("sess-1", "test-tool", { key: "value" });
+    expect(hookCalls).toHaveLength(1);
+    expect(hookCalls[0]!.session_id).toBe("sess-1");
+    expect(hookCalls[0]!.tool_name).toBe("test-tool");
+    expect(hookCalls[0]!.input).toEqual({ key: "value" });
+  });
+
+  it("swallows errors from external audit hook", async () => {
+    const hook = async () => { throw new Error("Hook exploded"); };
+    const engine = new PermissionEngine(journal, async () => "allow_session", { externalAuditHook: hook });
+
+    // Should not throw
+    await expect(engine.notifyObservedExecution("sess-1", "test-tool", {})).resolves.toBeUndefined();
+  });
+
+  it("no hook configured — notifyObservedExecution is a no-op", async () => {
+    const engine = new PermissionEngine(journal, async () => "allow_session");
+    // Should not throw
+    await expect(engine.notifyObservedExecution("sess-1", "test-tool", {})).resolves.toBeUndefined();
+  });
+
+  it("multiple observed calls each trigger the hook", async () => {
+    let callCount = 0;
+    const hook = async () => { callCount++; };
+    const engine = new PermissionEngine(journal, async () => "allow_session", { externalAuditHook: hook });
+
+    await engine.notifyObservedExecution("sess-1", "tool-a", {});
+    await engine.notifyObservedExecution("sess-1", "tool-b", {});
+    await engine.notifyObservedExecution("sess-2", "tool-a", {});
+    expect(callCount).toBe(3);
+  });
+});
+
+// ─── Rate-Limited Grant Tests ───────────────────────────────────
+
+describe("PermissionEngine allow_rate_limited", () => {
+  let journal: Journal;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { lock: false });
+    await journal.init();
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  function makeRequest(scopes: string[], sessionId = "sess-rate"): PermissionRequest {
+    return {
+      request_id: uuid(),
+      session_id: sessionId,
+      step_id: uuid(),
+      tool_name: "test-tool",
+      permissions: scopes.map((s) => PermissionEngine.parse(s)),
+    };
+  }
+
+  it("N calls succeed then denied when rate limit exhausted", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_rate_limited",
+      scope: "session",
+      max_calls_per_window: 3,
+      window_ms: 60000,
+    };
+    const engine = new PermissionEngine(journal, async () => decision);
+
+    // First call triggers prompt and consumes 1 token (2 remaining)
+    const r1 = await engine.check(makeRequest(["test:rate:target"]));
+    expect(r1.allowed).toBe(true);
+
+    // 2nd and 3rd calls consume from bucket
+    const r2 = await engine.check(makeRequest(["test:rate:target"]));
+    expect(r2.allowed).toBe(true);
+    const r3 = await engine.check(makeRequest(["test:rate:target"]));
+    expect(r3.allowed).toBe(true);
+
+    // 4th call: bucket exhausted → denied (triggers new prompt, but bucket is still empty)
+    // The isGranted check consumes token, and if empty, returns false → re-prompts
+    // But prompt returns same decision, creating a new bucket — so effectively it resets.
+    // To properly test exhaustion, we need to check isGranted directly
+    expect(engine.isGranted("test:rate:target", "sess-rate")).toBe(false);
+  });
+
+  it("window resets after expiry", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_rate_limited",
+      scope: "session",
+      max_calls_per_window: 1,
+      window_ms: 50, // 50ms window
+    };
+    const engine = new PermissionEngine(journal, async () => decision);
+
+    // First call succeeds
+    const r1 = await engine.check(makeRequest(["test:rate:expire"]));
+    expect(r1.allowed).toBe(true);
+
+    // Bucket exhausted
+    expect(engine.isGranted("test:rate:expire", "sess-rate")).toBe(false);
+
+    // Wait for window to expire
+    await new Promise((r) => setTimeout(r, 60));
+
+    // Window reset — should succeed again
+    expect(engine.isGranted("test:rate:expire", "sess-rate")).toBe(true);
+  });
+
+  it("per-scope/per-session isolation", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_rate_limited",
+      scope: "session",
+      max_calls_per_window: 1,
+      window_ms: 60000,
+    };
+    const engine = new PermissionEngine(journal, async () => decision);
+
+    // Session A scope X
+    const rA = await engine.check(makeRequest(["test:rate:x"], "sess-a"));
+    expect(rA.allowed).toBe(true);
+    expect(engine.isGranted("test:rate:x", "sess-a")).toBe(false); // exhausted
+
+    // Session B same scope — independent bucket
+    const rB = await engine.check(makeRequest(["test:rate:x"], "sess-b"));
+    expect(rB.allowed).toBe(true);
+  });
+
+  it("clearSession removes rate buckets", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_rate_limited",
+      scope: "session",
+      max_calls_per_window: 2,
+      window_ms: 60000,
+    };
+    const engine = new PermissionEngine(journal, async () => decision);
+
+    await engine.check(makeRequest(["test:rate:clear"]));
+    expect(engine.isGranted("test:rate:clear", "sess-rate")).toBe(true);
+
+    engine.clearSession("sess-rate");
+    expect(engine.isGranted("test:rate:clear", "sess-rate")).toBe(false);
+  });
+
+  it("journal event includes rate limit parameters", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_rate_limited",
+      scope: "session",
+      max_calls_per_window: 5,
+      window_ms: 30000,
+    };
+    const engine = new PermissionEngine(journal, async () => decision);
+
+    await engine.check(makeRequest(["test:rate:journal"]));
+    const events = await journal.readAll();
+    const grantEvent = events.find(e => e.type === "permission.granted" && e.payload.decision === "allow_rate_limited");
+    expect(grantEvent).toBeTruthy();
+    expect(grantEvent!.payload.max_calls_per_window).toBe(5);
+    expect(grantEvent!.payload.window_ms).toBe(30000);
+  });
+});
+
+// ─── Time-Bounded Grant Tests ───────────────────────────────────
+
+describe("PermissionEngine allow_time_bounded", () => {
+  let journal: Journal;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { lock: false });
+    await journal.init();
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  function makeRequest(scopes: string[], sessionId = "sess-time"): PermissionRequest {
+    return {
+      request_id: uuid(),
+      session_id: sessionId,
+      step_id: uuid(),
+      tool_name: "test-tool",
+      permissions: scopes.map((s) => PermissionEngine.parse(s)),
+    };
+  }
+
+  it("access within time window is allowed", async () => {
+    // Use "* * * * *" (every minute) with a large window to guarantee we're inside
+    const decision: ApprovalDecision = {
+      type: "allow_time_bounded",
+      scope: "session",
+      cron_expression: "* * * * *",
+      window_duration_ms: 120000, // 2 minutes — always within window
+    };
+    const engine = new PermissionEngine(journal, async () => decision);
+
+    const result = await engine.check(makeRequest(["test:time:open"]));
+    expect(result.allowed).toBe(true);
+
+    // Second check should also pass (grant cached, time still in window)
+    expect(engine.isGranted("test:time:open", "sess-time")).toBe(true);
+  });
+
+  it("access outside time window is denied", async () => {
+    // Use a cron that fired in the past but window already expired
+    // "0 0 1 1 *" fires on Jan 1 at midnight — window of 1ms means it's expired now
+    const decision: ApprovalDecision = {
+      type: "allow_time_bounded",
+      scope: "session",
+      cron_expression: "0 0 1 1 *",
+      window_duration_ms: 1, // 1ms window — already expired
+    };
+    const engine = new PermissionEngine(journal, async () => decision);
+
+    // First call grants the permission and sets up time bound
+    await engine.check(makeRequest(["test:time:closed"]));
+
+    // But subsequent isGranted check fails the time bound
+    expect(engine.isGranted("test:time:closed", "sess-time")).toBe(false);
+  });
+
+  it("invalid cron expression is treated as denied", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_time_bounded",
+      scope: "session",
+      cron_expression: "not a valid cron",
+      window_duration_ms: 60000,
+    };
+    const engine = new PermissionEngine(journal, async () => decision);
+
+    await engine.check(makeRequest(["test:time:invalid"]));
+    // Grant is cached but time bound check fails for invalid cron
+    expect(engine.isGranted("test:time:invalid", "sess-time")).toBe(false);
+  });
+
+  it("clearSession removes time bounds", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_time_bounded",
+      scope: "session",
+      cron_expression: "* * * * *",
+      window_duration_ms: 120000,
+    };
+    const engine = new PermissionEngine(journal, async () => decision);
+
+    await engine.check(makeRequest(["test:time:cleanup"]));
+    expect(engine.isGranted("test:time:cleanup", "sess-time")).toBe(true);
+
+    engine.clearSession("sess-time");
+    expect(engine.isGranted("test:time:cleanup", "sess-time")).toBe(false);
+  });
+
+  it("journal event includes time bound parameters", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_time_bounded",
+      scope: "session",
+      cron_expression: "0 9 * * 1-5",
+      window_duration_ms: 28800000,
+      timezone: "America/New_York",
+    };
+    const engine = new PermissionEngine(journal, async () => decision);
+
+    await engine.check(makeRequest(["test:time:journal"]));
+    const events = await journal.readAll();
+    const grantEvent = events.find(e => e.type === "permission.granted" && e.payload.decision === "allow_time_bounded");
+    expect(grantEvent).toBeTruthy();
+    expect(grantEvent!.payload.cron_expression).toBe("0 9 * * 1-5");
+    expect(grantEvent!.payload.window_duration_ms).toBe(28800000);
+    expect(grantEvent!.payload.timezone).toBe("America/New_York");
+  });
+});

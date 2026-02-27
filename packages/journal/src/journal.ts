@@ -396,6 +396,18 @@ export class Journal {
     }
   }
 
+  async readVerifiedSession(sessionId: string): Promise<JournalEvent[]> {
+    const integrity = await this.verifyIntegrity();
+    if (!integrity.valid) throw new Error(`Journal integrity check failed at event index ${integrity.brokenAt}`);
+    return this.readSession(sessionId);
+  }
+
+  async readVerifiedAll(): Promise<JournalEvent[]> {
+    const integrity = await this.verifyIntegrity();
+    if (!integrity.valid) throw new Error(`Journal integrity check failed at event index ${integrity.brokenAt}`);
+    return this.readAll();
+  }
+
   async verifyIntegrity(): Promise<{ valid: boolean; brokenAt?: number }> {
     const events = await this.readAll();
     let prevHash: string | undefined;

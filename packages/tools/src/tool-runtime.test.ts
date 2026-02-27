@@ -999,3 +999,133 @@ describe("B3: Timer leak fix in executeWithTimeout", () => {
     // Timer should be cleaned up even on error
   });
 });
+
+// ─── Output Allowlist Tests ──────────────────────────────────────
+
+describe("ToolRuntime output_allow_fields", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+
+  const flexTool: ToolManifest = {
+    name: "flex-tool",
+    version: "1.0.0",
+    description: "Returns multiple fields",
+    runner: "internal",
+    input_schema: { type: "object", additionalProperties: false },
+    output_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        secret: { type: "string" },
+        balance: { type: "number" },
+      },
+      additionalProperties: false,
+    },
+    permissions: ["filesystem:read:workspace"],
+    timeout_ms: 5000,
+    supports: { mock: true, dry_run: false },
+  };
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    registry = new ToolRegistry();
+    registry.register(flexTool);
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("allowlist filters output to only specified fields", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_constrained",
+      scope: "session",
+      constraints: { output_allow_fields: ["name"] },
+    };
+    const permissions = new PermissionEngine(journal, async () => decision);
+    const runtime = new ToolRuntime(registry, permissions, journal);
+    runtime.registerHandler("flex-tool", async () => ({ name: "Alice", secret: "hunter2", balance: 100 }));
+
+    const result = await runtime.execute(makeRequest("flex-tool", {}, "real"));
+    expect(result.ok).toBe(true);
+    expect(result.result).toEqual({ name: "Alice" });
+  });
+
+  it("empty allowlist yields empty output object", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_constrained",
+      scope: "session",
+      constraints: { output_allow_fields: [] },
+    };
+    const permissions = new PermissionEngine(journal, async () => decision);
+    const runtime = new ToolRuntime(registry, permissions, journal);
+    runtime.registerHandler("flex-tool", async () => ({ name: "Alice", secret: "x", balance: 1 }));
+
+    const result = await runtime.execute(makeRequest("flex-tool", {}, "real"));
+    expect(result.ok).toBe(true);
+    expect(result.result).toEqual({});
+  });
+
+  it("allowlist + redact together: allowlist first, then redact", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_constrained",
+      scope: "session",
+      constraints: {
+        output_allow_fields: ["name", "secret"],
+        output_redact_fields: ["secret"],
+      },
+    };
+    const permissions = new PermissionEngine(journal, async () => decision);
+    const runtime = new ToolRuntime(registry, permissions, journal);
+    runtime.registerHandler("flex-tool", async () => ({ name: "Alice", secret: "hunter2", balance: 100 }));
+
+    const result = await runtime.execute(makeRequest("flex-tool", {}, "real"));
+    expect(result.ok).toBe(true);
+    expect(result.result).toEqual({ name: "Alice", secret: "[REDACTED]" });
+  });
+
+  it("non-object output safely skipped by allowlist", async () => {
+    // Use a tool that returns a string (non-object)
+    const stringTool: ToolManifest = {
+      name: "string-tool",
+      version: "1.0.0",
+      description: "Returns string",
+      runner: "internal",
+      input_schema: { type: "object", additionalProperties: false },
+      output_schema: { type: "string" },
+      permissions: ["filesystem:read:workspace"],
+      timeout_ms: 5000,
+      supports: { mock: true, dry_run: false },
+    };
+    registry.register(stringTool);
+    const decision: ApprovalDecision = {
+      type: "allow_constrained",
+      scope: "session",
+      constraints: { output_allow_fields: ["name"] },
+    };
+    const permissions = new PermissionEngine(journal, async () => decision);
+    const runtime = new ToolRuntime(registry, permissions, journal);
+    runtime.registerHandler("string-tool", async () => "just a string");
+
+    const result = await runtime.execute(makeRequest("string-tool", {}, "real"));
+    expect(result.ok).toBe(true);
+    expect(result.result).toBe("just a string");
+  });
+
+  it("nonexistent fields in allowlist are silently ignored", async () => {
+    const decision: ApprovalDecision = {
+      type: "allow_constrained",
+      scope: "session",
+      constraints: { output_allow_fields: ["name", "nonexistent_field"] },
+    };
+    const permissions = new PermissionEngine(journal, async () => decision);
+    const runtime = new ToolRuntime(registry, permissions, journal);
+    runtime.registerHandler("flex-tool", async () => ({ name: "Alice", secret: "x", balance: 1 }));
+
+    const result = await runtime.execute(makeRequest("flex-tool", {}, "real"));
+    expect(result.ok).toBe(true);
+    expect(result.result).toEqual({ name: "Alice" });
+  });
+});

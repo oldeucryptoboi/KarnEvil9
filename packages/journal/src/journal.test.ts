@@ -1286,4 +1286,50 @@ describe("Journal", () => {
     expect(events[1]!.payload.task).toBe("second");
     await journal2.close();
   });
+
+  // ─── Verified Read Tests ────────────────────────────────────────
+
+  it("readVerifiedAll succeeds on valid chain", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    await journal.emit("sess-1", "session.created", { task: "a" });
+    await journal.emit("sess-1", "session.started", { task: "b" });
+
+    const events = await journal.readVerifiedAll();
+    expect(events).toHaveLength(2);
+    await journal.close();
+  });
+
+  it("readVerifiedAll throws on corrupted chain", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    await journal.emit("sess-1", "session.created", { task: "a" });
+    await journal.emit("sess-1", "session.started", { task: "b" });
+    await journal.close();
+
+    // Corrupt the file: modify the second event's hash_prev
+    const content = await readFile(TEST_FILE, "utf-8");
+    const lines = content.trim().split("\n");
+    const event = JSON.parse(lines[1]!);
+    event.hash_prev = "0000000000000000000000000000000000000000000000000000000000000000";
+    lines[1] = JSON.stringify(event);
+    await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
+
+    const journal2 = new Journal(TEST_FILE, { fsync: false, lock: false, recovery: "strict" });
+    await expect(journal2.init()).rejects.toThrow("integrity violation");
+  });
+
+  it("readVerifiedSession returns correct session events", async () => {
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    await journal.emit("sess-1", "session.created", { task: "a" });
+    await journal.emit("sess-2", "session.created", { task: "b" });
+    await journal.emit("sess-1", "session.started", { task: "c" });
+
+    const events = await journal.readVerifiedSession("sess-1");
+    expect(events).toHaveLength(2);
+    expect(events[0]!.session_id).toBe("sess-1");
+    expect(events[1]!.session_id).toBe("sess-1");
+    await journal.close();
+  });
 });

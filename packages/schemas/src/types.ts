@@ -239,7 +239,22 @@ export interface Permission {
 }
 
 export type ApprovalDecision = "allow_once" | "allow_session" | "allow_always" | "deny"
-  | AllowConstrained | AllowObserved | DenyWithAlternative;
+  | AllowConstrained | AllowObserved | AllowRateLimited | AllowTimeBounded | DenyWithAlternative;
+
+export interface AllowRateLimited {
+  type: "allow_rate_limited";
+  scope: "session" | "always";
+  max_calls_per_window: number;
+  window_ms: number;
+}
+
+export interface AllowTimeBounded {
+  type: "allow_time_bounded";
+  scope: "session" | "always";
+  cron_expression: string;
+  window_duration_ms: number;
+  timezone?: string;
+}
 
 export interface AllowConstrained {
   type: "allow_constrained";
@@ -265,6 +280,7 @@ export interface PermissionConstraints {
   max_duration_ms?: number;
   input_overrides?: Record<string, unknown>;
   output_redact_fields?: string[];
+  output_allow_fields?: string[];
 }
 
 export interface PermissionCheckResult {

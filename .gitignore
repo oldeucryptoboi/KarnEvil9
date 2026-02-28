@@ -5,8 +5,8 @@ dist/
 .env
 .env.*
 !.env.example
-**/journal/
-sessions/
+/sessions/
+/vault/
 .openvger/
 *.log
 .DS_Store
@@ -15,4 +15,3 @@ coverage/
 **/.test-*.jsonl
 .test-data/
 package-lock.json
-vault/

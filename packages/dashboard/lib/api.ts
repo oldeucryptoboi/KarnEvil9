@@ -22,6 +22,7 @@ export interface SessionSummary {
   task_text?: string;
   completed_steps?: number;
   total_steps?: number;
+  mode?: string;
 }
 
 export interface SessionDetail extends SessionSummary {

@@ -55,6 +55,7 @@ export default function SessionDetailPage() {
         task_text: taskText,
         completed_steps: events.filter((e) => e.type === "step.succeeded").length,
         total_steps: events.filter((e) => e.type === "step.started").length,
+        mode: (createdEvt?.payload?.mode as string) ?? undefined,
       });
     });
   }, [id]);
@@ -120,6 +121,13 @@ export default function SessionDetailPage() {
           )}
         </div>
       </div>
+
+      {session?.mode === "mock" && (
+        <div className="rounded-md bg-yellow-500/10 border border-yellow-500/20 p-2 text-xs text-yellow-400 mb-4 flex items-center gap-2">
+          <span className="rounded bg-yellow-500/20 px-1.5 py-0.5 font-semibold uppercase tracking-wider">Mock</span>
+          <span>This session ran with a mock planner — tool outputs are simulated.</span>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-md bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-400 mb-4">{error}</div>

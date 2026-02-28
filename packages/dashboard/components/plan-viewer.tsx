@@ -20,7 +20,14 @@ export function PlanViewer({ plan }: { plan: Plan | null }) {
   const [expanded, setExpanded] = useState(true);
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
 
-  if (!plan) return null;
+  if (!plan) {
+    return (
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
+        <h3 className="text-sm font-semibold text-[var(--muted)]">Plan</h3>
+        <p className="text-xs text-[var(--muted)]/60 mt-1">Waiting for planner...</p>
+      </div>
+    );
+  }
 
   const toggleStep = (stepId: string) => {
     setExpandedSteps((prev) => {

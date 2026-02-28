@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getSession, getJournal, abortSession, type SessionDetail, type JournalEvent } from "@/lib/api";
@@ -14,11 +14,14 @@ export default function SessionDetailPage() {
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [journal, setJournal] = useState<JournalEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [showRawJournal, setShowRawJournal] = useState(false);
   const { events, connected } = useWebSocket(id);
+  const stepsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!id) return;
+    setLoading(true);
 
     // Fetch journal first — it persists on disk even after API restarts
     const journalP = getJournal(id).then((events) => {
@@ -26,11 +29,12 @@ export default function SessionDetailPage() {
       return events;
     }).catch(() => [] as JournalEvent[]);
 
-    getSession(id).then(setSession).catch(async () => {
+    getSession(id).then((s) => { setSession(s); setLoading(false); }).catch(async () => {
       // Session not in memory (API restarted). Reconstruct from journal.
       const events = await journalP;
       if (events.length === 0) {
         setError("Session not found");
+        setLoading(false);
         return;
       }
 
@@ -57,6 +61,7 @@ export default function SessionDetailPage() {
         total_steps: events.filter((e) => e.type === "step.started").length,
         mode: (createdEvt?.payload?.mode as string) ?? undefined,
       });
+      setLoading(false);
     });
   }, [id]);
 
@@ -76,6 +81,13 @@ export default function SessionDetailPage() {
       setSession((s) => s ? { ...s, status: "planning" } : s);
     }
   }, [events, session]);
+
+  // Auto-scroll to latest step when new events arrive
+  useEffect(() => {
+    if (events.length > 0) {
+      stepsEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [events.length]);
 
   // Merge WebSocket events into journal
   const allEvents = [...journal];
@@ -133,6 +145,16 @@ export default function SessionDetailPage() {
         <div className="rounded-md bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-400 mb-4">{error}</div>
       )}
 
+      {loading && !session && !error && (
+        <div className="space-y-4 animate-pulse">
+          <div className="h-14 rounded-lg bg-[var(--border)]/30" />
+          <div className="grid grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => <div key={i} className="h-20 rounded-lg bg-[var(--border)]/30" />)}
+          </div>
+          <div className="h-32 rounded-lg bg-[var(--border)]/30" />
+        </div>
+      )}
+
       {/* Phase Indicator */}
       {session && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 mb-4">
@@ -155,7 +177,7 @@ export default function SessionDetailPage() {
           <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="text-xs text-[var(--muted)] mb-1">Progress</p>
             <p className="text-lg font-semibold">
-              {totalSteps != null ? `${stepDone} / ${totalSteps}` : "-"}
+              {totalSteps != null ? `${stepDone} / ${totalSteps}` : stepDone > 0 ? `${stepDone}` : "-"}
             </p>
           </div>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
@@ -178,6 +200,7 @@ export default function SessionDetailPage() {
       <div className="mb-4">
         <h3 className="text-sm font-semibold mb-2">Steps</h3>
         <StepTimeline events={allEvents} />
+        <div ref={stepsEndRef} />
       </div>
 
       {/* Raw Journal (collapsed) */}

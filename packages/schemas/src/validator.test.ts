@@ -539,6 +539,42 @@ describe("validateJournalEventData (plugin events)", () => {
   });
 });
 
+describe("schema compilation guards", () => {
+  it("rejects schemas exceeding max serialized size", () => {
+    clearSchemaCache();
+    // Create a schema with a very long enum array to exceed 100KB
+    const hugeEnum = Array.from({ length: 20000 }, (_, i) => `value_${i}_${"x".repeat(5)}`);
+    const hugeSchema = {
+      type: "object",
+      properties: { field: { type: "string", enum: hugeEnum } },
+    };
+    expect(() => validateToolInput({ field: "test" }, hugeSchema)).toThrow("Schema too large");
+  });
+
+  it("rejects deeply nested schemas", () => {
+    clearSchemaCache();
+    // Build a 25-level deep nested schema
+    let schema: Record<string, unknown> = { type: "string" };
+    for (let i = 0; i < 25; i++) {
+      schema = { type: "object", properties: { nested: schema } };
+    }
+    expect(() => validateToolInput({ nested: {} }, schema)).toThrow("Schema too deeply nested");
+  });
+
+  it("accepts schemas within size and depth limits", () => {
+    clearSchemaCache();
+    // A normal-sized schema with moderate nesting
+    const schema = {
+      type: "object",
+      properties: {
+        a: { type: "object", properties: { b: { type: "string" } } },
+      },
+    };
+    const result = validateToolInput({ a: { b: "hello" } }, schema);
+    expect(result.valid).toBe(true);
+  });
+});
+
 describe("schema compilation cache", () => {
   const inputSchema = {
     type: "object",

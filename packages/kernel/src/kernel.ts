@@ -753,10 +753,10 @@ export class Kernel {
         }
         previousPlanId = plan.plan_id;
 
-        // Validate plan steps array integrity
-        if (!Array.isArray(plan.steps) || plan.steps.length < 0) {
+        // Validate plan steps array integrity (defense-in-depth)
+        if (!Array.isArray(plan.steps) || plan.steps.length === 0) {
           await this.config.journal.tryEmit(this.session.session_id, "session.failed", {
-            reason: "Plan has invalid steps array",
+            reason: "Plan has invalid or empty steps array",
           });
           await this.transition("failed");
           return;

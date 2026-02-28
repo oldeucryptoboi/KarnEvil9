@@ -130,20 +130,22 @@ export function createScheduleToolHandler(scheduler: Scheduler): ToolHandler {
   };
 }
 
-/** Parse an interval string (e.g. "5m", "30s", "1h") to milliseconds. Returns null if unparseable. */
+/** Parse an interval string (e.g. "5m", "30s", "1h") to milliseconds. Returns null if unparseable or overflows. */
 function parseIntervalMs(interval: string): number | null {
   const match = interval.match(/^(\d+)\s*(ms|s|m|h|d)$/i);
   if (!match) return null;
   const value = parseInt(match[1]!, 10);
   const unit = match[2]!.toLowerCase();
+  let result: number;
   switch (unit) {
-    case "ms": return value;
-    case "s": return value * 1000;
-    case "m": return value * 60_000;
-    case "h": return value * 3_600_000;
-    case "d": return value * 86_400_000;
+    case "ms": result = value; break;
+    case "s": result = value * 1000; break;
+    case "m": result = value * 60_000; break;
+    case "h": result = value * 3_600_000; break;
+    case "d": result = value * 86_400_000; break;
     default: return null;
   }
+  return Number.isSafeInteger(result) ? result : null;
 }
 
 function mockResponse(op: string, input: Record<string, unknown>): unknown {

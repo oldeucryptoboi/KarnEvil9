@@ -1,0 +1,2180 @@
+openapi: "3.0.3"
+
+info:
+  title: KarnEvil9 API
+  version: 0.1.0
+  description: >
+    Deterministic agent runtime with explicit plans, typed tools, permissions,
+    and replay. KarnEvil9 orchestrates LLM-generated plans into structured step
+    execution with permission gates, an immutable event journal, and
+    cross-session learning.
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:3000/api
+    description: Local development server
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Health
+    description: Server health and readiness checks
+  - name: Sessions
+    description: Session lifecycle management
+  - name: Journal
+    description: Immutable event journal access
+  - name: SSE
+    description: Server-Sent Events for real-time session streaming
+  - name: Approvals
+    description: Permission approval workflow
+  - name: Tools
+    description: Tool registry queries
+  - name: Plugins
+    description: Plugin management
+  - name: Schedules
+    description: Scheduled job management (CRUD)
+  - name: Metrics
+    description: Prometheus-compatible metrics
+
+paths:
+  # ─── Health ──────────────────────────────────────────────────────────
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Health]
+      summary: Health check
+      description: >
+        Returns the overall server health status including subsystem checks
+        for the journal, tools, sessions, planner, permissions, runtime,
+        plugins, scheduler, and swarm. This endpoint is unauthenticated.
+      security: []
+      responses:
+        "200":
+          description: Server health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  # ─── Sessions ────────────────────────────────────────────────────────
+  /sessions:
+    get:
+      operationId: listSessions
+      tags: [Sessions]
+      summary: List all sessions
+      description: >
+        Returns all known sessions, both active (in-memory) and historical
+        (from journal). Active sessions include live status; historical
+        sessions are reconstructed from journal events.
+      responses:
+        "200":
+          description: List of session summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SessionSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      operationId: createSession
+      tags: [Sessions]
+      summary: Create a new session
+      description: >
+        Creates a new task and starts a kernel session. The server creates
+        a kernel with the planner, tool runtime, and permission engine, then
+        begins the plan-execute lifecycle asynchronously. Client-supplied
+        limits are clamped to server-configured maximums. Policy is
+        server-controlled and cannot be overridden by clients.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "200":
+          description: Session created and execution started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateSessionResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          description: Max concurrent sessions reached or rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /sessions/{id}:
+    get:
+      operationId: getSession
+      tags: [Sessions]
+      summary: Get session details
+      description: >
+        Returns the full session object for an active (in-memory) session,
+        including status, task, plan, limits, and policy.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Full session object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          description: Invalid session ID format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Session not found (not in memory)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /sessions/{id}/abort:
+    post:
+      operationId: abortSession
+      tags: [Sessions]
+      summary: Abort a running session
+      description: >
+        Sends an abort signal to the kernel for the specified session.
+        The session transitions to the "aborted" status.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session aborted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [aborted]
+        "400":
+          description: Invalid session ID format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /sessions/{id}/replay:
+    post:
+      operationId: replaySession
+      tags: [Sessions]
+      summary: Replay session events
+      description: >
+        Returns all journal events for a session, up to a maximum of 1000.
+        Useful for reconstructing session history for debugging or auditing.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Replayed session events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, event_count, total_events, truncated, events]
+                properties:
+                  session_id:
+                    type: string
+                    format: uuid
+                  event_count:
+                    type: integer
+                    description: Number of events returned
+                  total_events:
+                    type: integer
+                    description: Total events in the journal for this session
+                  truncated:
+                    type: boolean
+                    description: Whether the response was truncated
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/JournalEvent"
+        "400":
+          description: Invalid session ID format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No events found for session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /sessions/{id}/recover:
+    post:
+      operationId: recoverSession
+      tags: [Sessions]
+      summary: Recover a previously interrupted session
+      description: >
+        Attempts to recover a session that was interrupted (e.g., by a server
+        crash). Creates a new kernel and resumes execution from the last
+        known state in the journal.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session recovered and execution resumed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, status]
+                properties:
+                  session_id:
+                    type: string
+                    format: uuid
+                  status:
+                    $ref: "#/components/schemas/SessionStatus"
+        "400":
+          description: Invalid session ID format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Session not recoverable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Session already active
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Max concurrent sessions reached or rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          description: Server not fully configured for recovery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ─── Journal ─────────────────────────────────────────────────────────
+  /sessions/{id}/journal:
+    get:
+      operationId: getSessionJournal
+      tags: [Journal]
+      summary: Get paginated journal events for a session
+      description: >
+        Returns journal events for the specified session with pagination.
+        Events are ordered by sequence number. Maximum page size is 500.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - name: offset
+          in: query
+          description: Number of events to skip (0-based)
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          description: Maximum number of events to return (max 500)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 500
+      responses:
+        "200":
+          description: Paginated journal events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, total, offset, limit]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/JournalEvent"
+                  total:
+                    type: integer
+                    description: Total number of events for this session
+                  offset:
+                    type: integer
+                  limit:
+                    type: integer
+        "400":
+          description: Invalid session ID format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /journal/compact:
+    post:
+      operationId: compactJournal
+      tags: [Journal]
+      summary: Compact the journal
+      description: >
+        Compacts the journal by removing events for sessions not in the
+        retain list. This is a destructive operation that permanently
+        removes historical data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                retain_sessions:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Session IDs to retain. All other session data is removed.
+      responses:
+        "200":
+          description: Compaction result
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Compaction statistics returned by the journal
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── SSE ─────────────────────────────────────────────────────────────
+  /sessions/{id}/stream:
+    get:
+      operationId: streamSessionEvents
+      tags: [SSE]
+      summary: Stream session events via Server-Sent Events
+      description: >
+        Opens a persistent SSE connection that streams real-time journal
+        events for the specified session. Supports reconnection via the
+        Last-Event-ID header or the after_seq query parameter for catch-up
+        replay. Connections are automatically closed after 30 minutes.
+        A keepalive comment is sent every 15 seconds.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - name: after_seq
+          in: query
+          description: >
+            Replay events after this sequence number. Equivalent to
+            setting the Last-Event-ID header.
+          schema:
+            type: integer
+            minimum: 0
+        - name: Last-Event-ID
+          in: header
+          description: SSE reconnection sequence number
+          schema:
+            type: string
+      responses:
+        "200":
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: >
+                  Newline-delimited SSE messages. Each message contains
+                  an optional `id:` line (sequence number) and a `data:`
+                  line with a JSON-encoded JournalEvent.
+        "400":
+          description: Invalid session ID format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          description: Max SSE clients per session reached or rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ─── Approvals ───────────────────────────────────────────────────────
+  /approvals:
+    get:
+      operationId: listApprovals
+      tags: [Approvals]
+      summary: List pending approval requests
+      description: >
+        Returns all currently pending permission approval requests.
+        Each request includes the request ID and the full permission
+        request payload (session ID, step ID, tool name, permissions).
+      responses:
+        "200":
+          description: List of pending approvals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pending]
+                properties:
+                  pending:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PendingApproval"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /approvals/{id}:
+    post:
+      operationId: resolveApproval
+      tags: [Approvals]
+      summary: Resolve a pending approval request
+      description: >
+        Submits a decision for a pending permission approval request.
+        Decisions can be simple strings (allow_once, allow_session,
+        allow_always, deny) or structured objects for constrained,
+        observed, or alternative decisions. Approvals that have been
+        pending longer than twice the configured timeout are rejected
+        with a 410 Gone response.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Approval request ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalDecisionRequest"
+      responses:
+        "200":
+          description: Approval resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, decision]
+                properties:
+                  status:
+                    type: string
+                    enum: [resolved]
+                  decision:
+                    $ref: "#/components/schemas/ApprovalDecision"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Approval not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "410":
+          description: Approval request has expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  # ─── Tools ───────────────────────────────────────────────────────────
+  /tools:
+    get:
+      operationId: listTools
+      tags: [Tools]
+      summary: List all registered tools
+      description: >
+        Returns a summary of all tools in the tool registry, including
+        name, version, description, permissions, runner type, and
+        supported execution modes.
+      responses:
+        "200":
+          description: List of tool summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tools]
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ToolSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /tools/{name}:
+    get:
+      operationId: getTool
+      tags: [Tools]
+      summary: Get full tool manifest
+      description: >
+        Returns the complete tool manifest including input/output schemas,
+        timeout, runner configuration, and mock responses.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Tool name
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Full tool manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToolManifest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Tool not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  # ─── Plugins ─────────────────────────────────────────────────────────
+  /plugins:
+    get:
+      operationId: listPlugins
+      tags: [Plugins]
+      summary: List all plugins
+      description: >
+        Returns the state of all discovered plugins, including their
+        manifest, status, configuration, and error information.
+      responses:
+        "200":
+          description: List of plugin states
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plugins]
+                properties:
+                  plugins:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PluginState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /plugins/{id}:
+    get:
+      operationId: getPlugin
+      tags: [Plugins]
+      summary: Get a specific plugin
+      description: Returns the full state of a single plugin by its ID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Plugin ID
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Plugin state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Plugin not found or plugin system not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /plugins/{id}/reload:
+    post:
+      operationId: reloadPlugin
+      tags: [Plugins]
+      summary: Reload a plugin
+      description: >
+        Unloads and re-loads a plugin from disk. Useful for development
+        or hot-patching without restarting the server.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Plugin ID
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Plugin reloaded successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Plugin system not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /plugins/{id}/unload:
+    post:
+      operationId: unloadPlugin
+      tags: [Plugins]
+      summary: Unload a plugin
+      description: >
+        Unloads a plugin, stopping its services and removing its tools,
+        hooks, and routes from the runtime.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Plugin ID
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Plugin unloaded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [unloaded]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Plugin system not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Schedules ───────────────────────────────────────────────────────
+  /schedules:
+    get:
+      operationId: listSchedules
+      tags: [Schedules]
+      summary: List all schedules
+      description: >
+        Returns all registered schedules, optionally filtered by status
+        or tag.
+      parameters:
+        - name: status
+          in: query
+          description: Filter by schedule status
+          schema:
+            type: string
+            enum: [active, paused, completed, failed]
+        - name: tag
+          in: query
+          description: Filter by tag (schedules whose options.tags include this value)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of schedules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schedules, total]
+                properties:
+                  schedules:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Schedule"
+                  total:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+    post:
+      operationId: createSchedule
+      tags: [Schedules]
+      summary: Create a new schedule
+      description: >
+        Creates a new scheduled job with a trigger (at, every, or cron),
+        an action (createSession or emitEvent), and optional configuration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateScheduleRequest"
+      responses:
+        "201":
+          description: Schedule created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /schedules/{id}:
+    get:
+      operationId: getSchedule
+      tags: [Schedules]
+      summary: Get a specific schedule
+      description: Returns the full schedule object by its ID.
+      parameters:
+        - $ref: "#/components/parameters/ScheduleId"
+      responses:
+        "200":
+          description: Schedule object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "400":
+          description: Schedule ID is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Schedule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+    put:
+      operationId: updateSchedule
+      tags: [Schedules]
+      summary: Update a schedule
+      description: >
+        Partially updates a schedule. Only provided fields are changed;
+        omitted fields retain their current values.
+      parameters:
+        - $ref: "#/components/parameters/ScheduleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateScheduleRequest"
+      responses:
+        "200":
+          description: Schedule updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Schedule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      operationId: deleteSchedule
+      tags: [Schedules]
+      summary: Delete a schedule
+      description: Permanently removes a schedule and its trigger.
+      parameters:
+        - $ref: "#/components/parameters/ScheduleId"
+      responses:
+        "200":
+          description: Schedule deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, schedule_id]
+                properties:
+                  deleted:
+                    type: boolean
+                    enum: [true]
+                  schedule_id:
+                    type: string
+                    format: uuid
+        "400":
+          description: Schedule ID is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Schedule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /schedules/{id}/pause:
+    post:
+      operationId: pauseSchedule
+      tags: [Schedules]
+      summary: Pause a schedule
+      description: Pauses a running schedule so it will not fire until resumed.
+      parameters:
+        - $ref: "#/components/parameters/ScheduleId"
+      responses:
+        "200":
+          description: Schedule paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "400":
+          description: Schedule ID is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Schedule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /schedules/{id}/resume:
+    post:
+      operationId: resumeSchedule
+      tags: [Schedules]
+      summary: Resume a paused schedule
+      description: Resumes a paused schedule so it begins firing again.
+      parameters:
+        - $ref: "#/components/parameters/ScheduleId"
+      responses:
+        "200":
+          description: Schedule resumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "400":
+          description: Schedule ID is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Schedule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /schedules/{id}/trigger:
+    post:
+      operationId: triggerSchedule
+      tags: [Schedules]
+      summary: Manually trigger a schedule
+      description: >
+        Fires the schedule's action immediately, regardless of its
+        trigger configuration. Returns the session ID if the action
+        creates a session.
+      parameters:
+        - $ref: "#/components/parameters/ScheduleId"
+      responses:
+        "200":
+          description: Schedule triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [triggered, schedule_id]
+                properties:
+                  triggered:
+                    type: boolean
+                    enum: [true]
+                  schedule_id:
+                    type: string
+                    format: uuid
+                  session_id:
+                    type: string
+                    format: uuid
+                    description: Session ID created by the triggered action, if applicable
+        "400":
+          description: Schedule ID is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Schedule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Metrics ─────────────────────────────────────────────────────────
+  /metrics:
+    get:
+      operationId: getMetrics
+      tags: [Metrics]
+      summary: Prometheus metrics
+      description: >
+        Returns Prometheus-compatible metrics in OpenMetrics text format.
+        Includes counters for sessions, steps, tool executions, tokens,
+        cost; gauges for active sessions; and histograms for tool and
+        planner durations.
+      responses:
+        "200":
+          description: Prometheus metrics in text exposition format
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+                description: Prometheus text exposition format metrics
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          description: Error collecting metrics
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+
+# ─── Components ──────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        API token passed as a Bearer token in the Authorization header.
+        Set via the KARNEVIL9_API_TOKEN environment variable or the
+        apiToken server configuration option.
+
+  parameters:
+    SessionId:
+      name: id
+      in: path
+      required: true
+      description: Session ID (UUID v4)
+      schema:
+        type: string
+        format: uuid
+        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+    ScheduleId:
+      name: id
+      in: path
+      required: true
+      description: Schedule ID (UUID v4)
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: Unauthorized
+
+    ValidationError:
+      description: Request body validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    RateLimited:
+      description: Rate limit exceeded (100 requests per 60-second window)
+      headers:
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Number of requests remaining in the current window
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Unix timestamp (seconds) when the rate limit window resets
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "Rate limit exceeded. Try again later."
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: Internal server error
+
+  schemas:
+    # ─── Error ───────────────────────────────────────────────────────
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+
+    # ─── Session Types ───────────────────────────────────────────────
+    SessionStatus:
+      type: string
+      enum:
+        - created
+        - planning
+        - running
+        - awaiting_approval
+        - paused
+        - completed
+        - failed
+        - aborted
+
+    ExecutionMode:
+      type: string
+      enum: [live, dry_run, mock]
+
+    SessionLimits:
+      type: object
+      required: [max_steps, max_duration_ms, max_cost_usd, max_tokens]
+      properties:
+        max_steps:
+          type: integer
+          minimum: 1
+          description: Maximum number of steps in a single plan
+        max_duration_ms:
+          type: integer
+          minimum: 1000
+          description: Maximum session duration in milliseconds
+        max_cost_usd:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Maximum cost in USD
+        max_tokens:
+          type: integer
+          minimum: 1
+          description: Maximum total tokens (input + output)
+        max_iterations:
+          type: integer
+          minimum: 1
+          description: Maximum agentic loop iterations (optional)
+
+    PolicyProfile:
+      type: object
+      required:
+        - allowed_paths
+        - allowed_endpoints
+        - allowed_commands
+        - require_approval_for_writes
+      properties:
+        allowed_paths:
+          type: array
+          items:
+            type: string
+        allowed_endpoints:
+          type: array
+          items:
+            type: string
+        allowed_commands:
+          type: array
+          items:
+            type: string
+        require_approval_for_writes:
+          type: boolean
+        readonly_paths:
+          type: array
+          items:
+            type: string
+        writable_paths:
+          type: array
+          items:
+            type: string
+
+    TaskConstraints:
+      type: object
+      properties:
+        tool_allowlist:
+          type: array
+          items:
+            type: string
+          description: Only allow these tools
+        tool_denylist:
+          type: array
+          items:
+            type: string
+          description: Deny these tools
+        path_scope:
+          type: array
+          items:
+            type: string
+          description: Restrict file operations to these paths
+      additionalProperties: true
+
+    Task:
+      type: object
+      required: [task_id, text, created_at]
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        text:
+          type: string
+          maxLength: 10000
+        constraints:
+          $ref: "#/components/schemas/TaskConstraints"
+        submitted_by:
+          type: string
+          maxLength: 200
+        created_at:
+          type: string
+          format: date-time
+
+    Session:
+      type: object
+      required:
+        - session_id
+        - status
+        - mode
+        - task
+        - active_plan_id
+        - limits
+        - policy
+        - created_at
+        - updated_at
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/SessionStatus"
+        mode:
+          $ref: "#/components/schemas/ExecutionMode"
+        task:
+          $ref: "#/components/schemas/Task"
+        active_plan_id:
+          type: string
+          format: uuid
+          nullable: true
+        limits:
+          $ref: "#/components/schemas/SessionLimits"
+        policy:
+          $ref: "#/components/schemas/PolicyProfile"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SessionSummary:
+      type: object
+      required: [session_id, status, created_at]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          description: Session status or "unknown" for historical sessions
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        task_text:
+          type: string
+          description: The original task text
+        mode:
+          $ref: "#/components/schemas/ExecutionMode"
+
+    CreateSessionRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 10000
+          description: The task text describing what the agent should do
+        mode:
+          $ref: "#/components/schemas/ExecutionMode"
+        constraints:
+          $ref: "#/components/schemas/TaskConstraints"
+        submitted_by:
+          type: string
+          maxLength: 200
+          description: Identifier for the user submitting the task
+        limits:
+          type: object
+          description: >
+            Optional session limits. Values are clamped to server-configured
+            maximums.
+          properties:
+            max_steps:
+              type: integer
+              minimum: 1
+            max_duration_ms:
+              type: integer
+              minimum: 1000
+            max_cost_usd:
+              type: number
+              exclusiveMinimum: true
+              minimum: 0
+            max_tokens:
+              type: integer
+              minimum: 1
+
+    CreateSessionResponse:
+      type: object
+      required: [session_id, status, task]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/SessionStatus"
+        task:
+          $ref: "#/components/schemas/Task"
+        message:
+          type: string
+          description: >
+            Present when the server lacks a planner/runtime and the
+            task was created but not started.
+
+    # ─── Plan & Step Types ───────────────────────────────────────────
+    ToolRef:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        version_range:
+          type: string
+
+    FailurePolicy:
+      type: string
+      enum: [abort, replan, continue]
+
+    Step:
+      type: object
+      required:
+        - step_id
+        - title
+        - tool_ref
+        - input
+        - success_criteria
+        - failure_policy
+        - timeout_ms
+        - max_retries
+      properties:
+        step_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        tool_ref:
+          $ref: "#/components/schemas/ToolRef"
+        input:
+          type: object
+          additionalProperties: true
+        success_criteria:
+          type: array
+          items:
+            type: string
+        failure_policy:
+          $ref: "#/components/schemas/FailurePolicy"
+        timeout_ms:
+          type: integer
+          minimum: 0
+        max_retries:
+          type: integer
+          minimum: 0
+        depends_on:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Step IDs that must complete before this step runs
+        input_from:
+          type: object
+          additionalProperties:
+            type: string
+          description: >
+            Map of input field name to "stepId.outputField" for wiring
+            outputs from previous steps.
+
+    StepStatus:
+      type: string
+      enum: [pending, running, succeeded, failed, skipped]
+
+    StepResult:
+      type: object
+      required: [step_id, status, started_at, attempts]
+      properties:
+        step_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/StepStatus"
+        output:
+          description: Tool output (shape depends on the tool)
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            data:
+              description: Additional error context
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        attempts:
+          type: integer
+          minimum: 1
+
+    ArtifactSpec:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [file, patch, pr_url, report, other]
+        description:
+          type: string
+
+    Plan:
+      type: object
+      required: [plan_id, schema_version, goal, assumptions, steps, created_at]
+      properties:
+        plan_id:
+          type: string
+          format: uuid
+        schema_version:
+          type: string
+        goal:
+          type: string
+        assumptions:
+          type: array
+          items:
+            type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/Step"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactSpec"
+        created_at:
+          type: string
+          format: date-time
+
+    # ─── Journal ─────────────────────────────────────────────────────
+    JournalEventType:
+      type: string
+      description: >
+        The event type. Common types include session.created,
+        session.started, session.completed, session.failed,
+        session.aborted, plan.accepted, step.started, step.succeeded,
+        step.failed, permission.requested, permission.granted,
+        permission.denied, tool.started, tool.succeeded, tool.failed,
+        and many more.
+      example: session.created
+
+    JournalEvent:
+      type: object
+      required: [event_id, timestamp, session_id, type, payload]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        session_id:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/JournalEventType"
+        payload:
+          type: object
+          additionalProperties: true
+          description: Event-specific data
+        hash_prev:
+          type: string
+          description: SHA-256 hash of the previous event (hash-chain integrity)
+        seq:
+          type: integer
+          description: Monotonically increasing sequence number within the session
+
+    # ─── Approvals ───────────────────────────────────────────────────
+    ApprovalDecision:
+      description: >
+        The approval decision. Can be a simple string or a structured
+        object for advanced decision types.
+      oneOf:
+        - type: string
+          enum: [allow_once, allow_session, allow_always, deny]
+        - $ref: "#/components/schemas/AllowConstrained"
+        - $ref: "#/components/schemas/AllowObserved"
+        - $ref: "#/components/schemas/DenyWithAlternative"
+
+    AllowConstrained:
+      type: object
+      required: [type, scope, constraints]
+      properties:
+        type:
+          type: string
+          enum: [allow_constrained]
+        scope:
+          type: string
+          enum: [once, session, always]
+        constraints:
+          $ref: "#/components/schemas/PermissionConstraints"
+
+    AllowObserved:
+      type: object
+      required: [type, scope, telemetry_level]
+      properties:
+        type:
+          type: string
+          enum: [allow_observed]
+        scope:
+          type: string
+          enum: [once, session, always]
+        telemetry_level:
+          type: string
+          enum: [basic, detailed]
+
+    DenyWithAlternative:
+      type: object
+      required: [type, reason, alternative]
+      properties:
+        type:
+          type: string
+          enum: [deny_with_alternative]
+        reason:
+          type: string
+        alternative:
+          type: object
+          required: [tool_name]
+          properties:
+            tool_name:
+              type: string
+            suggested_input:
+              type: object
+              additionalProperties: true
+
+    PermissionConstraints:
+      type: object
+      properties:
+        readonly_paths:
+          type: array
+          items:
+            type: string
+        writable_paths:
+          type: array
+          items:
+            type: string
+        max_duration_ms:
+          type: integer
+        input_overrides:
+          type: object
+          additionalProperties: true
+        output_redact_fields:
+          type: array
+          items:
+            type: string
+        output_allow_fields:
+          type: array
+          items:
+            type: string
+
+    PendingApproval:
+      type: object
+      required: [request_id, request]
+      properties:
+        request_id:
+          type: string
+        request:
+          description: The original permission request object
+          type: object
+          properties:
+            request_id:
+              type: string
+            session_id:
+              type: string
+              format: uuid
+            step_id:
+              type: string
+              format: uuid
+            tool_name:
+              type: string
+            permissions:
+              type: array
+              items:
+                $ref: "#/components/schemas/Permission"
+          additionalProperties: true
+
+    Permission:
+      type: object
+      required: [scope, domain, action, target]
+      properties:
+        scope:
+          type: string
+          description: "Permission scope string in domain:action:target format"
+        domain:
+          type: string
+        action:
+          type: string
+        target:
+          type: string
+
+    ApprovalDecisionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          $ref: "#/components/schemas/ApprovalDecision"
+
+    # ─── Tools ───────────────────────────────────────────────────────
+    ToolRunner:
+      type: string
+      enum: [shell, http, internal, container]
+
+    ToolCategory:
+      type: string
+      enum: [browser, shell, http, filesystem, llm, social]
+
+    ToolSummary:
+      type: object
+      required: [name, version, description, permissions, runner, supports]
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+          description: Required permission scopes
+        runner:
+          $ref: "#/components/schemas/ToolRunner"
+        supports:
+          type: object
+          required: [mock, dry_run]
+          properties:
+            mock:
+              type: boolean
+              enum: [true]
+            dry_run:
+              type: boolean
+
+    ToolManifest:
+      type: object
+      required:
+        - name
+        - version
+        - description
+        - runner
+        - input_schema
+        - output_schema
+        - permissions
+        - timeout_ms
+        - supports
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        runner:
+          $ref: "#/components/schemas/ToolRunner"
+        category:
+          $ref: "#/components/schemas/ToolCategory"
+        input_schema:
+          type: object
+          additionalProperties: true
+          description: JSON Schema for the tool's input
+        output_schema:
+          type: object
+          additionalProperties: true
+          description: JSON Schema for the tool's output
+        permissions:
+          type: array
+          items:
+            type: string
+          description: Required permission scopes
+        timeout_ms:
+          type: integer
+          minimum: 0
+        supports:
+          type: object
+          required: [mock, dry_run]
+          properties:
+            mock:
+              type: boolean
+              enum: [true]
+            dry_run:
+              type: boolean
+        mock_responses:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    # ─── Plugins ─────────────────────────────────────────────────────
+    PluginManifest:
+      type: object
+      required: [id, name, version, description, entry, permissions, provides]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        entry:
+          type: string
+          description: Relative path to the plugin entry module
+        permissions:
+          type: array
+          items:
+            type: string
+        config_schema:
+          type: object
+          additionalProperties: true
+        provides:
+          type: object
+          properties:
+            tools:
+              type: array
+              items:
+                type: string
+            hooks:
+              type: array
+              items:
+                type: string
+            routes:
+              type: array
+              items:
+                type: string
+            commands:
+              type: array
+              items:
+                type: string
+            planners:
+              type: array
+              items:
+                type: string
+            services:
+              type: array
+              items:
+                type: string
+
+    PluginStatus:
+      type: string
+      enum: [discovered, loading, active, failed, unloaded]
+
+    PluginState:
+      type: object
+      required: [id, manifest, status, config]
+      properties:
+        id:
+          type: string
+        manifest:
+          $ref: "#/components/schemas/PluginManifest"
+        status:
+          $ref: "#/components/schemas/PluginStatus"
+        loaded_at:
+          type: string
+          format: date-time
+        failed_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+        config:
+          type: object
+          additionalProperties: true
+
+    # ─── Schedules ───────────────────────────────────────────────────
+    ScheduleType:
+      type: string
+      enum: [at, every, cron]
+
+    ScheduleStatus:
+      type: string
+      enum: [active, paused, completed, failed]
+
+    MissedSchedulePolicy:
+      type: string
+      enum: [skip, catchup_one, catchup_all]
+
+    ScheduleTrigger:
+      description: >
+        Trigger configuration. Exactly one trigger type should be used.
+      oneOf:
+        - type: object
+          title: AtTrigger
+          required: [type, at]
+          properties:
+            type:
+              type: string
+              enum: [at]
+            at:
+              type: string
+              format: date-time
+              description: ISO 8601 timestamp for one-time execution
+        - type: object
+          title: EveryTrigger
+          required: [type, interval]
+          properties:
+            type:
+              type: string
+              enum: [every]
+            interval:
+              type: string
+              description: "Duration string (e.g., '5m', '1h', '30s')"
+            start_at:
+              type: string
+              format: date-time
+        - type: object
+          title: CronTrigger
+          required: [type, expression]
+          properties:
+            type:
+              type: string
+              enum: [cron]
+            expression:
+              type: string
+              description: Cron expression (5 or 6 fields)
+            timezone:
+              type: string
+              description: "IANA timezone (e.g., 'America/New_York')"
+      discriminator:
+        propertyName: type
+
+    JobAction:
+      description: >
+        The action to perform when the schedule fires.
+      oneOf:
+        - type: object
+          title: CreateSessionAction
+          required: [type, task_text]
+          properties:
+            type:
+              type: string
+              enum: [createSession]
+            task_text:
+              type: string
+            mode:
+              $ref: "#/components/schemas/ExecutionMode"
+            constraints:
+              $ref: "#/components/schemas/TaskConstraints"
+            agentic:
+              type: boolean
+            planner:
+              type: string
+            model:
+              type: string
+            limits:
+              $ref: "#/components/schemas/SessionLimits"
+        - type: object
+          title: EmitEventAction
+          required: [type, event_type, payload]
+          properties:
+            type:
+              type: string
+              enum: [emitEvent]
+            session_id:
+              type: string
+              format: uuid
+            event_type:
+              type: string
+            payload:
+              type: object
+              additionalProperties: true
+      discriminator:
+        propertyName: type
+
+    ScheduleOptions:
+      type: object
+      properties:
+        delete_after_run:
+          type: boolean
+          description: Delete the schedule after it fires once
+        missed_policy:
+          $ref: "#/components/schemas/MissedSchedulePolicy"
+        max_failures:
+          type: integer
+          minimum: 0
+          description: Maximum consecutive failures before the schedule is marked failed
+        description:
+          type: string
+          maxLength: 2000
+        tags:
+          type: array
+          items:
+            type: string
+
+    Schedule:
+      type: object
+      required:
+        - schedule_id
+        - name
+        - trigger
+        - action
+        - options
+        - status
+        - run_count
+        - failure_count
+        - next_run_at
+        - last_run_at
+        - created_by
+        - created_at
+        - updated_at
+      properties:
+        schedule_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 200
+        trigger:
+          $ref: "#/components/schemas/ScheduleTrigger"
+        action:
+          $ref: "#/components/schemas/JobAction"
+        options:
+          $ref: "#/components/schemas/ScheduleOptions"
+        status:
+          $ref: "#/components/schemas/ScheduleStatus"
+        run_count:
+          type: integer
+          minimum: 0
+        failure_count:
+          type: integer
+          minimum: 0
+        next_run_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_run_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_session_id:
+          type: string
+          format: uuid
+        last_error:
+          type: string
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateScheduleRequest:
+      type: object
+      required: [name, trigger, action]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        trigger:
+          $ref: "#/components/schemas/ScheduleTrigger"
+        action:
+          $ref: "#/components/schemas/JobAction"
+        options:
+          $ref: "#/components/schemas/ScheduleOptions"
+
+    UpdateScheduleRequest:
+      type: object
+      description: >
+        Partial update. Only provided fields are modified.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        trigger:
+          $ref: "#/components/schemas/ScheduleTrigger"
+        action:
+          $ref: "#/components/schemas/JobAction"
+        options:
+          $ref: "#/components/schemas/ScheduleOptions"
+
+    # ─── Health ──────────────────────────────────────────────────────
+    HealthStatus:
+      type: object
+      required: [status, version, timestamp, checks]
+      properties:
+        status:
+          type: string
+          enum: [healthy, warning, degraded]
+          description: >
+            Overall health. "healthy" means all systems nominal,
+            "warning" if disk usage >90% or no tools loaded,
+            "degraded" if the journal is not writable.
+        version:
+          type: string
+          example: "0.1.0"
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          required:
+            - journal
+            - tools
+            - sessions
+            - planner
+            - permissions
+            - runtime
+            - plugins
+            - scheduler
+            - swarm
+          properties:
+            journal:
+              type: object
+              required: [status, detail]
+              properties:
+                status:
+                  type: string
+                  enum: [ok, error]
+                detail:
+                  type: string
+                disk_usage:
+                  type: object
+                  properties:
+                    usage_pct:
+                      type: number
+                      description: Disk usage percentage
+            tools:
+              type: object
+              required: [status, loaded]
+              properties:
+                status:
+                  type: string
+                  enum: [ok, warning]
+                loaded:
+                  type: integer
+            sessions:
+              type: object
+              required: [status, active]
+              properties:
+                status:
+                  type: string
+                  enum: [ok]
+                active:
+                  type: integer
+            planner:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [ok, unavailable]
+            permissions:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [ok, unavailable]
+            runtime:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [ok, unavailable]
+            plugins:
+              type: object
+              required: [status, loaded, failed]
+              properties:
+                status:
+                  type: string
+                  enum: [ok, unavailable]
+                loaded:
+                  type: integer
+                failed:
+                  type: integer
+            scheduler:
+              type: object
+              required: [status, schedules]
+              properties:
+                status:
+                  type: string
+                  enum: [ok, stopped, unavailable]
+                schedules:
+                  type: integer
+            swarm:
+              type: object
+              required: [status, peers, active_peers]
+              properties:
+                status:
+                  type: string
+                  enum: [ok, stopped, unavailable]
+                peers:
+                  type: integer
+                active_peers:
+                  type: integer

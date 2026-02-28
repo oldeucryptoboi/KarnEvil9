@@ -23,6 +23,18 @@ describe("parseInterval", () => {
     expect(() => parseInterval("10x")).toThrow("Invalid interval format");
     expect(() => parseInterval("")).toThrow("Invalid interval format");
   });
+
+  it("throws on integer overflow for large interval values", () => {
+    // 99999999999999d = 99999999999999 * 86400000 which overflows MAX_SAFE_INTEGER
+    expect(() => parseInterval("99999999999999d")).toThrow("overflows safe integer range");
+    // 99999999999999h = 99999999999999 * 3600000 which overflows MAX_SAFE_INTEGER
+    expect(() => parseInterval("99999999999999h")).toThrow("overflows safe integer range");
+  });
+
+  it("accepts large but safe interval values", () => {
+    // 365d = 31_536_000_000ms — well within safe integer range
+    expect(parseInterval("365d")).toBe(365 * 86_400_000);
+  });
 });
 
 describe("computeNextCron", () => {
@@ -65,5 +77,13 @@ describe("computeNextInterval", () => {
     const nextMs = new Date(next).getTime();
     expect(nextMs).toBeGreaterThanOrEqual(before + 3_600_000);
     expect(nextMs).toBeLessThanOrEqual(after + 3_600_000);
+  });
+
+  it("throws on invalid lastRunAt date", () => {
+    expect(() => computeNextInterval("30s", "not-a-date")).toThrow("Invalid lastRunAt date");
+  });
+
+  it("throws on invalid startAt date", () => {
+    expect(() => computeNextInterval("30s", undefined, "garbage")).toThrow("Invalid startAt date");
   });
 });

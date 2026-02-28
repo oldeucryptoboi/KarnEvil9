@@ -2761,4 +2761,51 @@ export async function register(api) {
     expect(({} as any).__proto__).toBe(Object.prototype);
     expect(({} as any).constructor).toBe(Object);
   });
+
+  it("rejects empty steps array in agentic non-first iteration defense-in-depth", async () => {
+    // This tests the defense-in-depth check for plan.steps.length === 0
+    // that was previously a tautological `< 0` check
+    registry.register(testTool);
+    let callCount = 0;
+    const planner: Planner = {
+      async generatePlan(task: Task, toolSchemas: ToolSchemaForPlanner[]) {
+        callCount++;
+        if (callCount === 1) {
+          // First iteration: return a real step
+          return {
+            plan: {
+              plan_id: uuid(), schema_version: "0.1", goal: "First step",
+              assumptions: [], created_at: new Date().toISOString(),
+              steps: [{
+                step_id: uuid(), title: "Do something", tool_ref: { name: "test-tool" },
+                input: { message: "hi" }, success_criteria: ["ok"],
+                failure_policy: "continue" as const, timeout_ms: 5000, max_retries: 0,
+              }],
+            },
+            usage: { input_tokens: 50, output_tokens: 50, total_tokens: 100, model: "test" },
+          };
+        }
+        // Second iteration: signal done with empty steps
+        return {
+          plan: {
+            plan_id: uuid(), schema_version: "0.1", goal: "Done",
+            assumptions: [], steps: [], created_at: new Date().toISOString(),
+          },
+          usage: { input_tokens: 50, output_tokens: 50, total_tokens: 100, model: "test" },
+        };
+      },
+    };
+
+    const task: Task = { task_id: uuid(), text: "Defense in depth test", created_at: new Date().toISOString() };
+    const kernel = new Kernel(makeKernelConfig({
+      journal, runtime, registry, permissions, planner,
+      limits: { max_steps: 20, max_duration_ms: 60000, max_cost_usd: 100, max_tokens: 100000, max_iterations: 10 },
+    }));
+    (kernel as any).config.agentic = true;
+    await kernel.createSession(task);
+    const session = await kernel.run();
+    // Should complete normally (empty steps on iteration 2 = done)
+    expect(session.status).toBe("completed");
+    expect(callCount).toBe(2);
+  });
 });

@@ -10,26 +10,30 @@ const UNTRUSTED_BEGIN = "<<<UNTRUSTED_INPUT>>>";
 const UNTRUSTED_END = "<<<END_UNTRUSTED_INPUT>>>";
 
 /**
+ * Regex matching delimiter strings and whitespace-variant forms that an LLM
+ * might still interpret as delimiter boundaries (e.g. "<<< UNTRUSTED_INPUT >>>").
+ */
+const DELIMITER_VARIANTS_RE = /<<<\s*(?:END_?\s*)?UNTRUSTED_?INPUT\s*>>>/gi;
+
+/**
  * Wraps untrusted content in delimiters so the LLM can distinguish
  * user/tool data from system instructions. Also strips any embedded
- * delimiter strings to prevent delimiter injection.
+ * delimiter strings (including whitespace variants) to prevent delimiter injection.
  */
 function wrapUntrusted(content: string, maxLen = 10000): string {
   const sanitized = content
-    .replace(/<<<UNTRUSTED_INPUT>>>/g, "[filtered]")
-    .replace(/<<<END_UNTRUSTED_INPUT>>>/g, "[filtered]")
+    .replace(DELIMITER_VARIANTS_RE, "[filtered]")
     .slice(0, maxLen);
   return `${UNTRUSTED_BEGIN}\n${sanitized}\n${UNTRUSTED_END}`;
 }
 
 /**
  * Sanitize a string value that will be interpolated into a prompt.
- * Strips common injection patterns but preserves legitimate content.
+ * Strips common injection patterns (including whitespace variants) but preserves legitimate content.
  */
 function sanitizeForPrompt(text: string, maxLen = 2000): string {
   return text
-    .replace(/<<<UNTRUSTED_INPUT>>>/g, "[filtered]")
-    .replace(/<<<END_UNTRUSTED_INPUT>>>/g, "[filtered]")
+    .replace(DELIMITER_VARIANTS_RE, "[filtered]")
     .slice(0, maxLen);
 }
 
@@ -441,6 +445,17 @@ export class LLMPlanner implements Planner {
   }
 
   /**
+   * Parse JSON safely, stripping prototype pollution keys (__proto__, constructor, prototype)
+   * at all levels of the parsed object tree.
+   */
+  private static safeParse(json: string): unknown {
+    return JSON.parse(json, (key, value) => {
+      if (key === "__proto__" || key === "constructor" || key === "prototype") return undefined;
+      return value;
+    });
+  }
+
+  /**
    * Parse raw model output into a Plan, applying unwrapping, key normalization,
    * and safe-default filling so that downstream schema validation is more likely to pass.
    */
@@ -456,13 +471,13 @@ export class LLMPlanner implements Planner {
     }
     let plan: Plan;
     try {
-      plan = JSON.parse(jsonStr) as Plan;
+      plan = LLMPlanner.safeParse(jsonStr) as Plan;
     } catch {
       // Try extracting JSON from within prose/markdown (model may wrap JSON in commentary)
       const fenceMatch = raw.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/);
       if (fenceMatch) {
         try {
-          plan = JSON.parse(fenceMatch[1]!) as Plan;
+          plan = LLMPlanner.safeParse(fenceMatch[1]!) as Plan;
         } catch {
           throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}...`);
         }
@@ -472,7 +487,7 @@ export class LLMPlanner implements Planner {
         const braceEnd = raw.lastIndexOf("}");
         if (braceStart >= 0 && braceEnd > braceStart) {
           try {
-            plan = JSON.parse(raw.slice(braceStart, braceEnd + 1)) as Plan;
+            plan = LLMPlanner.safeParse(raw.slice(braceStart, braceEnd + 1)) as Plan;
           } catch {
             throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}...`);
           }

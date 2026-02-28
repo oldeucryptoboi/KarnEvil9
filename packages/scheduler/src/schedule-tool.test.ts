@@ -136,4 +136,17 @@ describe("schedule tool", () => {
   it("throws on unknown operation", async () => {
     await expect(handler({ operation: "explode" }, "live", mockPolicy)).rejects.toThrow("Unknown operation");
   });
+
+  it("rejects 'every' trigger with interval that overflows safe integer", async () => {
+    await expect(handler(
+      {
+        operation: "create",
+        name: "overflow-schedule",
+        trigger: { type: "every", interval: "99999999999999d" },
+        action: { type: "createSession", task_text: "boom" },
+      },
+      "live",
+      mockPolicy,
+    )).rejects.toThrow();
+  });
 });

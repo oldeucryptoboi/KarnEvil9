@@ -1090,7 +1090,10 @@ export class ApiServer {
       if (afterSeq !== undefined) {
         const MAX_REPLAY = 500;
         try {
-          const events = await this.journal.readSession(sessionId, { limit: MAX_REPLAY + afterSeq + 1 });
+          // Use offset to skip events before afterSeq, avoiding unbounded memory when afterSeq is large.
+          // afterSeq is a seq number (0-based), so offset = afterSeq + 1 skips past it.
+          const replayOffset = Math.min(afterSeq + 1, Number.MAX_SAFE_INTEGER - MAX_REPLAY);
+          const events = await this.journal.readSession(sessionId, { offset: replayOffset, limit: MAX_REPLAY + 1 });
           let replayCount = 0;
           const serverResForReplay = res as unknown as ServerResponse;
           for (const event of events) {

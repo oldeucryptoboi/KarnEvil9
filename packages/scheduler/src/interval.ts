@@ -28,7 +28,11 @@ export function parseInterval(interval: string): number {
   if (ms === undefined) {
     throw new Error(`Unknown interval unit: "${unit}"`);
   }
-  return value * ms;
+  const result = value * ms;
+  if (!Number.isSafeInteger(result)) {
+    throw new Error(`Interval value overflows safe integer range: ${value}${unit} = ${result}ms`);
+  }
+  return result;
 }
 
 /**
@@ -53,11 +57,18 @@ export function computeNextInterval(intervalStr: string, lastRunAt?: string, sta
   const ms = parseInterval(intervalStr);
   const now = Date.now();
   if (lastRunAt) {
-    const next = new Date(lastRunAt).getTime() + ms;
+    const lastRunMs = new Date(lastRunAt).getTime();
+    if (!Number.isFinite(lastRunMs)) {
+      throw new Error(`Invalid lastRunAt date: "${lastRunAt}"`);
+    }
+    const next = lastRunMs + ms;
     return new Date(Math.max(next, now)).toISOString();
   }
   if (startAt) {
     const start = new Date(startAt).getTime();
+    if (!Number.isFinite(start)) {
+      throw new Error(`Invalid startAt date: "${startAt}"`);
+    }
     if (start > now) return new Date(start).toISOString();
     // Advance to next future occurrence
     const elapsed = now - start;

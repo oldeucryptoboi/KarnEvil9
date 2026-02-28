@@ -14,8 +14,31 @@ applyFormats(ajv);
 const MAX_SCHEMA_CACHE = 500;
 const schemaCache = new Map<string, ValidateFunction>();
 
+const MAX_SCHEMA_SIZE = 100_000; // 100 KB max serialized schema size
+const MAX_SCHEMA_DEPTH = 20;     // Maximum nesting depth
+
+function measureDepth(obj: unknown, current = 0): number {
+  if (current > MAX_SCHEMA_DEPTH) return current;
+  if (obj === null || typeof obj !== "object") return current;
+  let max = current;
+  const entries = Array.isArray(obj) ? obj : Object.values(obj as Record<string, unknown>);
+  for (const val of entries) {
+    const d = measureDepth(val, current + 1);
+    if (d > max) max = d;
+    if (max > MAX_SCHEMA_DEPTH) return max;
+  }
+  return max;
+}
+
 function getOrCompile(schema: Record<string, unknown>): ValidateFunction {
   const key = JSON.stringify(schema);
+  if (key.length > MAX_SCHEMA_SIZE) {
+    throw new Error(`Schema too large for compilation: ${key.length} bytes (max ${MAX_SCHEMA_SIZE})`);
+  }
+  const depth = measureDepth(schema);
+  if (depth > MAX_SCHEMA_DEPTH) {
+    throw new Error(`Schema too deeply nested: depth ${depth} (max ${MAX_SCHEMA_DEPTH})`);
+  }
   let validate = schemaCache.get(key);
   if (!validate) {
     // Evict oldest entry when cache is full

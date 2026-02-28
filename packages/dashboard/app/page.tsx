@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getSessions, compactJournal, type SessionSummary } from "@/lib/api";
 import { StatusBadge } from "@/components/status-badge";
+import { CreateSessionDialog } from "@/components/create-session-dialog";
 import { useWSContext } from "@/lib/ws-context";
 
 export default function SessionsPage() {
@@ -11,6 +12,7 @@ export default function SessionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [compactResult, setCompactResult] = useState<string | null>(null);
   const [compacting, setCompacting] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const { connected } = useWSContext();
 
   useEffect(() => {
@@ -24,12 +26,28 @@ export default function SessionsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-semibold">Sessions</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-xl font-semibold">Sessions</h2>
+          <button
+            onClick={() => setShowCreateDialog(true)}
+            className="bg-[var(--accent)] text-white rounded px-3 py-1.5 text-sm hover:opacity-90"
+          >
+            New Session
+          </button>
+        </div>
         <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
           <span className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} />
           {connected ? "Connected" : "Disconnected"}
         </div>
       </div>
+
+      <CreateSessionDialog
+        open={showCreateDialog}
+        onClose={() => setShowCreateDialog(false)}
+        onCreated={() => {
+          getSessions().then(setSessions).catch(() => {});
+        }}
+      />
 
       {error && (
         <div className="rounded-md bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-400 mb-4">

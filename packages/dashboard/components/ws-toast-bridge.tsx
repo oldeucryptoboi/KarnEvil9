@@ -6,7 +6,8 @@ import { useToast } from "@/components/toast";
 
 /**
  * Bridge component that listens to WebSocket events and fires toast
- * notifications for key session lifecycle events and connection changes.
+ * notifications for key session lifecycle events, approval requests,
+ * and connection changes.
  *
  * Must be rendered inside both WSProvider and ToastProvider.
  */
@@ -38,6 +39,15 @@ export function WSToastBridge() {
         case "session.aborted":
           addToast(`Session ${shortId}... aborted`, "warning");
           break;
+        case "approve.needed": {
+          // Server sends { type, request_id, session_id, request } which doesn't
+          // match the WSEvent shape, so access raw fields via type assertion
+          const raw = evt as unknown as Record<string, unknown>;
+          const request = raw.request as Record<string, unknown> | undefined;
+          const toolName = String(request?.tool_name ?? "unknown");
+          addToast(`Approval needed: ${toolName}`, "warning", 8000);
+          break;
+        }
         default:
           break;
       }

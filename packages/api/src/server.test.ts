@@ -36,7 +36,7 @@ async function fetch(url: string, opts?: { method?: string; body?: unknown; head
   const { method = "GET", body, headers: extraHeaders } = opts ?? {};
   const _parsed = new URL(url);
   const headers: Record<string, string> = { ...(body ? { "Content-Type": "application/json" } : {}), ...extraHeaders };
-  return new Promise<{ status: number; json: () => Promise<any> }>((resolve, reject) => {
+  return new Promise<{ status: number; json: () => Promise<any>; text: () => Promise<string> }>((resolve, reject) => {
     const req = http.request(
       url,
       { method, headers },
@@ -47,6 +47,7 @@ async function fetch(url: string, opts?: { method?: string; body?: unknown; head
           resolve({
             status: res.statusCode,
             json: async () => JSON.parse(data),
+            text: async () => data,
           });
         });
       }
@@ -110,6 +111,24 @@ describe("ApiServer (legacy constructor)", () => {
     expect(body.checks.planner.status).toBe("unavailable");
     expect(body.checks.permissions.status).toBe("unavailable");
     expect(body.checks.runtime.status).toBe("unavailable");
+  });
+
+  it("GET /api/docs returns 200 with HTML content", async () => {
+    const res = await fetch(`${baseUrl}/api/docs`);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("<!DOCTYPE html>");
+    expect(html).toContain("swagger-ui");
+    expect(html).toContain("KarnEvil9 API Docs");
+  });
+
+  it("GET /api/docs/openapi.json returns 200 with valid JSON containing openapi field", async () => {
+    const res = await fetch(`${baseUrl}/api/docs/openapi.json`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.openapi).toBeTruthy();
+    expect(body.info).toBeTruthy();
+    expect(body.info.title).toBe("KarnEvil9 API");
   });
 
   it("GET /api/tools lists registered tools", async () => {
@@ -2129,6 +2148,21 @@ describe("ApiServer WebSocket", () => {
 
       await new Promise((r) => setTimeout(r, 50));
       expect(resolvedDecision).toEqual({ type: "allow_constrained", constraints: { max_calls: 5 } });
+    } finally {
+      ws.close();
+    }
+  });
+
+  it("rejects WebSocket messages exceeding 64 KB size limit", async () => {
+    const ws = await connectWs();
+    try {
+      const msgPromise = waitForMessage(ws);
+      // Send a message that exceeds 64 KB
+      const oversizedPayload = JSON.stringify({ type: "submit", text: "x".repeat(70000) });
+      ws.send(oversizedPayload);
+      const msg = await msgPromise;
+      expect(msg.type).toBe("error");
+      expect(String(msg.message)).toContain("too large");
     } finally {
       ws.close();
     }

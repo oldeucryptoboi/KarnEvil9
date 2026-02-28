@@ -1,6 +1,9 @@
-import { readFile, readdir, mkdir, rename } from "node:fs/promises";
+import { readFile, readdir, mkdir, rename, stat } from "node:fs/promises";
 import { join, extname, basename } from "node:path";
 import { existsSync } from "node:fs";
+
+/** Maximum file size (50 MB) to read during source detection — prevents OOM on huge files. */
+const MAX_DETECT_FILE_SIZE = 50 * 1024 * 1024;
 
 export interface DropZoneFile {
   filePath: string;
@@ -63,6 +66,12 @@ export class DropZoneWatcher {
 
   private async detectJsonSource(filePath: string): Promise<string | null> {
     try {
+      // Guard against reading huge files into memory
+      const fileStats = await stat(filePath);
+      if (fileStats.size > MAX_DETECT_FILE_SIZE) {
+        console.warn(`[dropzone] Skipping oversized file ${filePath} (${fileStats.size} bytes)`);
+        return null;
+      }
       const raw = await readFile(filePath, "utf-8");
       const data = JSON.parse(raw);
 
@@ -84,6 +93,11 @@ export class DropZoneWatcher {
 
   private async detectTxtSource(filePath: string): Promise<string | null> {
     try {
+      const fileStats = await stat(filePath);
+      if (fileStats.size > MAX_DETECT_FILE_SIZE) {
+        console.warn(`[dropzone] Skipping oversized file ${filePath} (${fileStats.size} bytes)`);
+        return null;
+      }
       const raw = await readFile(filePath, "utf-8");
       const firstLine = raw.split("\n")[0] ?? "";
 

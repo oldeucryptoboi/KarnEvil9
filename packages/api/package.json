@@ -23,6 +23,8 @@
     "@karnevil9/tools": "workspace:*",
     "@karnevil9/vault": "workspace:*",
     "express": "^5.0.0",
+    "js-yaml": "^4.1.0",
+    "swagger-ui-dist": "^5.0.0",
     "uuid": "^11.0.0",
     "ws": "^8.0.0"
   },
@@ -30,6 +32,7 @@
     "@karnevil9/memory": "workspace:*",
     "@karnevil9/planner": "workspace:*",
     "@types/express": "^5.0.0",
+    "@types/js-yaml": "^4.0.0",
     "@types/ws": "^8.0.0"
   },
   "files": [

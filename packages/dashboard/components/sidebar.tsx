@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useWSContext } from "@/lib/ws-context";
+import { useApprovals } from "@/lib/approvals-context";
 
 const NAV_ITEMS = [
   { href: "/", label: "Sessions", icon: "S" },
@@ -10,12 +11,14 @@ const NAV_ITEMS = [
   { href: "/schedules", label: "Schedules", icon: "C" },
   { href: "/tools", label: "Tools", icon: "T" },
   { href: "/vault", label: "Vault", icon: "V" },
+  { href: "/swarm", label: "Swarm", icon: "W" },
   { href: "/metrics", label: "Metrics", icon: "M" },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const { connected } = useWSContext();
+  const { pendingCount } = useApprovals();
 
   return (
     <aside className="fixed left-0 top-0 h-full w-56 border-r border-[var(--border)] bg-[var(--card)] flex flex-col">
@@ -34,6 +37,7 @@ export function Sidebar() {
           const active = item.href === "/"
             ? pathname === "/"
             : pathname.startsWith(item.href);
+          const showBadge = item.href === "/approvals" && pendingCount > 0;
           return (
             <Link
               key={item.href}
@@ -47,7 +51,12 @@ export function Sidebar() {
               <span className="flex h-6 w-6 items-center justify-center rounded bg-white/5 text-xs font-mono">
                 {item.icon}
               </span>
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {showBadge && (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-400 tabular-nums">
+                  {pendingCount > 99 ? "99+" : pendingCount}
+                </span>
+              )}
             </Link>
           );
         })}

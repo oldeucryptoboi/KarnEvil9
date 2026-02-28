@@ -106,6 +106,29 @@ describe("RelayServer routes", () => {
       expect(res.body.error).toContain("Playwright crashed");
     });
 
+    it("sanitizes file paths from error messages to prevent information leakage", async () => {
+      const leakyDriver = createMockDriver({
+        execute: vi.fn().mockRejectedValue(new Error("ENOENT: no such file or directory, open '/home/user/.config/secrets/key.pem'")),
+      });
+      const leakyRelay = new RelayServer({ port: 0, driver: leakyDriver });
+      const res = await request(leakyRelay.getExpressApp(), "POST", "/actions", { action: "navigate", url: "https://example.com" });
+      expect(res.status).toBe(500);
+      expect(res.body.error).not.toContain("/home/user");
+      expect(res.body.error).not.toContain("secrets");
+      expect(res.body.error).toContain("[path]");
+    });
+
+    it("truncates overly long error messages to 500 characters", async () => {
+      const longMsg = "X".repeat(1000);
+      const longDriver = createMockDriver({
+        execute: vi.fn().mockRejectedValue(new Error(longMsg)),
+      });
+      const longRelay = new RelayServer({ port: 0, driver: longDriver });
+      const res = await request(longRelay.getExpressApp(), "POST", "/actions", { action: "navigate", url: "https://example.com" });
+      expect(res.status).toBe(500);
+      expect(res.body.error.length).toBeLessThanOrEqual(500);
+    });
+
     it("returns 400 when body has no action field", async () => {
       const res = await request(app, "POST", "/actions", { url: "https://example.com" });
       expect(res.status).toBe(400);

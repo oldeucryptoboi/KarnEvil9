@@ -27,11 +27,18 @@ export class ConsensusVerifier {
   createRound(taskId: string, requiredVoters?: number, requiredAgreement?: number): ConsensusRound {
     const roundId = randomUUID();
     const now = new Date();
+    // Clamp user-supplied parameters to sane bounds
+    const voters = (requiredVoters !== undefined && Number.isFinite(requiredVoters) && requiredVoters >= 1)
+      ? Math.min(Math.floor(requiredVoters), 100)
+      : this.config.default_required_voters;
+    const agreement = (requiredAgreement !== undefined && Number.isFinite(requiredAgreement))
+      ? Math.min(Math.max(requiredAgreement, 0), 1)
+      : this.config.default_required_agreement;
     const round: ConsensusRound = {
       round_id: roundId,
       task_id: taskId,
-      required_voters: requiredVoters ?? this.config.default_required_voters,
-      required_agreement: requiredAgreement ?? this.config.default_required_agreement,
+      required_voters: voters,
+      required_agreement: agreement,
       votes: new Map(),
       status: "open",
       created_at: now.toISOString(),

@@ -179,6 +179,10 @@ export class CDPClient {
       throw new Error("Not connected to CDP");
     }
 
+    // Guard against integer overflow — reset before reaching MAX_SAFE_INTEGER
+    if (this.nextId >= Number.MAX_SAFE_INTEGER - 1) {
+      this.nextId = 1;
+    }
     const id = this.nextId++;
     const request: CDPRequest = {
       id,

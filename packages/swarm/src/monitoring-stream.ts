@@ -31,6 +31,7 @@ export const MONITORING_LEVEL_ORDINAL: Record<MonitoringLevel, number> = {
 };
 
 let subscriberCounter = 0;
+const MAX_SUBSCRIBER_COUNTER = Number.MAX_SAFE_INTEGER - 1;
 
 export class MonitoringStream {
   private config: Required<MonitoringStreamConfig>;
@@ -53,6 +54,7 @@ export class MonitoringStream {
       return () => {};
     }
 
+    if (subscriberCounter >= MAX_SUBSCRIBER_COUNTER) subscriberCounter = 0;
     const id = `sub-${++subscriberCounter}`;
 
     const cleanup = () => {

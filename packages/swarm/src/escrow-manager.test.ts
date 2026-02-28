@@ -39,8 +39,17 @@ describe("EscrowManager", () => {
   });
 
   it("should throw on deposit with amount <= 0", () => {
-    expect(() => manager.deposit("node-1", 0)).toThrow("Deposit amount must be positive");
-    expect(() => manager.deposit("node-1", -5)).toThrow("Deposit amount must be positive");
+    expect(() => manager.deposit("node-1", 0)).toThrow();
+    expect(() => manager.deposit("node-1", -5)).toThrow();
+  });
+
+  it("should throw on deposit with NaN", () => {
+    expect(() => manager.deposit("node-1", NaN)).toThrow("finite positive");
+  });
+
+  it("should throw on deposit with Infinity", () => {
+    expect(() => manager.deposit("node-1", Infinity)).toThrow("finite positive");
+    expect(() => manager.deposit("node-1", -Infinity)).toThrow("finite positive");
   });
 
   // ─── Hold Bond ──────────────────────────────────────────────────
@@ -68,6 +77,20 @@ describe("EscrowManager", () => {
     const result = manager.holdBond("task-1", "unknown-node", 5);
     expect(result.held).toBe(false);
     expect(result.reason).toBe("No escrow account");
+  });
+
+  it("should reject holdBond with NaN amount", () => {
+    manager.deposit("node-1", 10);
+    const result = manager.holdBond("task-nan", "node-1", NaN);
+    expect(result.held).toBe(false);
+    expect(result.reason).toContain("finite positive");
+  });
+
+  it("should reject holdBond with Infinity amount", () => {
+    manager.deposit("node-1", 10);
+    const result = manager.holdBond("task-inf", "node-1", Infinity);
+    expect(result.held).toBe(false);
+    expect(result.reason).toContain("finite positive");
   });
 
   // ─── Release Bond ───────────────────────────────────────────────
@@ -133,6 +156,54 @@ describe("EscrowManager", () => {
     const result = manager.slashBond("unknown-task");
     expect(result.slashed).toBe(false);
     expect(result.amount).toBeUndefined();
+  });
+
+  it("should clamp negative slashPct to 0", () => {
+    manager.deposit("node-1", 10);
+    manager.holdBond("task-neg", "node-1", 6);
+
+    const result = manager.slashBond("task-neg", -50);
+    expect(result.slashed).toBe(true);
+    expect(result.amount).toBe(0); // -50 clamped to 0
+    const account = manager.getAccount("node-1");
+    expect(account!.balance).toBe(10); // no balance reduction
+    expect(account!.held).toBe(0);
+  });
+
+  it("should clamp slashPct above 100 to 100", () => {
+    manager.deposit("node-1", 10);
+    manager.holdBond("task-over", "node-1", 4);
+
+    const result = manager.slashBond("task-over", 200);
+    expect(result.slashed).toBe(true);
+    expect(result.amount).toBe(4); // 100% of 4
+    const account = manager.getAccount("node-1");
+    expect(account!.balance).toBe(6); // 10 - 4
+  });
+
+  it("should never allow negative balance after slash", () => {
+    manager.deposit("node-1", 3);
+    manager.holdBond("task-big-slash", "node-1", 3);
+
+    // Slash 100% of a 3 bond when balance is also 3
+    const result = manager.slashBond("task-big-slash", 100);
+    expect(result.slashed).toBe(true);
+    const account = manager.getAccount("node-1");
+    expect(account!.balance).toBeGreaterThanOrEqual(0);
+    expect(account!.held).toBeGreaterThanOrEqual(0);
+  });
+
+  it("should never allow negative held after release", () => {
+    manager.deposit("node-1", 10);
+    manager.holdBond("task-rel", "node-1", 5);
+    // Manually corrupt held to be less than bond
+    const account = manager.getAccount("node-1")!;
+    account.held = 2; // corrupted: less than the 5 bond
+
+    const result = manager.releaseBond("task-rel");
+    expect(result.released).toBe(true);
+    // held should be clamped to 0, not go to -3
+    expect(manager.getAccount("node-1")!.held).toBe(0);
   });
 
   // ─── Full Lifecycle ─────────────────────────────────────────────

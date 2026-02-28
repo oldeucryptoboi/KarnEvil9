@@ -162,6 +162,60 @@ describe("scheduler routes", () => {
     expect((res.capture.data as { status: string }).status).toBe("active");
   });
 
+  it("POST /schedules masks internal error details", async () => {
+    // Create a scheduler that throws an internal error (not a user-facing one)
+    const route = findRoute("POST", "/schedules");
+    const res = makeRes();
+    // Provide a valid body but cause an internal error by making the scheduler's
+    // createSchedule throw something unexpected
+    const originalCreate = scheduler.createSchedule.bind(scheduler);
+    scheduler.createSchedule = async () => { throw new Error("SQLITE_IOERR: disk I/O error at /var/db/data.sqlite"); };
+    try {
+      await route.handler(
+        {
+          method: "POST", path: "/schedules", params: {}, query: {},
+          body: {
+            name: "internal-err",
+            trigger: { type: "every", interval: "5m" },
+            action: { type: "createSession", task_text: "test" },
+          },
+        },
+        res,
+      );
+      expect(res.capture.status).toBe(500);
+      // Should NOT leak the SQLITE_IOERR or file path
+      expect((res.capture.data as { error: string }).error).toBe("Internal server error");
+      expect((res.capture.data as { error: string }).error).not.toContain("SQLITE");
+      expect((res.capture.data as { error: string }).error).not.toContain("/var/db");
+    } finally {
+      scheduler.createSchedule = originalCreate;
+    }
+  });
+
+  it("POST /schedules exposes validation errors (Invalid/format/required)", async () => {
+    const route = findRoute("POST", "/schedules");
+    const res = makeRes();
+    const originalCreate = scheduler.createSchedule.bind(scheduler);
+    scheduler.createSchedule = async () => { throw new Error("Invalid cron expression format"); };
+    try {
+      await route.handler(
+        {
+          method: "POST", path: "/schedules", params: {}, query: {},
+          body: {
+            name: "validation-err",
+            trigger: { type: "cron", expression: "bad" },
+            action: { type: "createSession", task_text: "test" },
+          },
+        },
+        res,
+      );
+      expect(res.capture.status).toBe(400);
+      expect((res.capture.data as { error: string }).error).toContain("Invalid cron expression format");
+    } finally {
+      scheduler.createSchedule = originalCreate;
+    }
+  });
+
   it("GET /schedules filters by status", async () => {
     await scheduler.createSchedule({
       name: "active-one",

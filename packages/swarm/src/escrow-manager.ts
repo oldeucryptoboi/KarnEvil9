@@ -63,7 +63,7 @@ export class EscrowManager {
   }
 
   deposit(nodeId: string, amount: number): EscrowAccount {
-    if (amount <= 0) throw new Error("Deposit amount must be positive");
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("Deposit amount must be a finite positive number");
 
     let account = this.accounts.get(nodeId);
     if (!account) {
@@ -88,6 +88,9 @@ export class EscrowManager {
   }
 
   holdBond(taskId: string, nodeId: string, amount: number): { held: boolean; reason?: string } {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { held: false, reason: "Bond amount must be a finite positive number" };
+    }
     const account = this.accounts.get(nodeId);
     if (!account) {
       return { held: false, reason: "No escrow account" };
@@ -130,7 +133,7 @@ export class EscrowManager {
     const account = this.accounts.get(bond.node_id);
     if (!account) return { released: false };
 
-    account.held -= bond.amount;
+    account.held = Math.max(0, account.held - bond.amount);
     this.taskBonds.delete(taskId);
 
     const tx: EscrowTransaction = {
@@ -162,11 +165,11 @@ export class EscrowManager {
     const account = this.accounts.get(bond.node_id);
     if (!account) return { slashed: false };
 
-    const pct = slashPct ?? this.bondRequirement.slash_pct_on_violation;
+    const pct = Math.min(Math.max(0, slashPct ?? this.bondRequirement.slash_pct_on_violation), 100);
     const slashAmount = bond.amount * (pct / 100);
 
-    account.held -= bond.amount;
-    account.balance -= slashAmount;
+    account.held = Math.max(0, account.held - bond.amount);
+    account.balance = Math.max(0, account.balance - slashAmount);
     this.taskBonds.delete(taskId);
 
     const tx: EscrowTransaction = {

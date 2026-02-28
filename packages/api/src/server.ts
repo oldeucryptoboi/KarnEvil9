@@ -16,8 +16,13 @@ import type { MeshManager } from "@karnevil9/swarm";
 import type { ServerResponse, Server, IncomingMessage } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { parse as parseUrl } from "node:url";
+import { readFileSync } from "node:fs";
+import { resolve as pathResolve, dirname as pathDirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { WebSocketServer, WebSocket } from "ws";
 import { spawn, type ChildProcess } from "node:child_process";
+import yaml from "js-yaml";
 
 // ─── Constants ────────────────────────────────────────────────────
 const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
@@ -447,20 +452,18 @@ export class ApiServer {
     }, this.approvalTimeoutMs);
     this.pendingApprovals.set(requestId, { resolve, request, timer, created_at: Date.now() });
 
-    // Broadcast approve.needed to WS clients tracking this session
+    // Broadcast approve.needed to ALL WS clients so dashboard and session-specific
+    // clients both receive real-time approval notifications
     const req = request as Record<string, unknown> | undefined;
     const sessionId = typeof req?.session_id === "string" ? req.session_id : undefined;
-    if (sessionId) {
-      for (const client of this.wsClients) {
-        if (client.activeSessionIds.has(sessionId)) {
-          this.wsSend(client.ws, {
-            type: "approve.needed",
-            request_id: requestId,
-            session_id: sessionId,
-            request,
-          });
-        }
-      }
+    const approveMsg = {
+      type: "approve.needed",
+      request_id: requestId,
+      session_id: sessionId,
+      request,
+    };
+    for (const client of this.wsClients) {
+      this.wsSend(client.ws, approveMsg);
     }
   }
 
@@ -625,6 +628,13 @@ export class ApiServer {
       this.wsClients.add(client);
 
       ws.on("message", async (raw: Buffer | string) => {
+        // Cap WS message size to prevent DoS via oversized payloads (64 KB)
+        const MAX_WS_MESSAGE_SIZE = 64 * 1024;
+        const rawLength = typeof raw === "string" ? raw.length : raw.byteLength;
+        if (rawLength > MAX_WS_MESSAGE_SIZE) {
+          this.wsSend(ws, { type: "error", message: `Message too large (${rawLength} bytes, max ${MAX_WS_MESSAGE_SIZE})` });
+          return;
+        }
         let msg: Record<string, unknown>;
         try {
           msg = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf-8"));
@@ -774,6 +784,19 @@ export class ApiServer {
     clearTimeout(approval.timer);
     approval.resolve(decision);
     this.pendingApprovals.delete(requestId);
+
+    // Broadcast approve.resolved to all WS clients so dashboard updates in real time
+    const req = approval.request as Record<string, unknown> | undefined;
+    const sessionId = typeof req?.session_id === "string" ? req.session_id : undefined;
+    const resolvedMsg = {
+      type: "approve.resolved",
+      request_id: requestId,
+      session_id: sessionId,
+      decision,
+    };
+    for (const client of this.wsClients) {
+      this.wsSend(client.ws, resolvedMsg);
+    }
   }
 
   /** Shared session lifecycle: timeout, error broadcast, cleanup. */
@@ -877,6 +900,68 @@ export class ApiServer {
           },
         },
       });
+    });
+
+    // ─── API Docs (unauthenticated) ──────────────────────────────────
+    // Load OpenAPI spec from YAML and serve as JSON + interactive Swagger UI
+    let openApiSpec: Record<string, unknown> | null = null;
+    try {
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = pathDirname(__filename);
+      const specPath = pathResolve(__dirname, "..", "openapi.yaml");
+      const specYaml = readFileSync(specPath, "utf-8");
+      openApiSpec = yaml.load(specYaml) as Record<string, unknown>;
+    } catch (err) {
+      logError("Failed to load openapi.yaml", err);
+    }
+
+    router.get("/docs/openapi.json", (_req, res) => {
+      if (!openApiSpec) {
+        res.status(500).json({ error: "OpenAPI spec not loaded" });
+        return;
+      }
+      res.setHeader("Content-Type", "application/json");
+      res.json(openApiSpec);
+    });
+
+    // Serve Swagger UI static assets with relaxed CSP
+    try {
+      const esmRequire = createRequire(import.meta.url);
+      const swaggerUiPath = pathDirname(esmRequire.resolve("swagger-ui-dist/package.json"));
+      router.use("/docs/assets", (_req, res, next) => {
+        res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:");
+        next();
+      }, express.static(swaggerUiPath));
+    } catch {
+      logError("swagger-ui-dist", "swagger-ui-dist not found — /api/docs UI will be unavailable");
+    }
+
+    router.get("/docs", (_req, res) => {
+      // Override security headers for the docs page so Swagger UI can load its assets
+      res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:");
+      res.setHeader("X-Frame-Options", "SAMEORIGIN");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>KarnEvil9 API Docs</title>
+  <link rel="stylesheet" href="/api/docs/assets/swagger-ui.css" />
+  <style>body { margin: 0; padding: 0; }</style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="/api/docs/assets/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: "/api/docs/openapi.json",
+      dom_id: "#swagger-ui",
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: "BaseLayout",
+    });
+  </script>
+</body>
+</html>`);
     });
 
     // Bearer token auth middleware — applied to all routes after /health
@@ -1175,6 +1260,18 @@ export class ApiServer {
       clearTimeout(approval.timer);
       approval.resolve(decision);
       this.pendingApprovals.delete(req.params.id!);
+      // Broadcast approve.resolved to all WS clients
+      const approvalReq = approval.request as Record<string, unknown> | undefined;
+      const approvalSessionId = typeof approvalReq?.session_id === "string" ? approvalReq.session_id : undefined;
+      const resolvedMsg = {
+        type: "approve.resolved",
+        request_id: req.params.id!,
+        session_id: approvalSessionId,
+        decision,
+      };
+      for (const client of this.wsClients) {
+        this.wsSend(client.ws, resolvedMsg);
+      }
       // Audit trail: log who approved what (sanitize to prevent log injection)
       // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional sanitization of control chars
       const requestId = req.params.id!.replace(/[\x00-\x1f\x7f]/g, "");

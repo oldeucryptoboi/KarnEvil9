@@ -34,6 +34,47 @@ describe("ConsensusVerifier", () => {
       expect(round.required_voters).toBe(5);
       expect(round.required_agreement).toBe(0.8);
     });
+
+    it("should clamp requiredVoters to integer between 1 and 100", () => {
+      // Fractional value should be floored
+      const round1 = verifier.createRound("task-frac", 3.9);
+      expect(round1.required_voters).toBe(3);
+
+      // Value above 100 should be clamped to 100
+      const round2 = verifier.createRound("task-huge", 500);
+      expect(round2.required_voters).toBe(100);
+
+      // Value of 0 should fall back to default
+      const round3 = verifier.createRound("task-zero", 0);
+      expect(round3.required_voters).toBe(DEFAULT_CONSENSUS_CONFIG.default_required_voters);
+
+      // Negative value should fall back to default
+      const round4 = verifier.createRound("task-neg", -5);
+      expect(round4.required_voters).toBe(DEFAULT_CONSENSUS_CONFIG.default_required_voters);
+    });
+
+    it("should clamp requiredAgreement to 0-1 range", () => {
+      // Value above 1 should be clamped to 1
+      const round1 = verifier.createRound("task-over", 3, 1.5);
+      expect(round1.required_agreement).toBe(1);
+
+      // Negative value should be clamped to 0
+      const round2 = verifier.createRound("task-under", 3, -0.5);
+      expect(round2.required_agreement).toBe(0);
+
+      // NaN should fall back to default
+      const round3 = verifier.createRound("task-nan", 3, NaN);
+      expect(round3.required_agreement).toBe(DEFAULT_CONSENSUS_CONFIG.default_required_agreement);
+
+      // Infinity is not finite, so should fall back to default
+      const round4 = verifier.createRound("task-inf", 3, Infinity);
+      expect(round4.required_agreement).toBe(DEFAULT_CONSENSUS_CONFIG.default_required_agreement);
+    });
+
+    it("should use defaults for NaN requiredVoters", () => {
+      const round = verifier.createRound("task-nan-voters", NaN);
+      expect(round.required_voters).toBe(DEFAULT_CONSENSUS_CONFIG.default_required_voters);
+    });
   });
 
   // ─── submitVerification ───────────────────────────────────────────

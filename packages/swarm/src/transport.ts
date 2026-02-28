@@ -63,11 +63,11 @@ export class PeerTransport {
   }
 
   async sendCheckpointRequest(apiUrl: string, taskId: string): Promise<TransportResponse<TaskCheckpointStatus>> {
-    return this.send<TaskCheckpointStatus>(apiUrl, `/api/plugins/swarm/task/${taskId}/status`, "GET");
+    return this.send<TaskCheckpointStatus>(apiUrl, `/api/plugins/swarm/task/${encodeURIComponent(taskId)}/status`, "GET");
   }
 
   async sendCancelTask(apiUrl: string, taskId: string): Promise<TransportResponse> {
-    return this.send(apiUrl, `/api/plugins/swarm/task/${taskId}/cancel`, "POST");
+    return this.send(apiUrl, `/api/plugins/swarm/task/${encodeURIComponent(taskId)}/cancel`, "POST");
   }
 
   async sendRFQ(apiUrl: string, rfq: TaskRFQ): Promise<TransportResponse> {

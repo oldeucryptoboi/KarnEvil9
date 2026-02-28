@@ -221,6 +221,39 @@ describe("CDPClient nextId reset", () => {
   });
 });
 
+describe("CDPClient nextId overflow guard", () => {
+  it("resets nextId before it reaches MAX_SAFE_INTEGER", async () => {
+    const { wss, url, ready } = createMockCDPServer();
+    servers.push(wss);
+    await ready;
+
+    const receivedIds: number[] = [];
+    wss.on("connection", (ws) => {
+      ws.on("message", (data) => {
+        const msg = JSON.parse(data.toString());
+        receivedIds.push(msg.id);
+        ws.send(JSON.stringify({ id: msg.id, result: {} }));
+      });
+    });
+
+    const client = new CDPClient({ wsUrl: url });
+    await client.connect();
+
+    // Force nextId to near MAX_SAFE_INTEGER
+    (client as any).nextId = Number.MAX_SAFE_INTEGER - 1;
+
+    // This send should trigger the overflow guard and reset nextId to 1
+    await client.send("Page.enable");
+    expect(receivedIds[receivedIds.length - 1]).toBe(1);
+
+    // Next call should use 2
+    await client.send("Page.enable");
+    expect(receivedIds[receivedIds.length - 1]).toBe(2);
+
+    await client.disconnect();
+  });
+});
+
 describe("CDPClient bridge mode", () => {
   it("accepts a pre-connected WebSocket and reports connected", async () => {
     const { wss, url, ready } = createMockCDPServer();

@@ -214,6 +214,34 @@ describe("PeerTransport", () => {
     expect(globalThis.fetch).toHaveBeenCalled();
   });
 
+  // ─── Path injection protection tests ───────────────────────────
+  it("should encode taskId in sendCheckpointRequest URL to prevent path injection", async () => {
+    mockFetch(200, { status: "running" });
+    await transport.sendCheckpointRequest("http://remote:3100", "task/../../../etc/passwd");
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const url = call[0] as string;
+    expect(url).not.toContain("../");
+    expect(url).toContain(encodeURIComponent("task/../../../etc/passwd"));
+  });
+
+  it("should encode taskId in sendCancelTask URL to prevent path injection", async () => {
+    mockFetch(200, { ok: true });
+    await transport.sendCancelTask("http://remote:3100", "task/../../admin/delete");
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const url = call[0] as string;
+    expect(url).not.toContain("admin/delete");
+    expect(url).toContain(encodeURIComponent("task/../../admin/delete"));
+  });
+
+  it("should encode taskId with special characters in checkpoint URL", async () => {
+    mockFetch(200, { status: "running" });
+    await transport.sendCheckpointRequest("http://remote:3100", "task with spaces & special=chars");
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const url = call[0] as string;
+    expect(url).not.toContain(" ");
+    expect(url).toContain(encodeURIComponent("task with spaces & special=chars"));
+  });
+
   it("should send join message", async () => {
     mockFetch(200, { ok: true });
     const result = await transport.sendJoin("http://remote:3100", {

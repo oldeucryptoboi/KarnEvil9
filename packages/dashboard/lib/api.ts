@@ -56,17 +56,61 @@ export interface ToolInfo {
   permissions: string[];
 }
 
+export interface ScheduleTrigger {
+  type: "at" | "every" | "cron";
+  interval?: string;
+  cron?: string;
+  expression?: string;
+  at?: string;
+  start_at?: string;
+  timezone?: string;
+}
+
+export interface ScheduleAction {
+  type: "createSession" | "emitEvent";
+  task_text: string;
+  agentic?: boolean;
+  mode?: string;
+  planner?: string;
+  model?: string;
+}
+
+export interface ScheduleOptions {
+  delete_after_run?: boolean;
+  max_failures?: number;
+  description?: string;
+  tags?: string[];
+}
+
 export interface Schedule {
   schedule_id: string;
   name: string;
-  trigger: { type: string; interval?: string; cron?: string };
-  action: { type: string; task_text: string; agentic?: boolean };
+  trigger: ScheduleTrigger;
+  action: ScheduleAction;
+  options?: ScheduleOptions;
   status: string;
   run_count: number;
   failure_count: number;
   next_run_at?: string;
   last_run_at?: string;
+  last_session_id?: string;
+  last_error?: string;
   created_at: string;
+  updated_at?: string;
+}
+
+export interface CreateScheduleInput {
+  name: string;
+  trigger: ScheduleTrigger;
+  action: ScheduleAction;
+  options?: ScheduleOptions;
+}
+
+export interface UpdateScheduleInput {
+  name?: string;
+  trigger?: ScheduleTrigger;
+  action?: ScheduleAction;
+  options?: ScheduleOptions;
 }
 
 export interface HealthStatus {
@@ -120,10 +164,26 @@ export const getSchedules = async (): Promise<Schedule[]> => {
   const res = await apiFetch<{ schedules: Schedule[] }>("/api/schedules");
   return res.schedules;
 };
-export const createSchedule = (schedule: Partial<Schedule>) =>
-  apiFetch<Schedule>("/api/schedules", { method: "POST", body: JSON.stringify(schedule) });
+export const getSchedule = (id: string) =>
+  apiFetch<Schedule>(`/api/schedules/${encodeURIComponent(id)}`);
+export const createScheduleApi = (input: CreateScheduleInput) =>
+  apiFetch<Schedule>("/api/schedules", { method: "POST", body: JSON.stringify(input) });
+export const updateSchedule = (id: string, input: UpdateScheduleInput) =>
+  apiFetch<Schedule>(`/api/schedules/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
 export const deleteSchedule = (id: string) =>
-  apiFetch<void>(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
+  apiFetch<{ deleted: boolean; schedule_id: string }>(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const pauseSchedule = (id: string) =>
+  apiFetch<Schedule>(`/api/schedules/${encodeURIComponent(id)}/pause`, { method: "POST" });
+export const resumeSchedule = (id: string) =>
+  apiFetch<Schedule>(`/api/schedules/${encodeURIComponent(id)}/resume`, { method: "POST" });
+export const triggerSchedule = (id: string) =>
+  apiFetch<{ triggered: boolean; schedule_id: string; session_id?: string }>(
+    `/api/schedules/${encodeURIComponent(id)}/trigger`,
+    { method: "POST" },
+  );
 
 // Health
 export const getHealth = () => apiFetch<HealthStatus>("/api/health");
@@ -199,3 +259,92 @@ export const searchVault = async (q: string, params?: { limit?: number; type?: s
   if (params?.category) query.set("category", params.category);
   return apiFetch<{ results: VaultObject[]; total: number }>(`/api/plugins/vault/vault/search?${query.toString()}`);
 };
+
+// Swarm
+export type PeerStatus = "active" | "suspected" | "unreachable" | "left";
+
+export interface SwarmPeer {
+  node_id: string;
+  display_name: string;
+  api_url: string;
+  capabilities: string[];
+  status: PeerStatus;
+  last_heartbeat_at: string;
+  last_latency_ms: number;
+  joined_at: string;
+}
+
+export interface SwarmIdentity {
+  node_id: string;
+  display_name: string;
+  api_url: string;
+  capabilities: string[];
+  version: string;
+}
+
+export interface SwarmStatusResponse {
+  running: boolean;
+  node_id: string;
+  display_name: string;
+  peer_count: number;
+  active_peers: number;
+  active_delegations: number;
+}
+
+export interface SwarmPeersResponse {
+  self: SwarmIdentity;
+  peers: SwarmPeer[];
+  total: number;
+}
+
+export interface PeerReputation {
+  node_id: string;
+  tasks_completed: number;
+  tasks_failed: number;
+  tasks_aborted: number;
+  total_duration_ms: number;
+  total_tokens_used: number;
+  total_cost_usd: number;
+  avg_latency_ms: number;
+  consecutive_successes: number;
+  consecutive_failures: number;
+  last_outcome_at: string;
+  trust_score: number;
+}
+
+export interface DelegationContract {
+  contract_id: string;
+  delegator_node_id: string;
+  delegatee_node_id: string;
+  task_id: string;
+  task_text: string;
+  status: "active" | "completed" | "violated" | "cancelled";
+  created_at: string;
+  completed_at?: string;
+  violation_reason?: string;
+}
+
+export interface AnomalyReport {
+  anomaly_id: string;
+  task_id: string;
+  peer_node_id: string;
+  type: string;
+  severity: "low" | "medium" | "high" | "critical";
+  description: string;
+  timestamp: string;
+}
+
+export const getSwarmStatus = () =>
+  apiFetch<SwarmStatusResponse>("/api/plugins/swarm/status");
+
+export const getSwarmPeers = () =>
+  apiFetch<SwarmPeersResponse>("/api/plugins/swarm/peers");
+
+export const getSwarmReputations = () =>
+  apiFetch<{ reputations: PeerReputation[]; total: number }>("/api/plugins/swarm/reputation");
+
+export const getSwarmContracts = () =>
+  apiFetch<{ contracts: DelegationContract[]; total: number }>("/api/plugins/swarm/contracts");
+
+export const getSwarmAnomalies = () =>
+  apiFetch<{ anomalies: AnomalyReport[]; total: number }>("/api/plugins/swarm/anomalies");

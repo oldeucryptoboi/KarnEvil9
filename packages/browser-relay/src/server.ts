@@ -47,7 +47,9 @@ export class RelayServer {
         res.status(status).json(result);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        res.status(500).json({ success: false, error: message });
+        // Sanitize error: strip file paths and stack traces to prevent information leakage
+        const safeMessage = message.replace(/\/[^\s:]+/g, "[path]").slice(0, 500);
+        res.status(500).json({ success: false, error: safeMessage });
       }
     });
 
@@ -57,7 +59,8 @@ export class RelayServer {
         res.json({ closed: true });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        res.status(500).json({ closed: false, error: message });
+        const safeMessage = message.replace(/\/[^\s:]+/g, "[path]").slice(0, 500);
+        res.status(500).json({ closed: false, error: safeMessage });
       }
     });
   }

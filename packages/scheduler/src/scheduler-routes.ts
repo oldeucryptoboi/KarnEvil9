@@ -120,7 +120,13 @@ export function createSchedulerRoutes(scheduler: Scheduler): SchedulerRoute[] {
       });
       res.status(201).json(schedule);
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+      const msg = err instanceof Error ? err.message : "Internal server error";
+      // Only expose known user-facing errors; mask internal details
+      if (msg.includes("Invalid") || msg.includes("format") || msg.includes("required")) {
+        res.status(400).json({ error: msg });
+      } else {
+        res.status(500).json({ error: "Internal server error" });
+      }
     }
   };
 

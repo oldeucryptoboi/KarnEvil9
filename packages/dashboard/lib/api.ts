@@ -128,6 +128,17 @@ export const deleteSchedule = (id: string) =>
 // Health
 export const getHealth = () => apiFetch<HealthStatus>("/api/health");
 
+// Journal compaction
+export interface CompactResult {
+  before: number;
+  after: number;
+}
+export const compactJournal = (retainSessionIds?: string[]) =>
+  apiFetch<CompactResult>("/api/journal/compact", {
+    method: "POST",
+    body: JSON.stringify({ retain_sessions: retainSessionIds }),
+  });
+
 // Vault
 export interface VaultObject {
   object_id: string;

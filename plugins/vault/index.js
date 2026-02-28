@@ -283,8 +283,7 @@ Content: <<<UNTRUSTED_INPUT>>>${truncatedContent}<<<END_UNTRUSTED_INPUT>>>`;
     });
 
     if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Anthropic API error ${response.status}: ${errText}`);
+      throw new Error(`Classifier API error (HTTP ${response.status})`);
     }
 
     const data = await response.json();
@@ -294,7 +293,19 @@ Content: <<<UNTRUSTED_INPUT>>>${truncatedContent}<<<END_UNTRUSTED_INPUT>>>`;
 
     // Parse JSON response, stripping any markdown fences
     const jsonStr = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const result = JSON.parse(jsonStr);
+    let result;
+    try {
+      result = JSON.parse(jsonStr);
+    } catch {
+      // LLM returned non-JSON — fall back to defaults
+      return {
+        object_type: "Note",
+        para_category: "inbox",
+        tags: [],
+        entities: [],
+        confidence: 0.1,
+      };
+    }
 
     return {
       object_type: result.object_type ?? "Note",
@@ -338,14 +349,14 @@ function createEmbedderFn(apiKey, model) {
 
         if (response.status === 429) {
           retries++;
-          const retryAfter = parseInt(response.headers.get("retry-after") ?? "2", 10);
+          const raw = parseInt(response.headers.get("retry-after") ?? "2", 10);
+          const retryAfter = Math.min(Math.max(Number.isFinite(raw) ? raw : 2, 1), 60);
           await new Promise((r) => setTimeout(r, retryAfter * 1000));
           continue;
         }
 
         if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`OpenAI API error ${response.status}: ${errText}`);
+          throw new Error(`Embedder API error (HTTP ${response.status})`);
         }
 
         const data = await response.json();
@@ -402,8 +413,7 @@ Ground every observation in quantitative data. Cite specific numbers. Do not spe
     });
 
     if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Anthropic API error ${response.status}: ${errText}`);
+      throw new Error(`Insights API error (HTTP ${response.status})`);
     }
 
     const data = await response.json();

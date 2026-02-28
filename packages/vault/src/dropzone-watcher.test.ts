@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rm, mkdir, writeFile, readdir, chmod } from "node:fs/promises";
+import { rm, mkdir, writeFile, readdir, chmod, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { v4 as uuid } from "uuid";
@@ -151,5 +151,21 @@ describe("DropZoneWatcher", () => {
 
     const results = await watcher.scan();
     expect(results.length).toBe(0);
+  });
+
+  it("skips symlinks to prevent path traversal", async () => {
+    // Create a file outside the dropzone
+    const outsideDir = join(tmpdir(), `vault-dropzone-outside-${uuid()}`);
+    await mkdir(outsideDir, { recursive: true });
+    const secretFile = join(outsideDir, "secret.json");
+    await writeFile(secretFile, JSON.stringify([{ mapping: {} }]), "utf-8");
+
+    // Create a symlink inside the dropzone pointing to the external file
+    await symlink(secretFile, join(tmpDir, "link-to-secret.json"));
+
+    const results = await watcher.scan();
+    expect(results.length).toBe(0);
+
+    await rm(outsideDir, { recursive: true, force: true });
   });
 });

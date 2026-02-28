@@ -16,6 +16,7 @@ export default function SessionDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showRawJournal, setShowRawJournal] = useState(false);
+  const [eventTypeFilter, setEventTypeFilter] = useState<string>("all");
   const { events, connected } = useWebSocket(id);
   const stepsEndRef = useRef<HTMLDivElement>(null);
 
@@ -106,6 +107,28 @@ export default function SessionDetailPage() {
   const stepDone = allEvents.filter((e) => e.type === "step.succeeded" || e.type === "step.failed").length;
   const totalSteps = session?.total_steps ?? (stepStarted > 0 ? stepStarted : undefined);
 
+  // Compute session duration
+  const duration = (() => {
+    if (!session?.created_at) return null;
+    const start = new Date(session.created_at).getTime();
+    const terminalEvt = [...allEvents].reverse().find(
+      (e) => e.type === "session.completed" || e.type === "session.failed" || e.type === "session.aborted"
+    );
+    const end = terminalEvt ? new Date(terminalEvt.timestamp).getTime() : Date.now();
+    const ms = end - start;
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+    const min = Math.floor(ms / 60_000);
+    const sec = Math.round((ms % 60_000) / 1000);
+    return `${min}m ${sec}s`;
+  })();
+
+  // Unique event types for filter dropdown
+  const eventTypes = [...new Set(allEvents.map((e) => e.type))].sort();
+  const filteredEvents = eventTypeFilter === "all"
+    ? allEvents
+    : allEvents.filter((e) => e.type === eventTypeFilter);
+
   const handleAbort = async () => {
     if (!id) return;
     try {
@@ -181,13 +204,21 @@ export default function SessionDetailPage() {
             </p>
           </div>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
+            <p className="text-xs text-[var(--muted)] mb-1">Duration</p>
+            <p className="text-sm font-semibold">{duration ?? "-"}</p>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="text-xs text-[var(--muted)] mb-1">Created</p>
             <p className="text-sm">{new Date(session.created_at).toLocaleString()}</p>
           </div>
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
-            <p className="text-xs text-[var(--muted)] mb-1">Task</p>
-            <p className="text-sm truncate" title={session.task_text ?? session.task?.text}>{session.task_text ?? session.task?.text ?? "-"}</p>
-          </div>
+        </div>
+      )}
+
+      {/* Task Text */}
+      {session && (session.task_text ?? session.task?.text) && (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 mb-4">
+          <p className="text-xs text-[var(--muted)] mb-1">Task</p>
+          <p className="text-sm">{session.task_text ?? session.task?.text}</p>
         </div>
       )}
 
@@ -214,32 +245,58 @@ export default function SessionDetailPage() {
         </button>
 
         {showRawJournal && (
-          <div className="border-t border-[var(--border)] divide-y divide-[var(--border)] max-h-[500px] overflow-y-auto">
-            {allEvents.map((evt) => (
-              <div key={evt.event_id} className="p-3 hover:bg-white/[0.02]">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-[var(--muted)] font-mono w-20">
-                    {evt.timestamp.split("T")[1]?.slice(0, 12) ?? ""}
-                  </span>
-                  <span className={`text-sm font-medium ${
-                    evt.type.includes("failed") ? "text-red-400" :
-                    evt.type.includes("succeeded") ? "text-green-400" :
-                    "text-[var(--foreground)]"
-                  }`}>
-                    {evt.type}
-                  </span>
+          <>
+            {/* Event type filter */}
+            <div className="border-t border-[var(--border)] p-3 flex items-center gap-2">
+              <label className="text-xs text-[var(--muted)]">Filter:</label>
+              <select
+                value={eventTypeFilter}
+                onChange={(e) => setEventTypeFilter(e.target.value)}
+                className="text-xs bg-[var(--background)] border border-[var(--border)] rounded px-2 py-1 text-[var(--foreground)]"
+              >
+                <option value="all">All types ({allEvents.length})</option>
+                {eventTypes.map((t) => (
+                  <option key={t} value={t}>
+                    {t} ({allEvents.filter((e) => e.type === t).length})
+                  </option>
+                ))}
+              </select>
+              {eventTypeFilter !== "all" && (
+                <span className="text-xs text-[var(--muted)]">
+                  {filteredEvents.length} of {allEvents.length}
+                </span>
+              )}
+            </div>
+
+            <div className="border-t border-[var(--border)] divide-y divide-[var(--border)] max-h-[500px] overflow-y-auto">
+              {filteredEvents.map((evt) => (
+                <div key={evt.event_id} className="p-3 hover:bg-white/[0.02]">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-[var(--muted)] font-mono w-20">
+                      {evt.timestamp.split("T")[1]?.slice(0, 12) ?? ""}
+                    </span>
+                    <span className={`text-sm font-medium ${
+                      evt.type.includes("failed") ? "text-red-400" :
+                      evt.type.includes("succeeded") ? "text-green-400" :
+                      "text-[var(--foreground)]"
+                    }`}>
+                      {evt.type}
+                    </span>
+                  </div>
+                  {Object.keys(evt.payload).length > 0 && (
+                    <pre className="text-xs text-[var(--muted)] mt-1 ml-[92px] overflow-x-auto">
+                      {JSON.stringify(evt.payload, null, 2)}
+                    </pre>
+                  )}
                 </div>
-                {Object.keys(evt.payload).length > 0 && (
-                  <pre className="text-xs text-[var(--muted)] mt-1 ml-[92px] overflow-x-auto">
-                    {JSON.stringify(evt.payload, null, 2)}
-                  </pre>
-                )}
-              </div>
-            ))}
-            {allEvents.length === 0 && (
-              <div className="p-6 text-center text-[var(--muted)]">No events yet</div>
-            )}
-          </div>
+              ))}
+              {filteredEvents.length === 0 && (
+                <div className="p-6 text-center text-[var(--muted)]">
+                  {eventTypeFilter === "all" ? "No events yet" : `No ${eventTypeFilter} events`}
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>

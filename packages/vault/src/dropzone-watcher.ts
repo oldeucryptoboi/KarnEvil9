@@ -21,9 +21,9 @@ export class DropZoneWatcher {
     const results: DropZoneFile[] = [];
 
     for (const entry of entries) {
-      // Skip hidden files/dirs and _processed directory
+      // Skip hidden files/dirs, _processed directory, directories, and symlinks
       if (entry.name.startsWith(".") || entry.name === "_processed") continue;
-      if (entry.isDirectory()) continue;
+      if (entry.isDirectory() || entry.isSymbolicLink()) continue;
 
       const filePath = join(this.dropZonePath, entry.name);
       const source = await this.detectSource(filePath);

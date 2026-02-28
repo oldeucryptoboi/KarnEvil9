@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getSessions, type SessionSummary } from "@/lib/api";
+import { getSessions, compactJournal, type SessionSummary } from "@/lib/api";
 import { StatusBadge } from "@/components/status-badge";
 import { useWSContext } from "@/lib/ws-context";
 
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [compactResult, setCompactResult] = useState<string | null>(null);
+  const [compacting, setCompacting] = useState(false);
   const { connected } = useWSContext();
 
   useEffect(() => {
@@ -73,6 +75,48 @@ export default function SessionsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Journal Compaction */}
+      {sessions.length > 0 && (
+        <div className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold">Journal Compaction</h3>
+              <p className="text-xs text-[var(--muted)] mt-0.5">
+                Remove old session events from the journal to reclaim disk space.
+              </p>
+            </div>
+            <button
+              disabled={compacting}
+              onClick={async () => {
+                setCompacting(true);
+                setCompactResult(null);
+                try {
+                  const activeSessions = sessions
+                    .filter((s) => s.status === "running" || s.status === "planning")
+                    .map((s) => s.session_id);
+                  const result = await compactJournal(activeSessions.length > 0 ? activeSessions : undefined);
+                  const removed = result.before - result.after;
+                  setCompactResult(`Compacted: ${result.before} -> ${result.after} events (${removed} removed)`);
+                  getSessions().then(setSessions).catch(() => {});
+                } catch (e) {
+                  setCompactResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+                } finally {
+                  setCompacting(false);
+                }
+              }}
+              className="rounded bg-[var(--accent)]/10 px-3 py-1.5 text-xs text-[var(--accent)] hover:bg-[var(--accent)]/20 disabled:opacity-50"
+            >
+              {compacting ? "Compacting..." : "Compact Journal"}
+            </button>
+          </div>
+          {compactResult && (
+            <p className={`text-xs mt-2 ${compactResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>
+              {compactResult}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

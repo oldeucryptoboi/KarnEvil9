@@ -30,6 +30,7 @@ export class WhatsAppClient {
     this._stopping = false;
     this._baileys = null;
     this._qrTerminal = null;
+    this._reconnectTimer = null;
   }
 
   /**
@@ -74,6 +75,10 @@ export class WhatsAppClient {
   async stop() {
     this._stopping = true;
     this.connected = false;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
     if (this._sock) {
       this._sock.end(undefined);
       this._sock = null;
@@ -248,7 +253,8 @@ export class WhatsAppClient {
     const jitter = Math.random() * baseDelay * 0.3;
     const delay = baseDelay + jitter;
     this.logger?.info(`WhatsApp reconnecting in ${Math.round(delay)}ms (attempt ${this._reconnectAttempt})`);
-    setTimeout(() => {
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
       if (!this._stopping) {
         this._connect().catch((err) => {
           this.logger?.error("WhatsApp reconnect failed", { error: err.message });

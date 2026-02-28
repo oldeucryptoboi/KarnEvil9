@@ -92,8 +92,8 @@ export const getJournal = async (sessionId: string): Promise<JournalEvent[]> => 
 
 // Approvals
 export const getApprovals = async (): Promise<ApprovalRequest[]> => {
-  const res = await apiFetch<ApprovalRequest[] | { pending: ApprovalRequest[] }>("/api/approvals");
-  return Array.isArray(res) ? res : res.pending;
+  const res = await apiFetch<{ pending: Array<{ request_id: string; request: ApprovalRequest }> }>("/api/approvals");
+  return res.pending.map((item) => ({ ...item.request, request_id: item.request_id }));
 };
 export const submitApproval = (id: string, decision: string) =>
   apiFetch<{ status: string }>(`/api/approvals/${encodeURIComponent(id)}`, {

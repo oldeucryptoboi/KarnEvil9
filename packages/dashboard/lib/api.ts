@@ -55,13 +55,16 @@ export interface ToolInfo {
 }
 
 export interface Schedule {
-  id: string;
-  cron?: string;
-  interval_ms?: number;
-  task_text: string;
-  enabled: boolean;
-  next_run?: string;
-  last_run?: string;
+  schedule_id: string;
+  name: string;
+  trigger: { type: string; interval?: string; cron?: string };
+  action: { type: string; task_text: string; agentic?: boolean };
+  status: string;
+  run_count: number;
+  failure_count: number;
+  next_run_at?: string;
+  last_run_at?: string;
+  created_at: string;
 }
 
 export interface HealthStatus {
@@ -70,8 +73,8 @@ export interface HealthStatus {
   sessions_active: number;
 }
 
-// Sessions
-export const getSessions = () => apiFetch<SessionSummary[]>("/api/sessions");
+// Sessions — no list endpoint exists; return empty array (sessions are created via CLI/API POST)
+export const getSessions = async (): Promise<SessionSummary[]> => [];
 export const getSession = (id: string) => apiFetch<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`);
 export const createSession = (task: string, mode = "mock") =>
   apiFetch<{ session_id: string; status: string }>("/api/sessions", {
@@ -82,25 +85,36 @@ export const abortSession = (id: string) =>
   apiFetch<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}/abort`, { method: "POST" });
 
 // Journal
-export const getJournal = (sessionId: string) =>
-  apiFetch<JournalEvent[]>(`/api/sessions/${encodeURIComponent(sessionId)}/journal`);
+export const getJournal = async (sessionId: string): Promise<JournalEvent[]> => {
+  const res = await apiFetch<JournalEvent[] | { events: JournalEvent[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/journal`);
+  return Array.isArray(res) ? res : res.events;
+};
 
 // Approvals
-export const getApprovals = () => apiFetch<ApprovalRequest[]>("/api/approvals");
+export const getApprovals = async (): Promise<ApprovalRequest[]> => {
+  const res = await apiFetch<ApprovalRequest[] | { pending: ApprovalRequest[] }>("/api/approvals");
+  return Array.isArray(res) ? res : res.pending;
+};
 export const submitApproval = (id: string, decision: string) =>
   apiFetch<{ status: string }>(`/api/approvals/${encodeURIComponent(id)}`, {
     method: "POST",
     body: JSON.stringify({ decision }),
   });
 
-// Tools
-export const getTools = () => apiFetch<ToolInfo[]>("/api/tools");
+// Tools — API returns { tools: [...] }
+export const getTools = async (): Promise<ToolInfo[]> => {
+  const res = await apiFetch<{ tools: ToolInfo[] }>("/api/tools");
+  return res.tools;
+};
 
 // Plugins
 export const getPlugins = () => apiFetch<Array<{ id: string; status: string; manifest: Record<string, unknown> }>>("/api/plugins");
 
-// Schedules
-export const getSchedules = () => apiFetch<Schedule[]>("/api/schedules");
+// Schedules — API returns { schedules: [...], total: N }
+export const getSchedules = async (): Promise<Schedule[]> => {
+  const res = await apiFetch<{ schedules: Schedule[] }>("/api/schedules");
+  return res.schedules;
+};
 export const createSchedule = (schedule: Partial<Schedule>) =>
   apiFetch<Schedule>("/api/schedules", { method: "POST", body: JSON.stringify(schedule) });
 export const deleteSchedule = (id: string) =>

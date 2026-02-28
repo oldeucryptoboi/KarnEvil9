@@ -344,11 +344,12 @@ program.command("server").description("Start the API server")
   .option("--swarm-name <name>", "Display name for this swarm node")
   .option("--swarm-mdns", "Enable mDNS discovery (default: true)")
   .option("--swarm-gossip", "Enable gossip protocol (default: true)")
+  .option("--server-name <name>", "Bonjour service name for client discovery", hostname())
   .option("--auto-approve", "Auto-approve all permission requests for the session")
   .option("--game <path>", "Path to Z-machine game file (e.g., sigma.z8)")
   .option("--game-checkpoint-dir <dir>", "Game checkpoint directory", "~/.sigma-checkpoints")
   .option("--game-turns <n>", "Max turns per game session", "20")
-  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean; browser: string; swarm?: boolean; swarmToken?: string; swarmSeeds?: string; swarmName?: string; swarmMdns?: boolean; swarmGossip?: boolean; autoApprove?: boolean; game?: string; gameCheckpointDir: string; gameTurns: string }) => {
+  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean; browser: string; swarm?: boolean; swarmToken?: string; swarmSeeds?: string; swarmName?: string; swarmMdns?: boolean; swarmGossip?: boolean; serverName?: string; autoApprove?: boolean; game?: string; gameCheckpointDir: string; gameTurns: string }) => {
     // Late-binding ref: set after ApiServer is constructed
     let apiServerRef: ApiServer | null = null;
     const serverApprovalPrompt = (opts.autoApprove || opts.insecure)
@@ -696,6 +697,7 @@ program.command("server").description("Start the API server")
       corsOrigins: corsOrigins ? corsOrigins.split(",").map((s) => s.trim()) : undefined,
       approvalTimeoutMs: parsePositiveInt(process.env.KARNEVIL9_APPROVAL_TIMEOUT_MS ?? "300000", "KARNEVIL9_APPROVAL_TIMEOUT_MS", 300000),
       maxConcurrentSessions: parsePositiveInt(process.env.KARNEVIL9_MAX_SESSIONS ?? "50", "KARNEVIL9_MAX_SESSIONS", 50),
+      serviceName: opts.serverName ?? process.env.KARNEVIL9_SERVER_NAME,
     });
     apiServerRef = apiServer;
     apiServer.listen(port);

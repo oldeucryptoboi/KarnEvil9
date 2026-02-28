@@ -17,6 +17,7 @@ import type { ServerResponse, Server, IncomingMessage } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { parse as parseUrl } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
+import { Bonjour, type Service } from "bonjour-service";
 
 // ─── Constants ────────────────────────────────────────────────────
 const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
@@ -240,6 +241,8 @@ export interface ApiServerConfig {
   checkpointDir?: string;
   /** IP addresses of trusted reverse proxies; enables X-Forwarded-For parsing. */
   trustedProxies?: string[];
+  /** Name advertised via Bonjour/mDNS (e.g. "EDDIE"). Defaults to OS hostname. */
+  serviceName?: string;
 }
 
 /** Validate numeric config values at startup to fail fast on misconfigurations. */
@@ -316,6 +319,9 @@ export class ApiServer {
   private journalUnsubscribe?: () => void;
   private wss?: WebSocketServer;
   private wsClients = new Set<WSClient>();
+  private serviceName?: string;
+  private bonjourInstance?: Bonjour;
+  private bonjourService?: Service;
 
   constructor(config: ApiServerConfig);
   constructor(toolRegistry: ToolRegistry, journal: Journal);
@@ -373,6 +379,7 @@ export class ApiServer {
       this.approvalTimeoutMs = config.approvalTimeoutMs ?? 300000; // 5 minutes
       this.corsOrigins = config.corsOrigins;
       this.trustedProxies = config.trustedProxies;
+      this.serviceName = config.serviceName;
       this.rateLimiter = new RateLimiter();
       this.rateLimiterPruneInterval = setInterval(() => this.rateLimiter.prune(), RATE_LIMITER_PRUNE_INTERVAL_MS);
       this.rateLimiterPruneInterval.unref();
@@ -501,9 +508,33 @@ export class ApiServer {
       const addr = this.httpServer!.address();
       const actualPort = typeof addr === "object" && addr ? addr.port : port;
       console.log(`KarnEvil9 API listening on http://localhost:${actualPort}`);
+      this.publishBonjour(actualPort);
     });
     this.setupWebSocket(this.httpServer);
     return this.httpServer;
+  }
+
+  private publishBonjour(port: number): void {
+    const name = this.serviceName || require("node:os").hostname() as string;
+    try {
+      const bonjour = new Bonjour();
+      this.bonjourInstance = bonjour;
+      const service = bonjour.publish({
+        name,
+        type: "karnevil9",
+        protocol: "tcp",
+        port,
+      });
+      this.bonjourService = service;
+      service.on("up", () => {
+        console.log(`Bonjour: advertising "${name}" as _karnevil9._tcp on port ${port}`);
+      });
+      service.on("error", (err: Error) => {
+        console.warn(`Bonjour: advertisement error — ${err.message}`);
+      });
+    } catch (err) {
+      console.warn(`Bonjour: failed to publish — ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -540,6 +571,9 @@ export class ApiServer {
     if (this.metricsCollector) this.metricsCollector.detach();
     // Wait for pending journal writes to flush
     await this.journal.close();
+    // Unpublish Bonjour service
+    this.bonjourService?.stop?.();
+    if (this.bonjourInstance) this.bonjourInstance.destroy();
     // Close HTTP server
     if (this.httpServer) {
       await new Promise<void>((resolve) => this.httpServer!.close(() => resolve()));

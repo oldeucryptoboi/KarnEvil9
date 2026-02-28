@@ -351,7 +351,7 @@ program.command("server").description("Start the API server")
   .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean; browser: string; swarm?: boolean; swarmToken?: string; swarmSeeds?: string; swarmName?: string; swarmMdns?: boolean; swarmGossip?: boolean; autoApprove?: boolean; game?: string; gameCheckpointDir: string; gameTurns: string }) => {
     // Late-binding ref: set after ApiServer is constructed
     let apiServerRef: ApiServer | null = null;
-    const serverApprovalPrompt = opts.autoApprove
+    const serverApprovalPrompt = (opts.autoApprove || opts.insecure)
       ? async (_request: PermissionRequest): Promise<ApprovalDecision> => "allow_session"
       : async (request: PermissionRequest): Promise<ApprovalDecision> => {
           if (!apiServerRef) return "deny";

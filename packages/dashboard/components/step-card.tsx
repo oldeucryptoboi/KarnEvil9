@@ -30,6 +30,51 @@ function formatDuration(start?: string, end?: string): string | null {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function StepOutput({ output }: { output: Record<string, unknown> }) {
+  const stdout = output.stdout as string | undefined;
+  const stderr = output.stderr as string | undefined;
+  const exitCode = output.exit_code as number | undefined;
+  const content = output.content as string | undefined;
+  const error = output.error as string | undefined;
+
+  // Shell-exec output: show stdout/stderr as code blocks
+  if (stdout !== undefined || stderr !== undefined || exitCode !== undefined) {
+    return (
+      <div className="space-y-1.5">
+        {exitCode !== undefined && exitCode !== 0 && (
+          <p className="text-red-400">Exit code: {exitCode}</p>
+        )}
+        {stdout && (
+          <pre className="rounded bg-black/30 p-2 text-green-300/80 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">{stdout}</pre>
+        )}
+        {stderr && (
+          <pre className="rounded bg-black/30 p-2 text-red-300/80 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all">{stderr}</pre>
+        )}
+      </div>
+    );
+  }
+
+  // Read-file output: show file content
+  if (content !== undefined) {
+    return (
+      <div className="space-y-1.5">
+        {"size_bytes" in output && (
+          <p className="text-[var(--muted)]">{output.size_bytes as number} bytes</p>
+        )}
+        <pre className="rounded bg-black/30 p-2 text-[var(--foreground)]/80 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">{content}</pre>
+      </div>
+    );
+  }
+
+  // Error output
+  if (error) {
+    return <pre className="rounded bg-red-500/10 p-2 text-red-400 overflow-x-auto">{error}</pre>;
+  }
+
+  // Fallback: raw JSON
+  return <pre className="text-[var(--muted)] overflow-x-auto">{JSON.stringify(output, null, 2)}</pre>;
+}
+
 export function StepCard({ step }: { step: StepData }) {
   const [expanded, setExpanded] = useState(false);
   const style = STATUS_STYLES[step.status] ?? STATUS_STYLES.pending!;
@@ -75,7 +120,7 @@ export function StepCard({ step }: { step: StepData }) {
           {step.output && Object.keys(step.output).length > 0 && (
             <div>
               <p className="text-[var(--muted)] mb-1">Output</p>
-              <pre className="text-[var(--muted)] overflow-x-auto">{JSON.stringify(step.output, null, 2)}</pre>
+              <StepOutput output={step.output} />
             </div>
           )}
         </div>

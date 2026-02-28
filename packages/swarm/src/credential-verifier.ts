@@ -6,7 +6,6 @@ import type {
   SwarmNodeIdentity,
   Ed25519KeyPair,
 } from "./types.js";
-import { signAttestation, verifyAttestationSignature } from "./ed25519-signer.js";
 
 export interface CredentialVerifierConfig {
   localIdentity: SwarmNodeIdentity;
@@ -119,7 +118,7 @@ export class CredentialVerifier {
       }
     }
 
-    const valid = signatureValid && !expired && issues.length <= 0;
+    const _valid = signatureValid && !expired && issues.length <= 0;
     // Re-check: if there are only endorsement-unrelated issues and signature is valid and not expired
     const isValid = signatureValid && !expired;
 

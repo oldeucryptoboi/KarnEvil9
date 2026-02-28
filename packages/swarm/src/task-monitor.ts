@@ -1,6 +1,6 @@
 import type { JournalEventType } from "@karnevil9/schemas";
 import type { PeerTransport } from "./transport.js";
-import type { TaskMonitorConfig, TaskCheckpointStatus, MonitoringLevel } from "./types.js";
+import type { TaskMonitorConfig, MonitoringLevel } from "./types.js";
 import { DEFAULT_TASK_MONITOR_CONFIG } from "./types.js";
 
 interface MonitoredTask {

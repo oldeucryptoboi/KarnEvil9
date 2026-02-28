@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { RootCauseAnalyzer, DEFAULT_ROOT_CAUSE_CONFIG } from "./root-cause-analyzer.js";
+import { RootCauseAnalyzer, } from "./root-cause-analyzer.js";
 import type { MeshManager } from "./mesh-manager.js";
 import type { ReputationStore } from "./reputation-store.js";
 import type { AnomalyReport, PeerEntry, PeerReputation, TaskAttribute } from "./types.js";

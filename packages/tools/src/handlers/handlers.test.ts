@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import type { PolicyProfile } from "@karnevil9/schemas";
 import { readFileHandler } from "./read-file.js";
 import { writeFileHandler } from "./write-file.js";
-import { shellExecHandler, redactSecrets, parseCommand } from "./shell-exec.js";
+import { shellExecHandler, redactSecrets, } from "./shell-exec.js";
 import { httpRequestHandler } from "./http-request.js";
 import { PolicyViolationError } from "../policy-enforcer.js";
 

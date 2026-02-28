@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import type { DelegationCapabilityToken, Caveat, CaveatType } from "./types.js";
+import type { DelegationCapabilityToken, Caveat, } from "./types.js";
 
 export interface DCTConfig {
   default_expiry_ms: number;
@@ -128,7 +128,7 @@ export class DCTManager {
 
     // Verify root signature
     const rootCaveatsJson = JSON.stringify(dct.caveats.slice(0, this.countRootCaveats(dct)));
-    const expectedRoot = createHmac("sha256", this.swarmToken)
+    const _expectedRoot = createHmac("sha256", this.swarmToken)
       .update(`${dct.parent_dct_id ? "" : dct.dct_id}${rootCaveatsJson}`)
       .digest("hex");
 

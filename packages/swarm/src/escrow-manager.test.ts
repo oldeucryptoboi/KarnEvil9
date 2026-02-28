@@ -3,7 +3,6 @@ import { EscrowManager, DEFAULT_BOND_REQUIREMENT } from "./escrow-manager.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { JournalEventType } from "@karnevil9/schemas";
 
 describe("EscrowManager", () => {
   let tmpDir: string;

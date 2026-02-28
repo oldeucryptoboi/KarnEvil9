@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CognitiveFrictionEngine } from "./cognitive-friction.js";
-import type { TaskAttribute, FrictionConfig } from "./types.js";
+import type { TaskAttribute, } from "./types.js";
 
 function makeAttrs(overrides?: Partial<TaskAttribute>): TaskAttribute {
   return {

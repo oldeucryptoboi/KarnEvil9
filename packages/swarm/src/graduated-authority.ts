@@ -38,7 +38,7 @@ export function getTrustTier(
 export function authorityFromTrust(
   trustScore: number,
   baseSlo: ContractSLO,
-  baseMonitoring: ContractMonitoring,
+  _baseMonitoring: ContractMonitoring,
   basePermBoundary?: ContractPermissionBoundary,
   config: GraduatedAuthorityConfig = DEFAULT_GRADUATED_AUTHORITY_CONFIG,
 ): {

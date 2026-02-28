@@ -4,7 +4,6 @@ import type {
   TaskRFQ,
   BidObject,
   AuctionRecord,
-  AuctionStatus,
   SwarmTaskConstraints,
   SelectionWeights,
 } from "./types.js";

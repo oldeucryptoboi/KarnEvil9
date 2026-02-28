@@ -18,7 +18,7 @@ const SECRET_VALUE_PATTERNS = [
   /ghs_[A-Za-z0-9]{36,}/g,               // GitHub server tokens
   /github_pat_[A-Za-z0-9_]{22,}/g,       // GitHub fine-grained PATs
   /AKIA[0-9A-Z]{16}/g,                   // AWS access key IDs
-  /Bearer\s+[A-Za-z0-9_.\-\/+=]{20,}/g,  // Bearer tokens
+  /Bearer\s+[A-Za-z0-9_.\-/+=]{20,}/g,  // Bearer tokens
   /eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g,  // JWT tokens (header.payload)
   /glpat-[A-Za-z0-9_-]{20,}/g,           // GitLab personal access tokens
   /npm_[A-Za-z0-9]{36,}/g,               // npm tokens
@@ -49,7 +49,7 @@ export function redactSecrets(text: string): string {
   let result = text;
 
   // Redact key=value lines where the key looks sensitive
-  result = result.replace(/^([A-Z_a-z][A-Za-z0-9_]*)=(.+)$/gm, (match, key: string, value: string) => {
+  result = result.replace(/^([A-Z_a-z][A-Za-z0-9_]*)=(.+)$/gm, (match, key: string, _value: string) => {
     if (SENSITIVE_KEY_PATTERN.test(`${key}=`)) {
       return `${key}=[REDACTED]`;
     }
@@ -132,6 +132,9 @@ export const shellExecHandler: ToolHandler = async (
   const rawTimeout = typeof input.timeout_ms === "number" ? input.timeout_ms : DEFAULT_SHELL_TIMEOUT;
   const shellTimeout = Math.max(1000, Math.min(rawTimeout, MAX_SHELL_TIMEOUT));
   const args = parseCommand(command.trim());
+  if (args.length === 0) {
+    throw new Error("Empty command");
+  }
   const binary = args.shift()!;
   return new Promise((resolvePromise) => {
     execFile(binary, args, { env: sanitizeEnv(), cwd, timeout: shellTimeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {

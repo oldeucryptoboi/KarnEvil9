@@ -63,7 +63,7 @@ describe("Attestation", () => {
   it("should reject attestation with tampered status", () => {
     const result = makeResult();
     const attestation = createAttestation(result, TOKEN);
-    const tampered: TaskAttestation = { ...attestation, status: "completed" };
+    const _tampered: TaskAttestation = { ...attestation, status: "completed" };
     // Only tampered if status was actually different
     const tampered2: TaskAttestation = { ...attestation, status: "failed" };
     expect(verifyAttestation(tampered2, TOKEN)).toBe(false);

@@ -16,7 +16,6 @@ const { mockClaudeCreate, mockOpenAICreate, mockGeminiGenerate } = vi.hoisted(()
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class Anthropic {
     messages = { create: mockClaudeCreate };
-    constructor(_opts: unknown) {}
   },
 }));
 
@@ -31,7 +30,6 @@ vi.mock("openai", () => ({
 vi.mock("@google/genai", () => ({
   GoogleGenAI: class GoogleGenAI {
     models = { generateContent: mockGeminiGenerate };
-    constructor(_opts: unknown) {}
   },
 }));
 

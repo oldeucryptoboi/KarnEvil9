@@ -61,12 +61,13 @@ function createClaudeCallFn(model: string): ModelCallFn {
   }
 
   // Cache client across calls for HTTP connection pooling; clear on failure so next call retries
-  let clientPromise: Promise<{ messages: { create: Function } }> | null = null;
+  type MessageClient = { messages: { create: (...args: any[]) => any } };
+  let clientPromise: Promise<MessageClient> | null = null;
 
   return async (systemPrompt: string, userPrompt: string): Promise<ModelCallResult> => {
     if (!clientPromise) {
       clientPromise = import("@anthropic-ai/sdk").then(
-        ({ default: Anthropic }) => new Anthropic({ apiKey }) as unknown as { messages: { create: Function } }
+        ({ default: Anthropic }) => new Anthropic({ apiKey }) as unknown as MessageClient
       ).catch((err) => { clientPromise = null; throw err; });
     }
     const client = await clientPromise;
@@ -145,12 +146,13 @@ function createClaudeRawCallFn(model: string): IFModelCallFn {
     );
   }
 
-  let clientPromise: Promise<{ messages: { create: Function } }> | null = null;
+  type IFMessageClient = { messages: { create: (...args: any[]) => any } };
+  let clientPromise: Promise<IFMessageClient> | null = null;
 
   return async (systemPrompt: string, userPrompt: string) => {
     if (!clientPromise) {
       clientPromise = import("@anthropic-ai/sdk").then(
-        ({ default: Anthropic }) => new Anthropic({ apiKey }) as unknown as { messages: { create: Function } }
+        ({ default: Anthropic }) => new Anthropic({ apiKey }) as unknown as IFMessageClient
       ).catch((err) => { clientPromise = null; throw err; });
     }
     const client = await clientPromise;
@@ -244,7 +246,8 @@ function createGeminiCallFn(model: string): ModelCallFn {
     );
   }
 
-  let clientPromise: Promise<{ models: { generateContent: Function } }> | null = null;
+  type GeminiClient = { models: { generateContent: (...args: any[]) => any } };
+  let clientPromise: Promise<GeminiClient> | null = null;
 
   return async (systemPrompt: string, userPrompt: string): Promise<ModelCallResult> => {
     if (!clientPromise) {

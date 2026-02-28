@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { OutcomeVerifier } from "./outcome-verifier.js";
 import { createAttestation } from "./attestation.js";
 import { generateEd25519KeyPair, signAttestation } from "./ed25519-signer.js";
-import type { SwarmTaskResult, DelegationContract, TaskAttestation } from "./types.js";
+import type { SwarmTaskResult, DelegationContract, } from "./types.js";
 
 const TOKEN = "test-swarm-token";
 

@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { randomUUID } from "node:crypto";
-import type { SwarmNodeIdentity, SybilReport, ProofOfWork, SybilIndicator } from "./types.js";
+import type { SwarmNodeIdentity, SybilReport, ProofOfWork, } from "./types.js";
 
 export interface SybilDetectorConfig {
   join_window_ms: number;
@@ -133,7 +133,7 @@ export class SybilDetector {
     return newReports;
   }
 
-  generateChallenge(nodeId: string): { challenge: string; difficulty: number } {
+  generateChallenge(_nodeId: string): { challenge: string; difficulty: number } {
     const challenge = randomBytes(32).toString("hex");
     return { challenge, difficulty: this.config.pow_difficulty };
   }

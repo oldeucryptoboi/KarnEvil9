@@ -231,7 +231,7 @@ export class GameSessionManager {
     if (this.currentEmulator) {
       try {
         await (this.currentEmulator as FrotzEmulator).close();
-      } catch (_) {}
+      } catch (e) { process.stderr.write(`cleanup error: ${e}\n`); }
       this.currentEmulator = null;
       this.locked = false;
     }

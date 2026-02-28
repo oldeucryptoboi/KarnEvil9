@@ -65,7 +65,7 @@ describe("CollusionDetector", () => {
   it("should detect coordination with very low variance but non-identical costs", () => {
     // CV needs to be < 0.05 (default threshold)
     // Mean = 1.0, costs within 1% variance
-    detector.recordBid(makeBid({ bid_id: "b1", bidder_node_id: "peer-a", estimated_cost_usd: 1.000 }));
+    detector.recordBid(makeBid({ bid_id: "b1", bidder_node_id: "peer-a", estimated_cost_usd: 1.002 }));
     detector.recordBid(makeBid({ bid_id: "b2", bidder_node_id: "peer-b", estimated_cost_usd: 1.001 }));
     detector.recordBid(makeBid({ bid_id: "b3", bidder_node_id: "peer-c", estimated_cost_usd: 0.999 }));
     const reports = detector.analyzeBids("rfq-1");

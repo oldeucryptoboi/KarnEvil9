@@ -174,7 +174,7 @@ describe("TaskAuction", () => {
         transport: mockTransport,
       });
 
-      const record = await auction.createAuction("Task", "session-1");
+      const _record = await auction.createAuction("Task", "session-1");
 
       // createAuction calls broadcastRFQ internally
       expect(mockTransport.sendRFQ).toHaveBeenCalledTimes(3);

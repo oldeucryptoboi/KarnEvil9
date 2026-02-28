@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { JournalEventType } from "@karnevil9/schemas";
-import type { FeedbackRecord, SabotageReport, SabotageIndicatorType } from "./types.js";
+import type { FeedbackRecord, SabotageReport, } from "./types.js";
 import type { CollusionDetector } from "./collusion-detector.js";
 
 export interface SabotageDetectorConfig {

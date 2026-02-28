@@ -49,7 +49,7 @@ export function createSwarmRoutes(
   externalTriggerHandler?: ExternalTriggerHandler,
   monitoringStream?: MonitoringStream,
   anomalyDetector?: AnomalyDetector,
-  disputeStore?: DisputeStore,
+  _disputeStore?: DisputeStore,
   credentialVerifier?: CredentialVerifier,
   dctManager?: DCTManager,
   sybilDetector?: SybilDetector,

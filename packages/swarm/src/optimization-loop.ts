@@ -4,7 +4,6 @@ import type { ReputationStore } from "./reputation-store.js";
 import type { MeshManager } from "./mesh-manager.js";
 import type {
   SelectionWeights,
-  PeerPerformanceSnapshot,
   ReoptimizationDecision,
   TaskCheckpointStatus,
   PeerEntry,

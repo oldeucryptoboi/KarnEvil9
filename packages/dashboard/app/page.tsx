@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getSessions, type SessionSummary } from "@/lib/api";
 import { StatusBadge } from "@/components/status-badge";
-import { useWebSocket } from "@/lib/use-websocket";
+import { useWSContext } from "@/lib/ws-context";
 
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const { connected } = useWebSocket();
+  const { connected } = useWSContext();
 
   useEffect(() => {
     getSessions().then(setSessions).catch((e) => setError(e.message));

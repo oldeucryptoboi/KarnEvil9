@@ -6,7 +6,7 @@ import type {
   VerificationResult,
 } from "./types.js";
 import { verifyAttestation, verifyChain } from "./attestation.js";
-import { verifyResultSignature, verifyAttestationSignature } from "./ed25519-signer.js";
+import { verifyAttestationSignature } from "./ed25519-signer.js";
 
 export interface VerifierConfig {
   slo_strict?: boolean;           // fail verification if any SLO exceeded

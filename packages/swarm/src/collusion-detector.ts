@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CollusionReport, CollusionIndicator, BidObject } from "./types.js";
+import type { CollusionReport, BidObject } from "./types.js";
 
 export interface CollusionDetectorConfig {
   bid_variance_threshold: number;

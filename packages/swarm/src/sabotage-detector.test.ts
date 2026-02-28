@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { SabotageDetector, DEFAULT_SABOTAGE_CONFIG } from "./sabotage-detector.js";
+import { SabotageDetector, } from "./sabotage-detector.js";
 import { CollusionDetector } from "./collusion-detector.js";
 import type { FeedbackRecord } from "./types.js";
 

@@ -34,7 +34,7 @@ const testTool: ToolManifest = {
 
 async function fetch(url: string, opts?: { method?: string; body?: unknown; headers?: Record<string, string> }) {
   const { method = "GET", body, headers: extraHeaders } = opts ?? {};
-  const parsed = new URL(url);
+  const _parsed = new URL(url);
   const headers: Record<string, string> = { ...(body ? { "Content-Type": "application/json" } : {}), ...extraHeaders };
   return new Promise<{ status: number; json: () => Promise<any> }>((resolve, reject) => {
     const req = http.request(

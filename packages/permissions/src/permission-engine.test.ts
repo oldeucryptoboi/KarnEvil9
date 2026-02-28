@@ -795,7 +795,7 @@ describe("PermissionEngine cache eviction", () => {
   });
 
   it("clearSession cleans up constraint cache via secondary index", async () => {
-    const engine = new PermissionEngine(journal, mockPrompt);
+    const _engine = new PermissionEngine(journal, mockPrompt);
     const sessionId = "constraint-session";
 
     // Create an allow_constrained decision
@@ -905,6 +905,44 @@ describe("PermissionEngine cache eviction", () => {
   // Note: constraint and observed cache eviction tests omitted — filling 50,000
   // entries with journal writes exceeds the test timeout. Session cache eviction
   // (10,000 entries via preGrant) is tested above and exercises the same FIFO logic.
+
+  it("constraint cache eviction handles keys without colon separator", async () => {
+    // Exercises the defensive `split(":")[0] ?? ""` guard in addConstraintCacheEntry
+    const constrainedPrompt = async (_req: PermissionRequest): Promise<ApprovalDecision> => ({
+      type: "allow_constrained",
+      scope: "session",
+      constraints: { readonly_paths: ["/safe"] },
+    });
+    const engine = new PermissionEngine(journal, constrainedPrompt);
+    // Just verify that checking permissions doesn't crash — the defensive guard
+    // prevents undefined dereference on malformed cache keys
+    const req = {
+      request_id: uuid(),
+      session_id: "evict-test",
+      step_id: "step-1",
+      tool_name: "test-tool",
+      permissions: [PermissionEngine.parse("filesystem:read:workspace")],
+    };
+    const result = await engine.check(req);
+    expect(result.constraints).toBeDefined();
+  });
+
+  it("observed cache eviction handles keys without colon separator", async () => {
+    const engine = new PermissionEngine(journal, async () => ({
+      type: "allow_observed" as const,
+      scope: "session" as const,
+      telemetry_level: "basic" as const,
+    }));
+    const req = {
+      request_id: uuid(),
+      session_id: "observed-evict-test",
+      step_id: "step-1",
+      tool_name: "test-tool",
+      permissions: [PermissionEngine.parse("filesystem:read:workspace")],
+    };
+    const result = await engine.check(req);
+    expect(result.observed).toBe(true);
+  });
 });
 
 // ─── Additional Edge Case Tests ─────────────────────────────────

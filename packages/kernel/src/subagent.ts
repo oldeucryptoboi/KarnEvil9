@@ -6,7 +6,6 @@ import type {
   Planner,
   ModelPricing,
   CheckpointFinding,
-  ApprovalDecision,
 } from "@karnevil9/schemas";
 import type { Journal } from "@karnevil9/journal";
 import type { ToolRegistry, ToolRuntime } from "@karnevil9/tools";

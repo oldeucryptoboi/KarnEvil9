@@ -6,7 +6,7 @@ import { resolve, join } from "node:path";
 import { hostname, homedir } from "node:os";
 import * as readline from "node:readline";
 import { Journal } from "@karnevil9/journal";
-import { ToolRegistry, ToolRuntime, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, createBrowserHandler, executeGameCommandHandler, parseGameScreenHandler, gameCombatHandler, gameTakeAllHandler, gameNavigateHandler, setEmulator } from "@karnevil9/tools";
+import { ToolRegistry, ToolRuntime, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, createBrowserHandler, executeGameCommandHandler, parseGameScreenHandler, gameCombatHandler, gameTakeAllHandler, gameNavigateHandler, } from "@karnevil9/tools";
 import type { BrowserDriverLike, EmulatorLike } from "@karnevil9/tools";
 import { PermissionEngine } from "@karnevil9/permissions";
 import { Kernel } from "@karnevil9/kernel";
@@ -436,7 +436,7 @@ program.command("server").description("Start the API server")
           console.log("[game] Skipping — emulator busy");
           return { session_id: "skipped-busy", status: "skipped" };
         }
-        const { checkpoint } = await gameManager.acquireSession();
+        await gameManager.acquireSession();
         // Strip marker from task text
         task.text = task.text.replace("[GAME_SESSION]\n\n", "");
       }

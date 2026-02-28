@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, } from "vitest";
 import { RedelegationMonitor } from "./redelegation-monitor.js";
 
 describe("RedelegationMonitor", () => {
@@ -104,7 +104,7 @@ describe("RedelegationMonitor", () => {
     monitor.recordRedelegation("task-1", "peer-B");
 
     // peer-A should be in excluded peers after redelegation
-    const tasks = monitor.checkPeerHealth(["peer-B"]);
+    const _tasks = monitor.checkPeerHealth(["peer-B"]);
     // Need to wait for cooldown first, so let's use a fresh monitor
     const monitor2 = new RedelegationMonitor({ max_redelegations: 3, redelegation_cooldown_ms: 0 });
     monitor2.trackDelegation("task-1", "peer-A", "Do something", "session-1");

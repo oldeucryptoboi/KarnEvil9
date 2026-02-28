@@ -8,6 +8,7 @@ export class ReputationStore {
   private reputations = new Map<string, PeerReputation>();
   private filePath: string;
   private behavioralScorer?: BehavioralScorer;
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: set via setSabotageDetector for future use
   private sabotageDetector?: SabotageDetector;
 
   constructor(filePath: string) {

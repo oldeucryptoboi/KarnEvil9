@@ -214,7 +214,8 @@ describe("SybilDetector", () => {
   });
 
   it("should verify valid proof of work", () => {
-    const { challenge, difficulty } = detector.generateChallenge("node-1");
+    // Verify the challenge is generated (vars unused — we use lowDiffDetector below)
+    detector.generateChallenge("node-1");
     // Brute force a valid solution (with low difficulty for test speed)
     const lowDiffDetector = new SybilDetector({ pow_difficulty: 1 });
     const lowChallenge = lowDiffDetector.generateChallenge("node-1");

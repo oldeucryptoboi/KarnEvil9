@@ -212,6 +212,38 @@ describe("redactSecrets — JSON-embedded secrets", () => {
 });
 
 /* ------------------------------------------------------------------ *
+ *  shellExecHandler — empty / whitespace command guard                *
+ * ------------------------------------------------------------------ */
+
+describe("shellExecHandler — empty command guard", () => {
+  let tmpDir: string;
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "shell-exec-empty-"));
+  });
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("throws on empty string command", async () => {
+    await expect(
+      shellExecHandler({ command: "", cwd: tmpDir }, "live", openPolicy)
+    ).rejects.toThrow("Empty command");
+  });
+
+  it("throws on whitespace-only command", async () => {
+    await expect(
+      shellExecHandler({ command: "   ", cwd: tmpDir }, "live", openPolicy)
+    ).rejects.toThrow("Empty command");
+  });
+
+  it("throws on tab-only command", async () => {
+    await expect(
+      shellExecHandler({ command: "\t\t", cwd: tmpDir }, "live", openPolicy)
+    ).rejects.toThrow("Empty command");
+  });
+});
+
+/* ------------------------------------------------------------------ *
  *  sanitizeEnv — additional prefix coverage via handler integration   *
  * ------------------------------------------------------------------ */
 

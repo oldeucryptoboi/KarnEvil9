@@ -5,7 +5,6 @@ import type {
   TaskDecomposition,
   SwarmTaskConstraints,
   VerifiabilityAssessment,
-  VerifiabilityLevel,
   DecompositionProposal,
 } from "./types.js";
 import type { DelegateeRouter } from "./delegatee-router.js";
@@ -243,7 +242,7 @@ export class TaskDecomposer {
     };
   }
 
-  assessVerifiability(subtaskText: string, attributes?: TaskAttribute): VerifiabilityAssessment {
+  assessVerifiability(subtaskText: string, _attributes?: TaskAttribute): VerifiabilityAssessment {
     const lower = subtaskText.toLowerCase();
     const hasHighVerifiability = HIGH_VERIFIABILITY_KEYWORDS.some(k => lower.includes(k));
     const hasLowVerifiability = LOW_VERIFIABILITY_KEYWORDS.some(k => lower.includes(k));

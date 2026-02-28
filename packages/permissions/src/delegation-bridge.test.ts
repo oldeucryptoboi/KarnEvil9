@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { rm } from "node:fs/promises";
 import { v4 as uuid } from "uuid";
 import { Journal } from "@karnevil9/journal";
-import type { ApprovalDecision, PermissionGrant, PermissionRequest } from "@karnevil9/schemas";
+import type { PermissionGrant, PermissionRequest } from "@karnevil9/schemas";
 import { PermissionEngine } from "./permission-engine.js";
 import { DelegationBridge } from "./delegation-bridge.js";
 

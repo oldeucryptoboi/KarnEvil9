@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useWSContext } from "@/lib/ws-context";
 
 const NAV_ITEMS = [
   { href: "/", label: "Sessions", icon: "S" },
@@ -13,11 +14,18 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { connected } = useWSContext();
 
   return (
     <aside className="fixed left-0 top-0 h-full w-56 border-r border-[var(--border)] bg-[var(--card)] flex flex-col">
       <div className="p-4 border-b border-[var(--border)]">
-        <h1 className="text-lg font-bold tracking-tight">KarnEvil9</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-bold tracking-tight">KarnEvil9</h1>
+          <span
+            className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`}
+            title={connected ? "WebSocket connected" : "WebSocket disconnected"}
+          />
+        </div>
         <p className="text-xs text-[var(--muted)]">Dashboard</p>
       </div>
       <nav className="flex-1 p-2">

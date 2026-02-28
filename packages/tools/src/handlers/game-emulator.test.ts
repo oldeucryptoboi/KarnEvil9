@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import type { PolicyProfile } from "@karnevil9/schemas";
 import type { EmulatorLike } from "./game-emulator.js";
 import {

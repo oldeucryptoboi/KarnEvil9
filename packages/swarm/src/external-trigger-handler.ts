@@ -5,9 +5,7 @@ import type { ContractStore } from "./delegation-contract.js";
 import type {
   ExternalTrigger,
   TriggerType,
-  TaskCancelTrigger,
   BudgetAlertTrigger,
-  PriorityPreemptTrigger,
   SwarmTaskConstraints,
 } from "./types.js";
 

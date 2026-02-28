@@ -462,7 +462,7 @@ describe("DCTManager", () => {
 
   it("should remove expired and revoked tokens", () => {
     // Create an expiring token and a long-lived one
-    const shortLived = manager.createRootToken("holder-1", [makeCaveat()], 50);
+    const _shortLived = manager.createRootToken("holder-1", [makeCaveat()], 50);
     const longLived = manager.createRootToken("holder-2", [makeCaveat()], 999999);
     const revoked = manager.createRootToken("holder-3", [makeCaveat()]);
     manager.revoke(revoked.dct_id);

@@ -490,11 +490,11 @@ describe("IFPlanner", () => {
 
   describe("blind mode", () => {
     it("masks game-identifying text in prompts", async () => {
-      let capturedSystem = "";
+      let _capturedSystem = "";
       let capturedUser = "";
       const planner = new IFPlanner({
         callModel: async (system, user) => {
-          capturedSystem = system;
+          _capturedSystem = system;
           capturedUser = user;
           return { text: "go north" };
         },

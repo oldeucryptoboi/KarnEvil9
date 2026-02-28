@@ -4,7 +4,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { TaskCheckpoint } from "./types.js";
-import type { JournalEventType } from "@karnevil9/schemas";
 
 function makeCheckpointInput(overrides: Partial<Omit<TaskCheckpoint, "checkpoint_id">> = {}): Omit<TaskCheckpoint, "checkpoint_id"> {
   return {

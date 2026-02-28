@@ -315,7 +315,9 @@ export class ChatClient {
   private processApprovalQueue(): void {
     if (this._approvalActive || this._approvalQueue.length === 0) return;
     this._approvalActive = true;
-    const { requestId, toolName, scopes } = this._approvalQueue.shift()!;
+    const entry = this._approvalQueue.shift();
+    if (!entry) return;
+    const { requestId, toolName, scopes } = entry;
     const pending = this._approvalQueue.length;
     const pendingNote = pending > 0 ? dim(` (${pending} more pending)`) : "";
     // Flush any buffered output before showing the question

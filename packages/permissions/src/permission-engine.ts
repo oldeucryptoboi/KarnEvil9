@@ -415,7 +415,7 @@ export class PermissionEngine {
       const oldest = this.constraintCache.keys().next().value;
       if (oldest !== undefined) {
         this.constraintCache.delete(oldest);
-        const oldSession = oldest.split(":")[0]!;
+        const oldSession = oldest.split(":")[0] ?? "";
         this.constraintCacheBySession.get(oldSession)?.delete(oldest);
       }
     }
@@ -433,7 +433,7 @@ export class PermissionEngine {
       const oldest = this.observedCache.values().next().value;
       if (oldest !== undefined) {
         this.observedCache.delete(oldest);
-        const oldSession = oldest.split(":")[0]!;
+        const oldSession = oldest.split(":")[0] ?? "";
         this.observedCacheBySession.get(oldSession)?.delete(oldest);
       }
     }

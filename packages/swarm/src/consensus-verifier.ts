@@ -1,6 +1,6 @@
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID, } from "node:crypto";
 import type { JournalEventType } from "@karnevil9/schemas";
-import type { ConsensusRound, ConsensusRoundStatus, ConsensusOutcome } from "./types.js";
+import type { ConsensusRound, ConsensusOutcome } from "./types.js";
 
 export interface ConsensusVerifierConfig {
   default_required_voters: number;
@@ -110,12 +110,12 @@ export class ConsensusVerifier {
     // Find majority
     let majorityHash = "";
     let majorityCount = 0;
-    let majorityVoters: string[] = [];
+    let _majorityVoters: string[] = [];
     for (const [hash, entry] of hashCounts) {
       if (entry.count > majorityCount) {
         majorityHash = hash;
         majorityCount = entry.count;
-        majorityVoters = entry.voters;
+        _majorityVoters = entry.voters;
       }
     }
 

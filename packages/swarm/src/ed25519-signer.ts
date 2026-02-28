@@ -33,13 +33,13 @@ function canonicalizeAttestation(attestation: TaskAttestation): string {
   });
 }
 
-function importPrivateKey(hexKey: string) {
+function _importPrivateKey(hexKey: string) {
   return import("node:crypto").then((c) =>
     c.createPrivateKey({ key: Buffer.from(hexKey, "hex"), format: "der", type: "pkcs8" }),
   );
 }
 
-function importPublicKey(hexKey: string) {
+function _importPublicKey(hexKey: string) {
   return import("node:crypto").then((c) =>
     c.createPublicKey({ key: Buffer.from(hexKey, "hex"), format: "der", type: "spki" }),
   );

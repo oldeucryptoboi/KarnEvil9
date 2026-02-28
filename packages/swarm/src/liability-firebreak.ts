@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+
 import type { JournalEventType } from "@karnevil9/schemas";
 import type { FirebreakPolicy, FirebreakDecision, TaskAttribute } from "./types.js";
 import { DEFAULT_FIREBREAK_POLICY } from "./types.js";
@@ -12,7 +12,7 @@ export class LiabilityFirebreak {
     this.emitEvent = emitEvent;
   }
 
-  evaluate(chainDepth: number, taskAttributes?: TaskAttribute, contractSLO?: { max_cost_usd?: number }): FirebreakDecision {
+  evaluate(chainDepth: number, taskAttributes?: TaskAttribute, _contractSLO?: { max_cost_usd?: number }): FirebreakDecision {
     let effectiveMaxDepth = this.policy.base_max_depth;
 
     // Reduce for high criticality

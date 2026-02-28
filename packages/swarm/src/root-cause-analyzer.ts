@@ -4,7 +4,6 @@ import type {
   RootCauseDiagnosis,
   AnomalyReport,
   TaskAttribute,
-  PeerEntry,
 } from "./types.js";
 import type { ReputationStore } from "./reputation-store.js";
 import type { MeshManager } from "./mesh-manager.js";

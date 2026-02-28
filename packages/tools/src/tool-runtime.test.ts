@@ -6,7 +6,7 @@ import { Journal } from "@karnevil9/journal";
 import { PermissionEngine } from "@karnevil9/permissions";
 import type { ToolManifest, ToolExecutionRequest, ApprovalDecision } from "@karnevil9/schemas";
 import { ToolRegistry } from "./tool-registry.js";
-import { ToolRuntime, CircuitBreaker, type BreakerState, type CategoryConfig } from "./tool-runtime.js";
+import { ToolRuntime, CircuitBreaker, type CategoryConfig } from "./tool-runtime.js";
 
 const TEST_DIR = resolve(import.meta.dirname ?? ".", "../../.test-data");
 const TEST_FILE = resolve(TEST_DIR, "runtime-journal.jsonl");

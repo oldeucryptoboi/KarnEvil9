@@ -164,7 +164,7 @@ export default function SessionDetailPage() {
           </div>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="text-xs text-[var(--muted)] mb-1">Task</p>
-            <p className="text-sm truncate" title={session.task_text}>{session.task_text || "-"}</p>
+            <p className="text-sm truncate" title={session.task_text ?? session.task?.text}>{session.task_text ?? session.task?.text ?? "-"}</p>
           </div>
         </div>
       )}

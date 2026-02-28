@@ -26,6 +26,7 @@ export interface SessionSummary {
 }
 
 export interface SessionDetail extends SessionSummary {
+  task?: { task_id: string; text: string; created_at: string };
   plan?: unknown;
   events?: JournalEvent[];
 }

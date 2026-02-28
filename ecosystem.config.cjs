@@ -16,9 +16,10 @@ module.exports = {
     },
     {
       name: "dashboard",
-      script: "node_modules/.bin/next",
-      args: "start -p 3001",
+      script: "node_modules/next/dist/bin/next",
+      args: "start -p 3001 -H 0.0.0.0",
       cwd: "packages/dashboard",
+      interpreter: "node",
       max_memory_restart: "256M",
       autorestart: true,
       watch: false,

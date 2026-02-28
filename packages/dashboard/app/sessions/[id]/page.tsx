@@ -27,15 +27,15 @@ export default function SessionDetailPage() {
   useEffect(() => {
     if (!session || events.length === 0) return;
     const latest = events[events.length - 1]!;
-    if (latest.type === "session_completed") {
+    if (latest.type === "session.completed") {
       setSession((s) => s ? { ...s, status: "completed" } : s);
-    } else if (latest.type === "session_failed") {
+    } else if (latest.type === "session.failed") {
       setSession((s) => s ? { ...s, status: "failed" } : s);
-    } else if (latest.type === "session_aborted") {
+    } else if (latest.type === "session.aborted") {
       setSession((s) => s ? { ...s, status: "aborted" } : s);
-    } else if (latest.type === "plan_generated") {
+    } else if (latest.type === "plan.accepted") {
       setSession((s) => s ? { ...s, status: "running" } : s);
-    } else if (latest.type === "planning_started") {
+    } else if (latest.type === "planner.requested") {
       setSession((s) => s ? { ...s, status: "planning" } : s);
     }
   }, [events, session]);
@@ -49,12 +49,12 @@ export default function SessionDetailPage() {
   }
 
   // Extract plan from journal events
-  const planEvent = [...allEvents].reverse().find((e) => e.type === "plan_generated");
+  const planEvent = [...allEvents].reverse().find((e) => e.type === "plan.accepted");
   const plan = (planEvent?.payload?.plan as Record<string, unknown> | undefined) ?? null;
 
   // Update step counts from events
-  const stepStarted = allEvents.filter((e) => e.type === "step_started").length;
-  const stepDone = allEvents.filter((e) => e.type === "step_succeeded" || e.type === "step_failed").length;
+  const stepStarted = allEvents.filter((e) => e.type === "step.started").length;
+  const stepDone = allEvents.filter((e) => e.type === "step.succeeded" || e.type === "step.failed").length;
   const totalSteps = session?.total_steps ?? (stepStarted > 0 ? stepStarted : undefined);
 
   const handleAbort = async () => {

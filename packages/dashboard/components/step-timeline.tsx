@@ -4,8 +4,8 @@ import type { JournalEvent } from "@/lib/api";
 import { StepCard, type StepData } from "./step-card";
 
 /**
- * Builds step data from journal events by correlating step_started, step_succeeded,
- * and step_failed events via their step_id payloads.
+ * Builds step data from journal events by correlating step.started, step.succeeded,
+ * and step.failed events via their step_id payloads.
  */
 function buildStepsFromEvents(events: JournalEvent[]): StepData[] {
   const stepMap = new Map<string, StepData>();
@@ -14,7 +14,7 @@ function buildStepsFromEvents(events: JournalEvent[]): StepData[] {
     const stepId = (evt.payload.step_id as string) ?? "";
     if (!stepId) continue;
 
-    if (evt.type === "step_started") {
+    if (evt.type === "step.started") {
       stepMap.set(stepId, {
         step_id: stepId,
         title: (evt.payload.title as string) ?? stepId,
@@ -23,7 +23,7 @@ function buildStepsFromEvents(events: JournalEvent[]): StepData[] {
         started_at: evt.timestamp,
         input: evt.payload.input as Record<string, unknown> | undefined,
       });
-    } else if (evt.type === "step_succeeded") {
+    } else if (evt.type === "step.succeeded") {
       const existing = stepMap.get(stepId);
       if (existing) {
         existing.status = "succeeded";
@@ -39,7 +39,7 @@ function buildStepsFromEvents(events: JournalEvent[]): StepData[] {
           output: evt.payload.output as Record<string, unknown> | undefined,
         });
       }
-    } else if (evt.type === "step_failed") {
+    } else if (evt.type === "step.failed") {
       const existing = stepMap.get(stepId);
       if (existing) {
         existing.status = "failed";

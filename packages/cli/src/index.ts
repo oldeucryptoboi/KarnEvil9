@@ -117,7 +117,7 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
   .option("-m, --mode <mode>", "Execution mode: real, dry_run, mock", "mock")
   .option("--max-steps <n>", "Maximum steps", "20")
   .option("--plugins-dir <dir>", "Plugins directory", "plugins")
-  .option("--planner <type>", "Planner: mock, claude, openai, gemini, grok, router")
+  .option("--planner <type>", "Planner: mock, claude, claude-code, openai, gemini, grok, router")
   .option("--model <name>", "Model name")
   .option("--agentic", "Enable agentic feedback loop")
   .option("--context-budget", "Enable proactive context budget management (requires --agentic)")
@@ -250,7 +250,7 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
   });
 
 program.command("plan").description("Generate a plan without executing").argument("<task>", "Task description")
-  .option("--planner <type>", "Planner: mock, claude, openai, gemini, grok, router")
+  .option("--planner <type>", "Planner: mock, claude, claude-code, openai, gemini, grok, router")
   .option("--model <name>", "Model name")
   .action(async (taskText: string, opts: { planner?: string; model?: string }) => {
     const { registry } = await createRuntime();
@@ -332,7 +332,7 @@ program.command("replay").description("Replay a session").argument("<id>", "Sess
 program.command("server").description("Start the API server")
   .option("-p, --port <port>", "Port number", String(DEFAULT_PORT))
   .option("--plugins-dir <dir>", "Plugins directory", "plugins")
-  .option("--planner <type>", "Planner: mock, claude, openai, gemini, grok, router")
+  .option("--planner <type>", "Planner: mock, claude, claude-code, openai, gemini, grok, router")
   .option("--model <name>", "Model name")
   .option("--agentic", "Enable agentic feedback loop")
   .option("--insecure", "Allow running without an API token (unauthenticated)")

@@ -7,10 +7,11 @@ import { MockPlanner, LLMPlanner } from "@karnevil9/planner";
  *  import("openai") used by the adapter closures.                     *
  * ------------------------------------------------------------------ */
 
-const { mockClaudeCreate, mockOpenAICreate, mockGeminiGenerate } = vi.hoisted(() => ({
+const { mockClaudeCreate, mockOpenAICreate, mockGeminiGenerate, mockSpawn } = vi.hoisted(() => ({
   mockClaudeCreate: vi.fn(),
   mockOpenAICreate: vi.fn(),
   mockGeminiGenerate: vi.fn(),
+  mockSpawn: vi.fn(),
 }));
 
 vi.mock("@anthropic-ai/sdk", () => ({
@@ -25,6 +26,10 @@ vi.mock("openai", () => ({
     opts: unknown;
     constructor(opts: unknown) { this.opts = opts; }
   },
+}));
+
+vi.mock("node:child_process", () => ({
+  spawn: mockSpawn,
 }));
 
 vi.mock("@google/genai", () => ({
@@ -176,7 +181,7 @@ describe("createPlanner", () => {
   });
 
   it("includes valid options in unknown planner error", () => {
-    expect(() => createPlanner({ planner: "llama" })).toThrow("mock, claude, openai, gemini, grok");
+    expect(() => createPlanner({ planner: "llama" })).toThrow("mock, claude, claude-code, openai, gemini, grok");
   });
 });
 
@@ -439,5 +444,151 @@ describe("Grok adapter parameters", () => {
 
     await expect(planner.generatePlan(TEST_TASK, TOOL_SCHEMAS, {}, {}))
       .rejects.toThrow("Grok returned no content");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ *  Claude Code CLI adapter                                            *
+ * ------------------------------------------------------------------ */
+
+import { EventEmitter } from "node:events";
+
+/** Create a fake ChildProcess-like EventEmitter with stdin/stdout/stderr */
+function createFakeProc(): EventEmitter & { stdin: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }; stdout: EventEmitter; stderr: EventEmitter } {
+  const proc = new EventEmitter() as EventEmitter & {
+    stdin: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+  };
+  proc.stdin = { write: vi.fn(), end: vi.fn() };
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  return proc;
+}
+
+describe("Claude Code CLI adapter", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    savedEnv.KARNEVIL9_PLANNER = process.env.KARNEVIL9_PLANNER;
+    savedEnv.KARNEVIL9_MODEL = process.env.KARNEVIL9_MODEL;
+    savedEnv.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+    delete process.env.KARNEVIL9_PLANNER;
+    delete process.env.KARNEVIL9_MODEL;
+    delete process.env.ANTHROPIC_API_KEY;
+    mockSpawn.mockReset();
+  });
+
+  afterEach(() => {
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+  });
+
+  it("factory returns LLMPlanner for claude-code without any API key", () => {
+    const planner = createPlanner({ planner: "claude-code" });
+    expect(planner).toBeInstanceOf(LLMPlanner);
+  });
+
+  it("error message includes claude-code in valid options", () => {
+    expect(() => createPlanner({ planner: "nope" })).toThrow("claude-code");
+  });
+
+  it("spawn receives correct args for plan generation", async () => {
+    const versionProc = createFakeProc();
+    const planProc = createFakeProc();
+
+    mockSpawn
+      .mockReturnValueOnce(versionProc)
+      .mockReturnValueOnce(planProc);
+
+    const planner = createPlanner({ planner: "claude-code" });
+    const planPromise = planner.generatePlan(TEST_TASK, TOOL_SCHEMAS, {}, {});
+
+    await new Promise((r) => setTimeout(r, 10));
+    versionProc.emit("close", 0);
+
+    await new Promise((r) => setTimeout(r, 10));
+    const cliResult = JSON.stringify({ type: "result", result: JSON.stringify(VALID_PLAN), cost_usd: 0.003 });
+    planProc.stdout.emit("data", Buffer.from(cliResult));
+    planProc.emit("close", 0);
+
+    await planPromise;
+
+    const planArgs = mockSpawn.mock.calls[1]![1] as string[];
+    expect(planArgs).toContain("-p");
+    expect(planArgs).toContain("--output-format");
+    expect(planArgs).toContain("json");
+    expect(planArgs).toContain("--max-turns");
+    expect(planArgs).toContain("1");
+    expect(planArgs).toContain("--system-prompt");
+  });
+
+  it("parses structured JSON result correctly", async () => {
+    const versionProc = createFakeProc();
+    const planProc = createFakeProc();
+
+    mockSpawn
+      .mockReturnValueOnce(versionProc)
+      .mockReturnValueOnce(planProc);
+
+    const planner = createPlanner({ planner: "claude-code" });
+    const planPromise = planner.generatePlan(TEST_TASK, TOOL_SCHEMAS, {}, {});
+
+    await new Promise((r) => setTimeout(r, 10));
+    versionProc.emit("close", 0);
+
+    await new Promise((r) => setTimeout(r, 10));
+    const cliResult = JSON.stringify({ type: "result", result: JSON.stringify(VALID_PLAN), cost_usd: 0.005 });
+    planProc.stdout.emit("data", Buffer.from(cliResult));
+    planProc.emit("close", 0);
+
+    const result = await planPromise;
+    expect(result.plan.plan_id).toBe(VALID_PLAN.plan_id);
+    expect(result.plan.goal).toBe(VALID_PLAN.goal);
+    expect(result.plan.steps).toHaveLength(1);
+  });
+
+  it("handles non-zero exit code", async () => {
+    const versionProc = createFakeProc();
+    const planProc = createFakeProc();
+
+    mockSpawn
+      .mockReturnValueOnce(versionProc)
+      .mockReturnValueOnce(planProc);
+
+    const planner = createPlanner({ planner: "claude-code" });
+    const planPromise = planner.generatePlan(TEST_TASK, TOOL_SCHEMAS, {}, {});
+
+    await new Promise((r) => setTimeout(r, 10));
+    versionProc.emit("close", 0);
+
+    await new Promise((r) => setTimeout(r, 10));
+    planProc.stderr.emit("data", Buffer.from("something went wrong"));
+    planProc.emit("close", 1);
+
+    await expect(planPromise).rejects.toThrow("Claude Code CLI failed (exit 1)");
+  });
+
+  it("handles authentication errors", async () => {
+    const versionProc = createFakeProc();
+    const planProc = createFakeProc();
+
+    mockSpawn
+      .mockReturnValueOnce(versionProc)
+      .mockReturnValueOnce(planProc);
+
+    const planner = createPlanner({ planner: "claude-code" });
+    const planPromise = planner.generatePlan(TEST_TASK, TOOL_SCHEMAS, {}, {});
+
+    await new Promise((r) => setTimeout(r, 10));
+    versionProc.emit("close", 0);
+
+    await new Promise((r) => setTimeout(r, 10));
+    planProc.stderr.emit("data", Buffer.from("not authenticated"));
+    planProc.emit("close", 1);
+
+    await expect(planPromise).rejects.toThrow("not authenticated");
   });
 });

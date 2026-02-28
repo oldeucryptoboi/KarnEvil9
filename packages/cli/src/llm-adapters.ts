@@ -1,6 +1,7 @@
 import { MockPlanner, LLMPlanner, RouterPlanner, IFPlanner, bfsPath } from "@karnevil9/planner";
 import type { ModelCallFn, ModelCallResult, IFModelCallFn } from "@karnevil9/planner";
 import type { Planner } from "@karnevil9/schemas";
+import { spawn } from "node:child_process";
 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 500;
@@ -38,6 +39,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 
 const PROVIDER_DEFAULTS: Record<string, string> = {
   claude: "claude-sonnet-4-6",
+  "claude-code": "claude-code",
   openai: "gpt-4o",
   gemini: "gemini-2.5-flash",
   grok: "grok-4",
@@ -334,6 +336,104 @@ function createGrokCallFn(model: string): ModelCallFn {
   };
 }
 
+function createClaudeCodeCallFn(model: string): ModelCallFn {
+  let cliVerified = false;
+
+  return async (systemPrompt: string, userPrompt: string): Promise<ModelCallResult> => {
+    // Lazy CLI verification on first call
+    if (!cliVerified) {
+      await new Promise<void>((resolve, reject) => {
+        const check = spawn("claude", ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+        let stderr = "";
+        check.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+        check.on("error", (err: NodeJS.ErrnoException) => {
+          if (err.code === "ENOENT") {
+            reject(new Error(
+              "Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code\n" +
+              "Then authenticate with: claude login"
+            ));
+          } else {
+            reject(err);
+          }
+        });
+        check.on("close", (code) => {
+          if (code !== 0) {
+            reject(new Error(`Claude CLI check failed (exit ${code}): ${stderr.trim()}`));
+          } else {
+            resolve();
+          }
+        });
+      });
+      cliVerified = true;
+    }
+
+    return withRetry(async () => {
+      const args = [
+        "-p",
+        "--output-format", "json",
+        "--max-turns", "1",
+        "--model", model === "claude-code" ? "sonnet" : model,
+        "--system-prompt", systemPrompt,
+      ];
+
+      return new Promise<ModelCallResult>((resolve, reject) => {
+        const proc = spawn("claude", args, { stdio: ["pipe", "pipe", "pipe"] });
+        let stdout = "";
+        let stderr = "";
+
+        proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+        proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+
+        proc.on("error", (err: NodeJS.ErrnoException) => {
+          reject(new Error(`Failed to spawn claude CLI: ${err.message}`));
+        });
+
+        proc.on("close", (code) => {
+          if (code !== 0) {
+            const msg = stderr.trim() || stdout.trim();
+            if (msg.includes("rate limit") || msg.includes("429") || msg.includes("too many requests")) {
+              const err = new Error(`Claude Code CLI rate limited: ${msg}`);
+              (err as unknown as Record<string, unknown>).status = 429;
+              reject(err);
+              return;
+            }
+            if (msg.includes("not authenticated") || msg.includes("not logged in")) {
+              reject(new Error(
+                "Claude Code CLI is not authenticated.\n" +
+                "Run: claude login"
+              ));
+              return;
+            }
+            reject(new Error(`Claude Code CLI failed (exit ${code}): ${msg}`));
+            return;
+          }
+
+          try {
+            const envelope = JSON.parse(stdout);
+            const text = typeof envelope.result === "string" ? envelope.result : JSON.stringify(envelope.result);
+            resolve({
+              text,
+              usage: {
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                model: model === "claude-code" ? "claude-code" : model,
+                cost_usd: typeof envelope.cost_usd === "number" ? envelope.cost_usd : undefined,
+              },
+            });
+          } catch {
+            reject(new Error(`Failed to parse Claude Code CLI output: ${stdout.slice(0, 200)}`));
+          }
+        });
+
+        // Pipe user prompt via stdin to avoid ARG_MAX issues
+        proc.stdin.write(userPrompt);
+        proc.stdin.end();
+      });
+    });
+  };
+}
+
 export function createPlanner(opts: { planner?: string; model?: string; agentic?: boolean; baseURL?: string }): Planner {
   const provider = resolveProvider(opts);
   const model = resolveModel(provider, opts);
@@ -343,6 +443,8 @@ export function createPlanner(opts: { planner?: string; model?: string; agentic?
       return new MockPlanner({ agentic: opts.agentic });
     case "claude":
       return new LLMPlanner(createClaudeCallFn(model), { agentic: opts.agentic });
+    case "claude-code":
+      return new LLMPlanner(createClaudeCodeCallFn(model), { agentic: opts.agentic });
     case "openai":
       return new LLMPlanner(createOpenAICallFn(model, opts.baseURL), { agentic: opts.agentic });
     case "gemini":
@@ -359,7 +461,7 @@ export function createPlanner(opts: { planner?: string; model?: string; agentic?
     }
     default:
       throw new Error(
-        `Unknown planner type: "${provider}". Valid options: mock, claude, openai, gemini, grok, router, if`
+        `Unknown planner type: "${provider}". Valid options: mock, claude, claude-code, openai, gemini, grok, router, if`
       );
   }
 }

@@ -17,7 +17,7 @@ import type { ServerResponse, Server, IncomingMessage } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { parse as parseUrl } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
-import ciao, { type CiaoService, type Responder } from "@homebridge/ciao";
+import { spawn, type ChildProcess } from "node:child_process";
 
 // ─── Constants ────────────────────────────────────────────────────
 const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
@@ -320,8 +320,7 @@ export class ApiServer {
   private wss?: WebSocketServer;
   private wsClients = new Set<WSClient>();
   private serviceName?: string;
-  private ciaoResponder?: Responder;
-  private ciaoService?: CiaoService;
+  private dnssdProcess?: ChildProcess;
 
   constructor(config: ApiServerConfig);
   constructor(toolRegistry: ToolRegistry, journal: Journal);
@@ -517,19 +516,26 @@ export class ApiServer {
   private publishBonjour(port: number): void {
     const name = this.serviceName || require("node:os").hostname() as string;
     try {
-      const responder = ciao.getResponder();
-      this.ciaoResponder = responder;
-      const service = responder.createService({
-        name,
-        type: "karnevil9",
-        port,
+      // Use dns-sd CLI which registers with the system mDNSResponder.
+      // This works reliably on macOS/Linux and is visible to iOS NWBrowser.
+      // dns-sd -R <name> <type> <domain> <port> — runs until killed.
+      const proc = spawn("dns-sd", ["-R", name, "_karnevil9._tcp", "local.", String(port)], {
+        stdio: "ignore",
+        detached: false,
       });
-      this.ciaoService = service;
-      service.advertise().then(() => {
-        console.log(`Bonjour: advertising "${name}" as _karnevil9._tcp on port ${port}`);
-      }).catch((err: Error) => {
-        console.warn(`Bonjour: advertisement error — ${err.message}`);
+      proc.unref();
+      this.dnssdProcess = proc;
+      proc.on("error", (err) => {
+        console.warn(`Bonjour: dns-sd failed — ${err.message}`);
+        this.dnssdProcess = undefined;
       });
+      proc.on("exit", (code) => {
+        if (code !== null && code !== 0) {
+          console.warn(`Bonjour: dns-sd exited with code ${code}`);
+        }
+        this.dnssdProcess = undefined;
+      });
+      console.log(`Bonjour: advertising "${name}" as _karnevil9._tcp on port ${port}`);
     } catch (err) {
       console.warn(`Bonjour: failed to publish — ${err instanceof Error ? err.message : err}`);
     }
@@ -570,8 +576,10 @@ export class ApiServer {
     // Wait for pending journal writes to flush
     await this.journal.close();
     // Unpublish Bonjour service
-    if (this.ciaoService) await this.ciaoService.end();
-    if (this.ciaoResponder) this.ciaoResponder.shutdown();
+    if (this.dnssdProcess) {
+      this.dnssdProcess.kill();
+      this.dnssdProcess = undefined;
+    }
     // Close HTTP server
     if (this.httpServer) {
       await new Promise<void>((resolve) => this.httpServer!.close(() => resolve()));

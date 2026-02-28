@@ -134,7 +134,7 @@ export class WhatsAppAdapter extends BaseAdapter {
   private parseTimestamp(ts: string): string {
     // Try parsing common formats
     const date = new Date(ts);
-    if (!isNaN(date.getTime())) return date.toISOString();
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
 
     // Manual parsing for DD/MM/YYYY format (always present in WhatsApp timestamps)
     const match = ts.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);

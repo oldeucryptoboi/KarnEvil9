@@ -1,4 +1,4 @@
-import { mkdir, rename } from "node:fs/promises";
+import { mkdir, } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { JournalEventType } from "@karnevil9/schemas";
@@ -666,7 +666,7 @@ export class VaultManager {
       total_links: this.linkStore.size(),
       objects_by_type: storeStats.by_type,
       objects_by_category: storeStats.by_category,
-      unclassified_count: storeStats.by_category["inbox"] ?? 0,
+      unclassified_count: storeStats.by_category.inbox ?? 0,
     };
   }
 

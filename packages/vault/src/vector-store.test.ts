@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rm, mkdir, readFile } from "node:fs/promises";
+import { rm, mkdir, } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { v4 as uuid } from "uuid";
-import { existsSync } from "node:fs";
 import { VectorStore, cosineSimilarity } from "./vector-store.js";
 import type { EmbedderFn } from "./types.js";
 

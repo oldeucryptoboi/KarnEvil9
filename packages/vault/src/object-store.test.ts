@@ -1,12 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rm, mkdir, readdir, unlink, writeFile, chmod } from "node:fs/promises";
+import { rm, mkdir, unlink, writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { v4 as uuid } from "uuid";
 import { existsSync } from "node:fs";
 import { ObjectStore } from "./object-store.js";
 import { getDefaultSchema } from "./ontology-schema.js";
-import { PARA_FOLDERS } from "./types.js";
 
 describe("ObjectStore", () => {
   let tmpDir: string;
@@ -194,10 +193,10 @@ describe("ObjectStore", () => {
 
       const stats = store.getStats();
       expect(stats.total).toBe(3);
-      expect(stats.by_type["Note"]).toBe(2);
-      expect(stats.by_type["Person"]).toBe(1);
-      expect(stats.by_category["resources"]).toBe(2);
-      expect(stats.by_category["inbox"]).toBe(1);
+      expect(stats.by_type.Note).toBe(2);
+      expect(stats.by_type.Person).toBe(1);
+      expect(stats.by_category.resources).toBe(2);
+      expect(stats.by_category.inbox).toBe(1);
     });
   });
 
@@ -329,7 +328,7 @@ describe("ObjectStore", () => {
     });
 
     it("handles name collision by appending short ID", async () => {
-      const obj1 = await store.create("Collision Test", "Content 1", {
+      const _obj1 = await store.create("Collision Test", "Content 1", {
         source: "test",
         source_id: "c1",
         object_type: "Note",

@@ -544,7 +544,7 @@ export class Journal {
           return this.acquireLock();
         }
 
-        if (isNaN(pid)) {
+        if (Number.isNaN(pid)) {
           // Invalid PID in lockfile — treat as stale
           await this.removeStaleLock();
           return this.acquireLock();

@@ -9,7 +9,7 @@ import { ObjectStore } from "./object-store.js";
 import { LinkStore } from "./link-store.js";
 import { VectorStore } from "./vector-store.js";
 import { getDefaultSchema } from "./ontology-schema.js";
-import type { DashboardData, InsightsFn } from "./types.js";
+import type { InsightsFn } from "./types.js";
 
 describe("DashboardGenerator", () => {
   let tmpDir: string;
@@ -67,8 +67,8 @@ describe("DashboardGenerator", () => {
       await objectStore.create("C", "Content", { source: "claude", source_id: "3" }, schema);
 
       const data = generator.buildDashboardData();
-      expect(data.objects_by_source["chatgpt"]).toBe(2);
-      expect(data.objects_by_source["claude"]).toBe(1);
+      expect(data.objects_by_source.chatgpt).toBe(2);
+      expect(data.objects_by_source.claude).toBe(1);
     });
 
     it("computes embedding coverage", async () => {

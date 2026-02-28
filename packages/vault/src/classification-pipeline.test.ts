@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { ClassificationPipeline } from "./classification-pipeline.js";
 import { getDefaultSchema } from "./ontology-schema.js";
-import type { ClassifierFn, ClassificationResult } from "./types.js";
+import type { ClassifierFn, } from "./types.js";
 
 function mockClassifier(): ClassifierFn {
-  return async (title, content, availableTypes) => ({
+  return async (_title, _content, _availableTypes) => ({
     object_type: "Conversation",
     para_category: "resources",
     tags: ["test"],

@@ -149,7 +149,7 @@ export class GmailAdapter extends BaseAdapter {
   private parseDate(headerDate: string | undefined, internalDate: string): string {
     if (headerDate) {
       const d = new Date(headerDate);
-      if (!isNaN(d.getTime())) return d.toISOString();
+      if (!Number.isNaN(d.getTime())) return d.toISOString();
     }
     // Strict numeric check: parseInt("2023abc") returns 2023, which is wrong
     if (/^\d+$/.test(internalDate)) {

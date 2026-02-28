@@ -14,5 +14,18 @@ module.exports = {
         KARNEVIL9_CORS_ORIGINS: "*",
       },
     },
+    {
+      name: "dashboard",
+      script: "node_modules/.bin/next",
+      args: "start -p 3001",
+      cwd: "packages/dashboard",
+      max_memory_restart: "256M",
+      autorestart: true,
+      watch: false,
+      log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+      env: {
+        NODE_ENV: "production",
+      },
+    },
   ],
 };

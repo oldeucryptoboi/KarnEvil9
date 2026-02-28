@@ -8,7 +8,7 @@ import { VaultManager } from "./vault-manager.js";
 import type { ClassifierFn, EmbedderFn, IngestItem, VaultAdapter } from "./types.js";
 
 function mockClassifier(): ClassifierFn {
-  return async (title, content, availableTypes) => ({
+  return async (_title, _content, _availableTypes) => ({
     object_type: "Conversation",
     para_category: "resources",
     tags: ["test"],

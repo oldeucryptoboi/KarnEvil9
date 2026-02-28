@@ -6,7 +6,7 @@ function makeVector(...values: number[]): Float32Array {
   return new Float32Array(values);
 }
 
-function makeClusterData(
+function _makeClusterData(
   groups: Array<{ prefix: string; center: number[]; count: number; spread: number }>,
 ): ClusterInput[] {
   const data: ClusterInput[] = [];
@@ -140,7 +140,7 @@ describe("OPTICSClusterer", () => {
   });
 
   it("defaults maxObjects to 10000", () => {
-    const clusterer = new OPTICSClusterer();
+    const _clusterer = new OPTICSClusterer();
     // Create data just above a small limit to confirm the default is high
     const data: ClusterInput[] = [];
     for (let i = 0; i < 2500; i++) {

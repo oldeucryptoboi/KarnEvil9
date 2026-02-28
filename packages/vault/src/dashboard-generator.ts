@@ -79,7 +79,7 @@ export class DashboardGenerator {
       generated_at: now,
       total_objects: totalObjects,
       total_links: this.linkStore.size(),
-      unclassified_count: storeStats.by_category["inbox"] ?? 0,
+      unclassified_count: storeStats.by_category.inbox ?? 0,
       embedding_coverage: embeddingCoverage,
       objects_by_type: storeStats.by_type,
       objects_by_category: storeStats.by_category,

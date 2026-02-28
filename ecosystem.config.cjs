@@ -3,7 +3,7 @@ module.exports = {
     {
       name: "karnevil9",
       script: "packages/cli/dist/index.js",
-      args: "server --insecure --planner claude-code",
+      args: "server --insecure --planner claude-code --agentic",
       interpreter: "node",
       max_memory_restart: "512M",
       autorestart: true,

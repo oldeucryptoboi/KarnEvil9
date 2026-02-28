@@ -142,6 +142,40 @@ describe("WhatsAppAdapter", () => {
     expect(items[0]!.metadata.participants).toContain("Bob");
   });
 
+  it("handles invalid date in timestamp gracefully", async () => {
+    // Month 00 is invalid — should produce epoch fallback
+    const chatContent = "01/00/2024, 10:30 - Alice: Bad month";
+    const filePath = join(tmpDir, "bad-date.txt");
+    await writeFile(filePath, chatContent, "utf-8");
+
+    const adapter = new WhatsAppAdapter(filePath);
+    const items = [];
+    for await (const item of adapter.extract()) {
+      items.push(item);
+    }
+
+    // Should still extract — timestamp falls back to epoch
+    expect(items.length).toBe(1);
+    expect(items[0]!.created_at).toBe(new Date(0).toISOString());
+  });
+
+  it("handles day 32 as invalid in DD/MM format", async () => {
+    // 32/01/2024 cannot be parsed by Date constructor, so DD/MM parser is used
+    // Day 32 is invalid and should produce epoch fallback
+    const chatContent = "32/01/2024, 10:30 - Alice: Bad day";
+    const filePath = join(tmpDir, "bad-day32.txt");
+    await writeFile(filePath, chatContent, "utf-8");
+
+    const adapter = new WhatsAppAdapter(filePath);
+    const items = [];
+    for await (const item of adapter.extract()) {
+      items.push(item);
+    }
+
+    expect(items.length).toBe(1);
+    expect(items[0]!.created_at).toBe(new Date(0).toISOString());
+  });
+
   it("extracts chat name from filename", async () => {
     const chatContent = "15/01/2024, 10:30 - User: Hey";
     const filePath = join(tmpDir, "WhatsApp Chat with Team Work.txt");

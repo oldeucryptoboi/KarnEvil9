@@ -122,7 +122,8 @@ export class ContextBudgetMonitor {
   private getTokenVelocity(): number {
     if (this.tokenHistory.length === 0) return 0;
     const sum = this.tokenHistory.reduce((a, b) => a + b, 0);
-    return sum / this.tokenHistory.length;
+    const avg = sum / this.tokenHistory.length;
+    return Number.isFinite(avg) ? avg : 0;
   }
 }
 

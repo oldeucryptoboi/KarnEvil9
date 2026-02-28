@@ -419,10 +419,17 @@ export class ApiServer {
 
   registerKernel(sessionId: string, kernel: Kernel): void { this.kernels.set(sessionId, kernel); }
 
+  private static readonly MAX_PENDING_APPROVALS = 10_000;
+
   registerApproval(requestId: string, request: unknown, resolve: (decision: ApprovalDecision) => void): void {
     // Reject request IDs with control characters at registration time for audit trail consistency
     // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional security check for control chars
     if (/[\x00-\x1f\x7f]/.test(requestId)) {
+      resolve("deny");
+      return;
+    }
+    // Cap pending approvals to prevent unbounded memory growth
+    if (this.pendingApprovals.size >= ApiServer.MAX_PENDING_APPROVALS) {
       resolve("deny");
       return;
     }

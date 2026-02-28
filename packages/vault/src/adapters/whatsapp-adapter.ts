@@ -141,6 +141,11 @@ export class WhatsAppAdapter extends BaseAdapter {
     if (!match) return new Date(0).toISOString();
     let year = parseInt(match[3]!, 10);
     if (year < 100) year += 2000;
-    return new Date(year, parseInt(match[2]!, 10) - 1, parseInt(match[1]!, 10)).toISOString();
+    const month = parseInt(match[2]!, 10);
+    const day = parseInt(match[1]!, 10);
+    if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day) || month < 1 || month > 12 || day < 1 || day > 31) {
+      return new Date(0).toISOString();
+    }
+    return new Date(year, month - 1, day).toISOString();
   }
 }

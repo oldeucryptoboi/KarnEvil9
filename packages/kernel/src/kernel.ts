@@ -269,7 +269,7 @@ export class Kernel {
     if (hookData && typeof hookData === "object") {
       const allowed = new Set(["hints", "constraints", "context", "relevant_memories", "subagent_findings"]);
       for (const key of Object.keys(hookData)) {
-        if (allowed.has(key)) {
+        if (allowed.has(key) && key !== "__proto__" && key !== "constructor" && key !== "prototype") {
           (enrichedSnapshot as Record<string, unknown>)[key] = hookData[key];
         }
       }

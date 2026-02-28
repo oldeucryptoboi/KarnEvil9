@@ -469,11 +469,22 @@ export class MeshManager {
     this.seenNonces.set(nonce, Date.now());
   }
 
+  private static readonly MAX_NONCES = 100_000;
+
   private cleanupNonces(): void {
     const cutoff = Date.now() - this.config.nonce_window_ms;
     for (const [nonce, timestamp] of this.seenNonces) {
       if (timestamp < cutoff) {
         this.seenNonces.delete(nonce);
+      }
+    }
+    // Hard cap: evict oldest if still over limit
+    if (this.seenNonces.size > MeshManager.MAX_NONCES) {
+      const excess = this.seenNonces.size - MeshManager.MAX_NONCES;
+      const iter = this.seenNonces.keys();
+      for (let i = 0; i < excess; i++) {
+        const key = iter.next().value;
+        if (key !== undefined) this.seenNonces.delete(key);
       }
     }
   }

@@ -256,6 +256,7 @@ export class CDPClient {
         pending.reject(new Error("CDP client disconnected"));
       }
       this.pending.clear();
+      this.nextId = 1;
       this.ws = null;
     }
   }

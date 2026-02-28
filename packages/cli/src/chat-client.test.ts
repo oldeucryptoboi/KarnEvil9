@@ -467,6 +467,40 @@ describe("ChatClient", () => {
       expect(terminal.lines.some((l) => l.includes("Error") && l.includes("something broke"))).toBe(true);
     });
 
+    describe("error categorization", () => {
+      it("shows friendly message for session limit errors", () => {
+        const { client, ws, terminal } = createClient();
+        client.connect();
+        ws.simulateOpen();
+        ws.simulateMessage(JSON.stringify({ type: "error", message: "Too many concurrent sessions", code: "SESSION_LIMIT" }));
+        expect(terminal.lines.some((l) => l.includes("Session limit reached"))).toBe(true);
+      });
+
+      it("shows friendly message for rate limit errors", () => {
+        const { client, ws, terminal } = createClient();
+        client.connect();
+        ws.simulateOpen();
+        ws.simulateMessage(JSON.stringify({ type: "error", message: "rate limit exceeded", code: "RATE_LIMITED" }));
+        expect(terminal.lines.some((l) => l.includes("Rate limited"))).toBe(true);
+      });
+
+      it("shows friendly message for validation errors", () => {
+        const { client, ws, terminal } = createClient();
+        client.connect();
+        ws.simulateOpen();
+        ws.simulateMessage(JSON.stringify({ type: "error", message: "validation failed: text required" }));
+        expect(terminal.lines.some((l) => l.includes("Invalid input"))).toBe(true);
+      });
+
+      it("falls back to generic error for unknown codes", () => {
+        const { client, ws, terminal } = createClient();
+        client.connect();
+        ws.simulateOpen();
+        ws.simulateMessage(JSON.stringify({ type: "error", message: "something unexpected" }));
+        expect(terminal.lines.some((l) => l.includes("Error:") && l.includes("something unexpected"))).toBe(true);
+      });
+    });
+
     it("pong is silent", () => {
       const { client, ws, terminal } = createClient();
       client.connect();
@@ -597,6 +631,34 @@ describe("ChatClient", () => {
       sockets[0]!.simulateClose();
       // Process.exit should not have been called during reconnection
       expect(proc.exit).not.toHaveBeenCalled();
+    });
+
+    it("clears reconnect timer on user close", () => {
+      const sockets: MockWebSocket[] = [];
+      const factory = vi.fn(() => {
+        const s = new MockWebSocket();
+        sockets.push(s);
+        return s;
+      });
+      const proc = createMockProcess();
+      const { client } = createClient({
+        wsFactory: factory,
+        process: proc,
+        initialReconnectDelay: 5000,
+      });
+      client.connect();
+      sockets[0]!.simulateOpen();
+      sockets[0]!.simulateClose(); // triggers reconnect schedule
+
+      // User closes before reconnect timer fires
+      client.close();
+
+      // Advance past the reconnect delay
+      vi.advanceTimersByTime(10000);
+
+      // Factory should have been called only once (initial connect)
+      // — no reconnect after user close
+      expect(factory).toHaveBeenCalledTimes(1);
     });
 
     it("clears ping interval on close", () => {

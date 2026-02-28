@@ -190,7 +190,7 @@ export class ExtensionDriver implements BrowserDriver {
             expression: "document.body.innerText",
             returnByValue: true,
           });
-          return { success: true, text: (result.result.value as string) ?? "" };
+          return { success: true, text: (result.result?.value as string) ?? "" };
         }
 
         case "evaluate": {
@@ -203,7 +203,7 @@ export class ExtensionDriver implements BrowserDriver {
           if (result.exceptionDetails) {
             return { success: false, error: result.exceptionDetails.text };
           }
-          return { success: true, result: result.result.value };
+          return { success: true, result: result.result?.value };
         }
 
         case "wait": {
@@ -345,7 +345,7 @@ export class ExtensionDriver implements BrowserDriver {
     });
     let info: { url: string; title: string };
     try {
-      info = JSON.parse(result.result.value as string);
+      info = JSON.parse((result.result?.value ?? "{}") as string);
     } catch {
       throw new Error("Failed to parse page info from extension");
     }

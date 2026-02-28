@@ -152,15 +152,16 @@ export async function resolveTarget(
   }
 
   // Check for not-found or ambiguous markers
-  if (result.result.type === "object" && result.result.objectId) {
+  const evalResult = result.result;
+  if (evalResult?.type === "object" && evalResult.objectId) {
     // Got an element — but need to check if it's our error marker
     const check = await cdp.send("Runtime.callFunctionOn", {
       functionDeclaration: "function() { return this.__notFound || this.__ambiguous ? JSON.stringify(this) : null; }",
-      objectId: result.result.objectId,
+      objectId: evalResult.objectId,
       returnByValue: true,
     });
 
-    if (check.result.value) {
+    if (check.result?.value) {
       const marker = JSON.parse(check.result.value as string);
       if (marker.__notFound) {
         throw new Error(`Element not found for target: ${JSON.stringify(target)}`);
@@ -172,7 +173,7 @@ export async function resolveTarget(
       }
     }
 
-    return { objectId: result.result.objectId };
+    return { objectId: evalResult.objectId };
   }
 
   throw new Error(`Element not found for target: ${JSON.stringify(target)}`);
@@ -197,7 +198,7 @@ export async function callOnElement<T>(
     throw new Error(`callOnElement failed: ${result.exceptionDetails.text}`);
   }
 
-  return result.result.value as T;
+  return result.result?.value as T;
 }
 
 /**

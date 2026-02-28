@@ -55,6 +55,7 @@ export class ChatClient {
   private _reconnecting = false;
   private _reconnectScheduled = false;
   private _reconnectDelay: number;
+  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _ws: ChatWebSocket | null = null;
   private _pingInterval: ReturnType<typeof setInterval> | null = null;
   private _approvalQueue: Array<{ requestId: string; toolName: string; scopes: string }> = [];
@@ -137,6 +138,10 @@ export class ChatClient {
 
   close(): void {
     this._userClose = true;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
     if (this._statusBar) this._statusBar.teardown();
     if (this._ws) this._ws.close();
     this._terminal.closeReadline();
@@ -273,9 +278,20 @@ export class ChatClient {
         }
         break;
       }
-      case "error":
-        this.printAbove(red(`Error: ${msg.message ?? "unknown"}`));
+      case "error": {
+        const errMsg = String(msg.message ?? "unknown");
+        const code = msg.code as string | undefined;
+        if (code === "SESSION_LIMIT" || errMsg.includes("concurrent session")) {
+          this.printAbove(red(`Session limit reached — wait for the current session to finish`));
+        } else if (code === "RATE_LIMITED" || errMsg.includes("rate limit")) {
+          this.printAbove(yellow(`Rate limited — please wait a moment`));
+        } else if (code === "VALIDATION_ERROR" || errMsg.includes("validation")) {
+          this.printAbove(red(`Invalid input: ${errMsg}`));
+        } else {
+          this.printAbove(red(`Error: ${errMsg}`));
+        }
         break;
+      }
       case "pong":
         break;
     }
@@ -287,7 +303,8 @@ export class ChatClient {
     this._terminal.closeReadline();
     this._reconnecting = false;
     if (this._statusBar) this._statusBar.update({ connection: "reconnecting" });
-    this._terminal.writeLine(yellow(`\nDisconnected. Reconnecting in ${this._reconnectDelay / 1000}s...`));
+    const delaySec = Math.round(this._reconnectDelay / 1000);
+    this._terminal.writeLine(yellow(`\nDisconnected. Reconnecting in ${delaySec}s...`));
     this.scheduleReconnect();
   }
 
@@ -299,7 +316,8 @@ export class ChatClient {
       this._reconnecting = false;
       if (this._statusBar) this._statusBar.update({ connection: "disconnected" });
       this._terminal.writeLine(red(`Cannot connect to server — is it running?`));
-      this._terminal.writeLine(yellow(`Retrying in ${this._reconnectDelay / 1000}s...`));
+      const delaySec = Math.round(this._reconnectDelay / 1000);
+      this._terminal.writeLine(yellow(`Retrying in ${delaySec}s...`));
       this.scheduleReconnect();
     }
   }
@@ -307,8 +325,8 @@ export class ChatClient {
   private scheduleReconnect(): void {
     if (this._reconnectScheduled) return;
     this._reconnectScheduled = true;
-    const t = setTimeout(() => this.connect(), this._reconnectDelay);
-    t.unref();
+    this._reconnectTimer = setTimeout(() => this.connect(), this._reconnectDelay);
+    this._reconnectTimer.unref();
     this._reconnectDelay = Math.min(this._reconnectDelay * 2, this._maxReconnectDelay);
   }
 
@@ -342,8 +360,11 @@ export class ChatClient {
 
   private printAbove(text: string): void {
     if (this._approvalActive) {
-      // Buffer output while a question is visible to avoid overwriting it
       this._outputBuffer.push(text);
+      if (this._outputBuffer.length === 5) {
+        // Hint that events are being buffered
+        this._terminal.writeLine(dim(`  (buffering events while waiting for approval...)`));
+      }
       return;
     }
     this._terminal.clearLine();

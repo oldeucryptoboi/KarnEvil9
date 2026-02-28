@@ -128,6 +128,19 @@ export const deleteSchedule = (id: string) =>
 // Health
 export const getHealth = () => apiFetch<HealthStatus>("/api/health");
 
+// Metrics (raw Prometheus text)
+export const getMetricsText = async (): Promise<string> => {
+  const headers: Record<string, string> = {
+    ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+  };
+  const res = await fetch(`${BASE_URL}/api/metrics`, { headers });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${body}`);
+  }
+  return res.text();
+};
+
 // Journal compaction
 export interface CompactResult {
   before: number;

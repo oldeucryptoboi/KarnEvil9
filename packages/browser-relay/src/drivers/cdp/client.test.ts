@@ -186,6 +186,41 @@ describe("CDPClient", () => {
   });
 });
 
+describe("CDPClient nextId reset", () => {
+  it("resets nextId to 1 after disconnect", async () => {
+    const { wss, url, ready } = createMockCDPServer();
+    servers.push(wss);
+    await ready;
+
+    const receivedIds: number[] = [];
+    wss.on("connection", (ws) => {
+      ws.on("message", (data) => {
+        const msg = JSON.parse(data.toString());
+        receivedIds.push(msg.id);
+        // Echo back a result so the send() promise resolves
+        ws.send(JSON.stringify({ id: msg.id, result: {} }));
+      });
+    });
+
+    const client = new CDPClient({ wsUrl: url });
+    await client.connect();
+
+    // Send a couple of commands — ids should be 1, 2
+    await client.send("Page.enable");
+    await client.send("Page.enable");
+    expect(receivedIds).toEqual([1, 2]);
+
+    await client.disconnect();
+
+    // Reconnect and send again — id should restart at 1
+    await client.connect();
+    await client.send("Page.enable");
+    expect(receivedIds).toEqual([1, 2, 1]);
+
+    await client.disconnect();
+  });
+});
+
 describe("CDPClient bridge mode", () => {
   it("accepts a pre-connected WebSocket and reports connected", async () => {
     const { wss, url, ready } = createMockCDPServer();

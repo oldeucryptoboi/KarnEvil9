@@ -11,6 +11,11 @@ import { ApprovalHandler } from "./approval-handler.js";
 import { CommandHandler } from "./command-handler.js";
 import { AccessControl } from "./access-control.js";
 import { sendGmailMessageManifest, createSendGmailMessageHandler } from "./send-tool.js";
+import {
+  searchGmailManifest, createSearchGmailHandler,
+  readGmailMessageManifest, createReadGmailMessageHandler,
+  listGmailUnreadManifest, createListGmailUnreadHandler,
+} from "./read-tools.js";
 
 /**
  * @param {import("@karnevil9/schemas").PluginApi} api
@@ -203,8 +208,11 @@ export async function register(api) {
     });
   });
 
-  // ── Register tool: send-gmail-message ──
+  // ── Register tools ──
   api.registerTool(sendGmailMessageManifest, createSendGmailMessageHandler(gmailClient));
+  api.registerTool(searchGmailManifest, createSearchGmailHandler(gmailClient));
+  api.registerTool(readGmailMessageManifest, createReadGmailMessageHandler(gmailClient));
+  api.registerTool(listGmailUnreadManifest, createListGmailUnreadHandler(gmailClient));
 
   // ── Register hook: after_session_end ──
   api.registerHook("after_session_end", async (context) => {
@@ -263,6 +271,18 @@ export async function register(api) {
 function _registerStubs(api) {
   api.registerTool(sendGmailMessageManifest, async (input, mode) => {
     if (mode === "mock") return { ok: true, to: input.to ?? "mock@example.com", messageId: "mock-id" };
+    return { ok: false, error: "Gmail not connected" };
+  });
+  api.registerTool(searchGmailManifest, async (_input, mode) => {
+    if (mode === "mock") return { ok: true, count: 0, messages: [] };
+    return { ok: false, error: "Gmail not connected" };
+  });
+  api.registerTool(readGmailMessageManifest, async (_input, mode) => {
+    if (mode === "mock") return { ok: true, from: "mock", to: "mock", subject: "mock", date: "", threadId: "", body: "", links: [] };
+    return { ok: false, error: "Gmail not connected" };
+  });
+  api.registerTool(listGmailUnreadManifest, async (_input, mode) => {
+    if (mode === "mock") return { ok: true, count: 0, messages: [] };
     return { ok: false, error: "Gmail not connected" };
   });
 

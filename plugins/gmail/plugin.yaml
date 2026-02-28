@@ -5,6 +5,7 @@ description: Bidirectional Gmail integration — receive tasks via email, post p
 entry: index.js
 permissions:
   - gmail:send:messages
+  - gmail:read:messages
   - gmail:receive:events
 config_schema:
   type: object
@@ -20,6 +21,9 @@ config_schema:
 provides:
   tools:
     - send-gmail-message
+    - search-gmail
+    - read-gmail-message
+    - list-gmail-unread
   hooks:
     - after_session_end
   routes:

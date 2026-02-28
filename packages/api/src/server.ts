@@ -421,6 +421,7 @@ export class ApiServer {
 
   registerApproval(requestId: string, request: unknown, resolve: (decision: ApprovalDecision) => void): void {
     // Reject request IDs with control characters at registration time for audit trail consistency
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional security check for control chars
     if (/[\x00-\x1f\x7f]/.test(requestId)) {
       resolve("deny");
       return;
@@ -674,6 +675,7 @@ export class ApiServer {
       ...(this.agentic && this.contextBudgetConfig ? { contextBudgetConfig: this.contextBudgetConfig } : {}),
       ...(this.checkpointDir ? { checkpointDir: this.checkpointDir } : {}),
       plannerTimeoutMs: PLANNER_TIMEOUT_MS,
+      plannerRetries: 2,
     });
 
     const session = await kernel.createSession(task);
@@ -947,6 +949,7 @@ export class ApiServer {
             ...(this.agentic && this.contextBudgetConfig ? { contextBudgetConfig: this.contextBudgetConfig } : {}),
             ...(this.checkpointDir ? { checkpointDir: this.checkpointDir } : {}),
             plannerTimeoutMs: PLANNER_TIMEOUT_MS,
+            plannerRetries: 2,
           };
           const kernel = new KernelClass(kernelConfig);
           const session = await kernel.createSession(task);
@@ -1092,6 +1095,7 @@ export class ApiServer {
       approval.resolve(decision);
       this.pendingApprovals.delete(req.params.id!);
       // Audit trail: log who approved what (sanitize to prevent log injection)
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional sanitization of control chars
       const requestId = req.params.id!.replace(/[\x00-\x1f\x7f]/g, "");
       const sourceIp = getClientIP(req, this.trustedProxies);
       const decisionStr = typeof decision === "string" ? decision : typeof decision === "object" && decision !== null && "type" in decision ? (decision as { type: string }).type : "unknown";
@@ -1150,6 +1154,7 @@ export class ApiServer {
           limits: this.defaultLimits,
           policy: this.defaultPolicy,
           plannerTimeoutMs: PLANNER_TIMEOUT_MS,
+          plannerRetries: 2,
         });
         const session = await kernel.resumeSession(sessionId);
         if (!session) {

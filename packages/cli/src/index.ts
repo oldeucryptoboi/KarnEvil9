@@ -50,7 +50,7 @@ process.on("uncaughtException", (err) => {
 });
 
 const JOURNAL_PATH = process.env.KARNEVIL9_JOURNAL_PATH ?? resolve("journal/events.jsonl");
-const TOOLS_DIR = process.env.KARNEVIL9_TOOLS_DIR ?? resolve("tools/examples");
+const TOOLS_DIR = process.env.KARNEVIL9_TOOLS_DIR ?? resolve("tools/manifests");
 const MEMORY_PATH = process.env.KARNEVIL9_MEMORY_PATH ?? resolve("sessions/memory.jsonl");
 const SCHEDULER_PATH = process.env.KARNEVIL9_SCHEDULER_PATH ?? resolve("sessions/schedules.jsonl");
 const DEFAULT_PORT = parseInt(process.env.KARNEVIL9_PORT ?? "3100", 10);
@@ -397,7 +397,7 @@ program.command("server").description("Start the API server")
       runtime.registerHandler("game-navigate", gameNavigateHandler);
 
       // Register compound game tool manifests (execute-game-command and parse-game-screen
-      // are already loaded from tools/examples/ by registry.loadFromDirectory)
+      // are already loaded from tools/manifests/ by registry.loadFromDirectory)
       for (const toolName of ["game-combat", "game-take-all", "game-navigate"]) {
         if (!registry.get(toolName)) {
           console.warn(`[game] Tool manifest for "${toolName}" not found in ${TOOLS_DIR} — ensure tool.yaml exists`);

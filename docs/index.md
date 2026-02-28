@@ -30,7 +30,7 @@ description: "Open-source deterministic agent runtime implementing Google DeepMi
 
 # KarnEvil9
 
-**Deterministic agent runtime with explicit plans, typed tools, permissions, and replay.** KarnEvil9 is the first open-source implementation of Google DeepMind's [Intelligent AI Delegation](intelligent-delegation-whitepaper) framework ([Tomasev, Franklin & Osindero, 2026](https://arxiv.org/abs/2602.11865)), translating all five pillars of the paper into runnable TypeScript.
+**Deterministic agent runtime with explicit plans, typed tools, permissions, and replay.** KarnEvil9 is the first open-source implementation of Google DeepMind's [Intelligent AI Delegation](whitepapers/intelligent-delegation) framework ([Tomasev, Franklin & Osindero, 2026](https://arxiv.org/abs/2602.11865)), translating all five pillars of the paper into runnable TypeScript.
 
 KarnEvil9 converts a natural-language task into a structured execution plan, runs each step under fine-grained permission control, and records every event in a SHA-256 hash-chain journal. It supports single-shot execution, an agentic feedback loop with iterative re-planning, and P2P task delegation across a swarm mesh with nine safety mechanisms.
 
@@ -59,7 +59,7 @@ The `@karnevil9/swarm` package translates the five pillars of the Tomasev et al.
 | Reputation Store | Scalable Market | Bayesian trust tracking |
 | Re-delegation Pipeline | Adaptive Execution | Automatic recovery |
 
-[Read the full whitepaper →](intelligent-delegation-whitepaper)
+[Read the full whitepaper →](whitepapers/intelligent-delegation)
 
 ## How is KarnEvil9 architected?
 
@@ -69,19 +69,19 @@ KarnEvil9 is a TypeScript monorepo with 15 packages:
 schemas → journal, permissions, memory → tools → planner, plugins → kernel → api → cli
 ```
 
-[Full architecture reference →](ARCHITECTURE)
+[Full architecture reference →](architecture)
 
 ## How does KarnEvil9 handle AI safety?
 
 KarnEvil9 implements runtime-enforced safety guardrails including permission gates on every tool invocation, policy enforcement (SSRF protection, path allowlisting, command filtering), prompt injection prevention, credential sanitization, and circuit breakers.
 
-[Read the Three Laws whitepaper →](three-laws-whitepaper)
+[Read the Three Laws whitepaper →](whitepapers/three-laws)
 
 ## Case study: AI agent plays Zork I through governed delegation
 
 We tested KarnEvil9 by building a three-node AI swarm to play Zork I. A Strategist (Claude) decides moves, a Tactician executes them against a Z-machine emulator, and a Cartographer independently verifies game state. The DeepMind governance framework initially blocked the agent from attacking a troll — the fix revealed a key insight about separating domain intelligence from accountability.
 
-[Read the Zork experiment →](zork-swarm-experiment)
+[Read the Zork experiment →](whitepapers/zork-swarm-experiment)
 
 ## Quick Start
 
@@ -95,12 +95,12 @@ karnevil9 run "list all TypeScript files" --planner claude --mode real
 
 ## Documentation
 
-- [Architecture Reference](ARCHITECTURE)
-- [Roadmap: KarnEvil9 Computer](roadmap-computer)
-- [Intelligent AI Delegation Whitepaper](intelligent-delegation-whitepaper)
-- [Three Laws Safety Whitepaper](three-laws-whitepaper)
-- [Zork Swarm Experiment](zork-swarm-experiment)
-- [Claude Code Hello World Tutorial](claude-code-hello-world.html)
+- [Architecture Reference](architecture)
+- [Roadmap: KarnEvil9 Computer](roadmap)
+- [Intelligent AI Delegation Whitepaper](whitepapers/intelligent-delegation)
+- [Three Laws Safety Whitepaper](whitepapers/three-laws)
+- [Zork Swarm Experiment](whitepapers/zork-swarm-experiment)
+- [Claude Code Hello World Tutorial](demos/claude-code-hello-world.html)
 
 ## Links
 

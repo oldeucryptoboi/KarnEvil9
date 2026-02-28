@@ -10,9 +10,8 @@ plugins:
 include:
   - images
 exclude:
-  - "*.html"
-  - dev-to-zork-post.md
-  - substack-zork-post.md
+  - "demos/"
+  - "blog/"
 defaults:
   - scope:
       path: ""

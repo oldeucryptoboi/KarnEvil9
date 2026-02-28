@@ -2,7 +2,7 @@
 
 ## What is KarnEvil9?
 
-KarnEvil9 is an open-source deterministic agent runtime that converts natural-language tasks into structured execution plans with typed tools, fine-grained permissions, and tamper-evident replay. It is the first public implementation of Google DeepMind's [Intelligent AI Delegation](docs/intelligent-delegation-whitepaper.md) framework ([Tomasev, Franklin & Osindero, 2026](https://arxiv.org/abs/2602.11865)) — translating all five pillars of the paper into runnable TypeScript.
+KarnEvil9 is an open-source deterministic agent runtime that converts natural-language tasks into structured execution plans with typed tools, fine-grained permissions, and tamper-evident replay. It is the first public implementation of Google DeepMind's [Intelligent AI Delegation](docs/whitepapers/intelligent-delegation.md) framework ([Tomasev, Franklin & Osindero, 2026](https://arxiv.org/abs/2602.11865)) — translating all five pillars of the paper into runnable TypeScript.
 
 Every step runs under permission gates, every event is recorded in a SHA-256 hash-chain journal, and multi-agent delegation is governed by nine safety mechanisms: cognitive friction, liability firebreaks, graduated authority, escrow bonds, outcome verification, consensus verification, reputation tracking, delegatee routing, and re-delegation.
 
@@ -13,11 +13,11 @@ Every step runs under permission gates, every event is recorded in a SHA-256 has
 - **Domain-ignorant governance** — Safety layers own trust and chain depth, not domain knowledge. The same framework governs a code refactor, a text adventure, or a financial workflow with zero code changes.
 - **Tamper-evident journal** — SHA-256 hash-chain event log detects post-hoc modification of execution history.
 
-> **[Intelligent AI Delegation: From Theory to Working Code](docs/intelligent-delegation-whitepaper.md)** — The whitepaper details how every pillar of the Tomasev et al. paper is translated into runnable code within the `@karnevil9/swarm` package, demonstrated through a controlled experiment comparing naive vs. intelligent delegation across a three-node P2P mesh.
+> **[Intelligent AI Delegation: From Theory to Working Code](docs/whitepapers/intelligent-delegation.md)** — The whitepaper details how every pillar of the Tomasev et al. paper is translated into runnable code within the `@karnevil9/swarm` package, demonstrated through a controlled experiment comparing naive vs. intelligent delegation across a three-node P2P mesh.
 
 ### Demonstrated: AI agent plays Zork I through governed delegation
 
-We tested KarnEvil9 by building a three-node AI swarm to play Zork I. A Strategist (Claude Sonnet) decides moves, a Tactician executes them against a Z-machine emulator, and a Cartographer independently verifies game state. The DeepMind governance framework initially blocked the agent from attacking a troll — classifying "attack" as high-risk — even though the troll fight is mandatory. The fix: make governance trust-aware instead of command-aware. [Full experiment writeup](docs/zork-swarm-experiment.md).
+We tested KarnEvil9 by building a three-node AI swarm to play Zork I. A Strategist (Claude Sonnet) decides moves, a Tactician executes them against a Z-machine emulator, and a Cartographer independently verifies game state. The DeepMind governance framework initially blocked the agent from attacking a troll — classifying "attack" as high-risk — even though the troll fight is mandatory. The fix: make governance trust-aware instead of command-aware. [Full experiment writeup](docs/whitepapers/zork-swarm-experiment.md).
 
 ## Quick Start
 
@@ -126,7 +126,7 @@ api                           <- REST/WebSocket server
 cli, browser-relay            <- Entry points
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture reference.
+See [docs/architecture.md](docs/architecture.md) for the full architecture reference.
 
 ### Execution Flow
 
@@ -211,7 +211,7 @@ The `@karnevil9/swarm` package is a complete implementation of Google DeepMind's
 
 The framework forms a closed loop: delegation failure triggers bond slashing, reputation downgrade, re-delegation to a higher-trust peer, and consensus verification — all within a single execution cycle.
 
-See the full [whitepaper](docs/intelligent-delegation-whitepaper.md) for component deep dives, quantitative results, and a controlled naive-vs-intelligent demonstration.
+See the full [whitepaper](docs/whitepapers/intelligent-delegation.md) for component deep dives, quantitative results, and a controlled naive-vs-intelligent demonstration.
 
 ## What is the Knowledge Vault?
 

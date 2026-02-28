@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import type { ToolManifest } from "@karnevil9/schemas";
 import { ToolRegistry } from "./tool-registry.js";
 
-const TOOLS_DIR = resolve(import.meta.dirname ?? ".", "../../../tools/examples");
+const TOOLS_DIR = resolve(import.meta.dirname ?? ".", "../../../tools/manifests");
 
 const validManifest = (): ToolManifest => ({
   name: "test-tool",

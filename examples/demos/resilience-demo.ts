@@ -117,7 +117,7 @@ function buildRegistry() {
 }
 
 async function loadBuiltinTools(registry: ToolRegistry) {
-  await registry.loadFromDirectory(resolve("tools/examples"));
+  await registry.loadFromDirectory(resolve("tools/manifests"));
 }
 
 function wireRuntime(registry: ToolRegistry, permissions: PermissionEngine, journal: Journal) {

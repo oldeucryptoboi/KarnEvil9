@@ -11,7 +11,7 @@ import { Kernel } from "@karnevil9/kernel";
 import type { Task } from "@karnevil9/schemas";
 
 const ROOT = resolve(import.meta.dirname ?? ".", "../..");
-const TOOLS_DIR = join(ROOT, "tools/examples");
+const TOOLS_DIR = join(ROOT, "tools/manifests");
 
 describe("Session Roundtrip Smoke", () => {
   let testDir: string;

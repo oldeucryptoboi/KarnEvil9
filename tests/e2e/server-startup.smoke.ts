@@ -8,7 +8,7 @@ import { ToolRegistry } from "@karnevil9/tools";
 import { ApiServer } from "@karnevil9/api";
 
 const ROOT = resolve(import.meta.dirname ?? ".", "../..");
-const TOOLS_DIR = join(ROOT, "tools/examples");
+const TOOLS_DIR = join(ROOT, "tools/manifests");
 
 describe("Server Startup Smoke", () => {
   let testDir: string;

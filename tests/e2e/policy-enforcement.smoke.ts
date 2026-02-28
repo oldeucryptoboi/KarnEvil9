@@ -9,7 +9,7 @@ import { PermissionEngine } from "@karnevil9/permissions";
 import { Kernel } from "@karnevil9/kernel";
 import type { Task, PlanResult, Planner, PolicyProfile } from "@karnevil9/schemas";
 
-const TOOLS_DIR = join(import.meta.dirname ?? ".", "../../tools/examples");
+const TOOLS_DIR = join(import.meta.dirname ?? ".", "../../tools/manifests");
 
 function makeSingleStepPlanner(toolName: string, input: Record<string, unknown>): Planner {
   return {

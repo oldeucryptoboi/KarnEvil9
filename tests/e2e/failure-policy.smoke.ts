@@ -9,7 +9,7 @@ import { PermissionEngine } from "@karnevil9/permissions";
 import { Kernel } from "@karnevil9/kernel";
 import type { Task, Plan, PlanResult, Planner, Step, FailurePolicy } from "@karnevil9/schemas";
 
-const TOOLS_DIR = join(import.meta.dirname ?? ".", "../../tools/examples");
+const TOOLS_DIR = join(import.meta.dirname ?? ".", "../../tools/manifests");
 
 /** Planner that returns a custom list of steps. */
 function makeMultiStepPlanner(steps: Step[]): Planner {

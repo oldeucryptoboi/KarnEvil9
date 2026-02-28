@@ -24,7 +24,7 @@ async function main() {
   await journal.init();
 
   const registry = new ToolRegistry();
-  await registry.loadFromDirectory(resolve("tools/examples"));
+  await registry.loadFromDirectory(resolve("tools/manifests"));
 
   const permissions = new PermissionEngine(journal, async () => "allow_session");
 

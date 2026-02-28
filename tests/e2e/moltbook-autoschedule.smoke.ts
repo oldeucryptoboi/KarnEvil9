@@ -13,7 +13,7 @@ import { createServer } from "node:http";
 import type { Server } from "node:http";
 
 const ROOT = resolve(import.meta.dirname ?? ".", "../..");
-const TOOLS_DIR = join(ROOT, "tools/examples");
+const TOOLS_DIR = join(ROOT, "tools/manifests");
 const PLUGINS_DIR = join(ROOT, "plugins");
 
 /**

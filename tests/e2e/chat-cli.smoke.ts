@@ -12,7 +12,7 @@ import { ApiServer } from "@karnevil9/api";
 import type { Server } from "node:http";
 
 const ROOT = resolve(import.meta.dirname ?? ".", "../..");
-const TOOLS_DIR = join(ROOT, "tools/examples");
+const TOOLS_DIR = join(ROOT, "tools/manifests");
 const CLI_BIN = resolve(ROOT, "packages/cli/dist/index.js");
 const NODE = process.execPath;
 

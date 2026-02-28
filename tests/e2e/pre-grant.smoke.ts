@@ -12,7 +12,7 @@ import { PluginRegistry } from "@karnevil9/plugins";
 import type { Task, PermissionRequest, ApprovalDecision } from "@karnevil9/schemas";
 
 const ROOT = resolve(import.meta.dirname ?? ".", "../..");
-const TOOLS_DIR = join(ROOT, "tools/examples");
+const TOOLS_DIR = join(ROOT, "tools/manifests");
 const PLUGINS_DIR = join(ROOT, "plugins");
 
 describe("Pre-Grant Smoke", () => {

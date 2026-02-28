@@ -15,7 +15,7 @@ import type { SessionFactory } from "@karnevil9/scheduler";
 import type { Task, Schedule } from "@karnevil9/schemas";
 
 const ROOT = resolve(import.meta.dirname ?? ".", "../..");
-const TOOLS_DIR = join(ROOT, "tools/examples");
+const TOOLS_DIR = join(ROOT, "tools/manifests");
 
 describe("Scheduler Smoke Tests", () => {
   let testDir: string;

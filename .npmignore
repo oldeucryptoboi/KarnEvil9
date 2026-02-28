@@ -14,7 +14,7 @@ packages/.test-*.jsonl
 .biomelintrc.json
 biome.json
 tests
-scripts
+examples
 /plugins
 docs
 /tools
@@ -28,7 +28,6 @@ docker-compose*.yml
 ecosystem.config.cjs
 extensions
 infra
-hello.txt
 CONTRIBUTING.md
 SECURITY.md
 CHANGELOG.md

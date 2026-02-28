@@ -9,7 +9,7 @@ import { PermissionEngine } from "@karnevil9/permissions";
 import { Kernel } from "@karnevil9/kernel";
 import type { Task, PlanResult, Planner, Step } from "@karnevil9/schemas";
 
-const TOOLS_DIR = join(import.meta.dirname ?? ".", "../../tools/examples");
+const TOOLS_DIR = join(import.meta.dirname ?? ".", "../../tools/manifests");
 
 describe("Context Budget Enforcement Smoke", () => {
   let testDir: string;

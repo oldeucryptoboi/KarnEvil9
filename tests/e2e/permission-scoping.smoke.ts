@@ -9,7 +9,7 @@ import { PermissionEngine } from "@karnevil9/permissions";
 import { Kernel } from "@karnevil9/kernel";
 import type { Task, PlanResult, Planner, Step, ApprovalDecision, PermissionRequest } from "@karnevil9/schemas";
 
-const TOOLS_DIR = join(import.meta.dirname ?? ".", "../../tools/examples");
+const TOOLS_DIR = join(import.meta.dirname ?? ".", "../../tools/manifests");
 
 /** Planner that produces N sequential steps all using the same tool. */
 function makeNStepPlanner(toolName: string, n: number): Planner {

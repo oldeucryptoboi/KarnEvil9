@@ -13,7 +13,7 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
 const ROOT = resolve(import.meta.dirname ?? ".", "../..");
-const TOOLS_DIR = join(ROOT, "tools/examples");
+const TOOLS_DIR = join(ROOT, "tools/manifests");
 
 /** Helper: read the OS-assigned port from a listening server */
 function serverPort(server: Server): number {

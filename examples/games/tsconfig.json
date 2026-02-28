@@ -7,7 +7,7 @@
     "allowSyntheticDefaultImports": true,
     "strict": false,
     "skipLibCheck": true,
-    "outDir": "../dist/scripts"
+    "outDir": "../../dist/examples/games"
   },
   "include": ["apple2-zork-swarm.ts", "apple2-zork-frotz.ts", "apple2-zork-emulator.ts"]
 }

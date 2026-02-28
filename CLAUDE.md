@@ -37,6 +37,24 @@ npx vitest run packages/<name>/src/<file>.test.ts
 - **Express 5** for the REST API
 - **AJV** for JSON Schema validation at all component boundaries
 
+## Repository Layout
+
+```
+packages/              # 15 @karnevil9/* npm workspace packages
+plugins/               # 15 runtime plugins (discovered dynamically)
+extensions/
+  cdp-bridge/          # Chrome DevTools Protocol bridge extension
+tools/
+  manifests/           # Production tool YAML manifests (read-file, shell-exec, etc.)
+examples/
+  demos/               # Agentic, swarm, resilience, metrics demos
+  games/               # Zork emulators, IF kernel runner, zork1.z3
+  utilities/           # One-off utility scripts
+docs/                  # Jekyll site, whitepapers/, blog/, demos/
+tests/e2e/             # Smoke tests
+infra/                 # Infrastructure config
+```
+
 ## Monorepo Architecture
 
 All packages live under `packages/` and are scoped as `@karnevil9/*`. The dependency flow is strictly bottom-up:

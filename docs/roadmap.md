@@ -26,7 +26,7 @@ This roadmap defines the path from deterministic agent runtime to full autonomou
 | Circuit breaker on tool failures | Complete | `@karnevil9/tools` |
 | REST API + WebSocket events | Complete | `@karnevil9/api` |
 | CLI with interactive approval | Complete | `@karnevil9/cli` |
-| LLM adapters (Claude + OpenAI) | Complete | `@karnevil9/planner` |
+| LLM adapters (Claude, OpenAI, Gemini, Grok) | Complete | `@karnevil9/planner` |
 | Domain-aware task routing | Complete | `@karnevil9/planner` (RouterPlanner) |
 | Plugin system (tools, hooks, routes) | Complete | `@karnevil9/plugins` |
 
@@ -41,7 +41,7 @@ This roadmap defines the path from deterministic agent runtime to full autonomou
 ### What's needed
 - **Model complexity heuristic** — Classify steps as simple/medium/complex based on token estimate, tool count, and dependency depth. Route simple tasks to fast/cheap models (Haiku, GPT-4o-mini), complex tasks to strong models (Opus, o1).
 - **Fallback chains** — If primary model fails or times out, cascade to next provider. E.g., Claude Opus -> Claude Sonnet -> OpenAI GPT-4o.
-- **Additional adapters** — Google Gemini, Mistral, local models (Ollama/vLLM). Each adapter implements the existing `Planner` interface.
+- ~~**Additional adapters** — Google Gemini, Mistral, local models (Ollama/vLLM). Each adapter implements the existing `Planner` interface.~~ ✅ Gemini (`@google/genai`) and Grok (xAI, OpenAI-compatible) adapters added. Ollama/vLLM supported via OpenAI adapter with `OPENAI_BASE_URL`.
 - **Cost tracking per model** — Extend the existing token/cost budget system to track spend per provider and optimize routing based on remaining budget.
 
 ### Packages affected

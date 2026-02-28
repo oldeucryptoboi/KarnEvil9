@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@google/genai": "^1.43.0",
     "@karnevil9/api": "workspace:*",
     "@karnevil9/browser-relay": "workspace:*",
     "@karnevil9/journal": "workspace:*",
@@ -26,8 +27,8 @@
     "@karnevil9/planner": "workspace:*",
     "@karnevil9/plugins": "workspace:*",
     "@karnevil9/scheduler": "workspace:*",
-    "@karnevil9/swarm": "workspace:*",
     "@karnevil9/schemas": "workspace:*",
+    "@karnevil9/swarm": "workspace:*",
     "@karnevil9/tools": "workspace:*",
     "commander": "^13.0.0",
     "dotenv": "^17.2.4",
@@ -38,7 +39,9 @@
   "devDependencies": {
     "@types/ws": "^8.0.0"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "access": "public",
     "provenance": true

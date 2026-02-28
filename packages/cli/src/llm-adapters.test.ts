@@ -7,9 +7,10 @@ import { MockPlanner, LLMPlanner } from "@karnevil9/planner";
  *  import("openai") used by the adapter closures.                     *
  * ------------------------------------------------------------------ */
 
-const { mockClaudeCreate, mockOpenAICreate } = vi.hoisted(() => ({
+const { mockClaudeCreate, mockOpenAICreate, mockGeminiGenerate } = vi.hoisted(() => ({
   mockClaudeCreate: vi.fn(),
   mockOpenAICreate: vi.fn(),
+  mockGeminiGenerate: vi.fn(),
 }));
 
 vi.mock("@anthropic-ai/sdk", () => ({
@@ -22,6 +23,14 @@ vi.mock("@anthropic-ai/sdk", () => ({
 vi.mock("openai", () => ({
   default: class OpenAI {
     chat = { completions: { create: mockOpenAICreate } };
+    opts: unknown;
+    constructor(opts: unknown) { this.opts = opts; }
+  },
+}));
+
+vi.mock("@google/genai", () => ({
+  GoogleGenAI: class GoogleGenAI {
+    models = { generateContent: mockGeminiGenerate };
     constructor(_opts: unknown) {}
   },
 }));
@@ -69,12 +78,16 @@ describe("createPlanner", () => {
     savedEnv.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
     savedEnv.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     savedEnv.OPENAI_BASE_URL = process.env.OPENAI_BASE_URL;
+    savedEnv.GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+    savedEnv.XAI_API_KEY = process.env.XAI_API_KEY;
 
     delete process.env.KARNEVIL9_PLANNER;
     delete process.env.KARNEVIL9_MODEL;
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_BASE_URL;
+    delete process.env.GOOGLE_API_KEY;
+    delete process.env.XAI_API_KEY;
   });
 
   afterEach(() => {
@@ -140,12 +153,32 @@ describe("createPlanner", () => {
     expect(planner).toBeInstanceOf(LLMPlanner);
   });
 
+  it("throws with clear message when GOOGLE_API_KEY is missing for gemini", () => {
+    expect(() => createPlanner({ planner: "gemini" })).toThrow("GOOGLE_API_KEY");
+  });
+
+  it("returns LLMPlanner for valid gemini config", () => {
+    process.env.GOOGLE_API_KEY = "AI-test-key";
+    const planner = createPlanner({ planner: "gemini" });
+    expect(planner).toBeInstanceOf(LLMPlanner);
+  });
+
+  it("throws with clear message when XAI_API_KEY is missing for grok", () => {
+    expect(() => createPlanner({ planner: "grok" })).toThrow("XAI_API_KEY");
+  });
+
+  it("returns LLMPlanner for valid grok config", () => {
+    process.env.XAI_API_KEY = "xai-test-key";
+    const planner = createPlanner({ planner: "grok" });
+    expect(planner).toBeInstanceOf(LLMPlanner);
+  });
+
   it("throws on unknown planner type", () => {
-    expect(() => createPlanner({ planner: "gemini" })).toThrow('Unknown planner type: "gemini"');
+    expect(() => createPlanner({ planner: "llama" })).toThrow('Unknown planner type: "llama"');
   });
 
   it("includes valid options in unknown planner error", () => {
-    expect(() => createPlanner({ planner: "llama" })).toThrow("mock, claude, openai");
+    expect(() => createPlanner({ planner: "llama" })).toThrow("mock, claude, openai, gemini, grok");
   });
 });
 
@@ -265,5 +298,149 @@ describe("OpenAI adapter parameters", () => {
     expect(mockOpenAICreate).toHaveBeenCalledOnce();
     const args = mockOpenAICreate.mock.calls[0]![0];
     expect(args.response_format).toEqual({ type: "json_object" });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ *  Gemini adapter — verify API call parameters                        *
+ * ------------------------------------------------------------------ */
+
+describe("Gemini adapter parameters", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    savedEnv.GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+    savedEnv.KARNEVIL9_PLANNER = process.env.KARNEVIL9_PLANNER;
+    delete process.env.GOOGLE_API_KEY;
+    delete process.env.KARNEVIL9_PLANNER;
+    mockGeminiGenerate.mockReset();
+  });
+
+  afterEach(() => {
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+  });
+
+  it("passes responseMimeType application/json to generateContent", async () => {
+    process.env.GOOGLE_API_KEY = "AI-test";
+    const planner = createPlanner({ planner: "gemini" });
+
+    mockGeminiGenerate.mockResolvedValue({
+      text: JSON.stringify(VALID_PLAN),
+      usageMetadata: { promptTokenCount: 80, candidatesTokenCount: 40 },
+    });
+
+    await planner.generatePlan(TEST_TASK, TOOL_SCHEMAS, {}, {});
+
+    expect(mockGeminiGenerate).toHaveBeenCalledOnce();
+    const args = mockGeminiGenerate.mock.calls[0]![0];
+    expect(args.config.responseMimeType).toBe("application/json");
+    expect(args.model).toBe("gemini-2.5-flash");
+  });
+
+  it("returns parsed plan with correct usage", async () => {
+    process.env.GOOGLE_API_KEY = "AI-test";
+    const planner = createPlanner({ planner: "gemini" });
+
+    mockGeminiGenerate.mockResolvedValue({
+      text: JSON.stringify(VALID_PLAN),
+      usageMetadata: { promptTokenCount: 80, candidatesTokenCount: 40 },
+    });
+
+    const result = await planner.generatePlan(TEST_TASK, TOOL_SCHEMAS, {}, {});
+    expect(result.plan.plan_id).toBe(VALID_PLAN.plan_id);
+    expect(result.usage).toEqual({
+      input_tokens: 80,
+      output_tokens: 40,
+      total_tokens: 120,
+      model: "gemini-2.5-flash",
+    });
+  });
+
+  it("throws when response has no text", async () => {
+    process.env.GOOGLE_API_KEY = "AI-test";
+    const planner = createPlanner({ planner: "gemini" });
+
+    mockGeminiGenerate.mockResolvedValue({
+      text: null,
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 0 },
+    });
+
+    await expect(planner.generatePlan(TEST_TASK, TOOL_SCHEMAS, {}, {}))
+      .rejects.toThrow("Gemini returned no content");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ *  Grok adapter — verify API call parameters                          *
+ * ------------------------------------------------------------------ */
+
+describe("Grok adapter parameters", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    savedEnv.XAI_API_KEY = process.env.XAI_API_KEY;
+    savedEnv.KARNEVIL9_PLANNER = process.env.KARNEVIL9_PLANNER;
+    delete process.env.XAI_API_KEY;
+    delete process.env.KARNEVIL9_PLANNER;
+    mockOpenAICreate.mockReset();
+  });
+
+  afterEach(() => {
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+  });
+
+  it("passes response_format json_object via OpenAI-compatible client", async () => {
+    process.env.XAI_API_KEY = "xai-test";
+    const planner = createPlanner({ planner: "grok" });
+
+    mockOpenAICreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify(VALID_PLAN) } }],
+      usage: { prompt_tokens: 90, completion_tokens: 45 },
+    });
+
+    await planner.generatePlan(TEST_TASK, TOOL_SCHEMAS, {}, {});
+
+    expect(mockOpenAICreate).toHaveBeenCalledOnce();
+    const args = mockOpenAICreate.mock.calls[0]![0];
+    expect(args.response_format).toEqual({ type: "json_object" });
+    expect(args.model).toBe("grok-4");
+  });
+
+  it("returns parsed plan with correct usage", async () => {
+    process.env.XAI_API_KEY = "xai-test";
+    const planner = createPlanner({ planner: "grok" });
+
+    mockOpenAICreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify(VALID_PLAN) } }],
+      usage: { prompt_tokens: 90, completion_tokens: 45 },
+    });
+
+    const result = await planner.generatePlan(TEST_TASK, TOOL_SCHEMAS, {}, {});
+    expect(result.plan.plan_id).toBe(VALID_PLAN.plan_id);
+    expect(result.usage).toEqual({
+      input_tokens: 90,
+      output_tokens: 45,
+      total_tokens: 135,
+      model: "grok-4",
+    });
+  });
+
+  it("throws when response has no content", async () => {
+    process.env.XAI_API_KEY = "xai-test";
+    const planner = createPlanner({ planner: "grok" });
+
+    mockOpenAICreate.mockResolvedValue({
+      choices: [{ message: { content: null } }],
+      usage: { prompt_tokens: 10, completion_tokens: 0 },
+    });
+
+    await expect(planner.generatePlan(TEST_TASK, TOOL_SCHEMAS, {}, {}))
+      .rejects.toThrow("Grok returned no content");
   });
 });

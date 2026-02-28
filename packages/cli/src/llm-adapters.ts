@@ -39,6 +39,8 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 const PROVIDER_DEFAULTS: Record<string, string> = {
   claude: "claude-sonnet-4-6",
   openai: "gpt-4o",
+  gemini: "gemini-2.5-flash",
+  grok: "grok-4",
 };
 
 function resolveProvider(opts: { planner?: string }): string {
@@ -201,6 +203,102 @@ function createOpenAICallFn(model: string, overrideBaseURL?: string): ModelCallF
   };
 }
 
+function createGeminiCallFn(model: string): ModelCallFn {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "GOOGLE_API_KEY environment variable is required for the gemini planner.\n" +
+      "Set it with: export GOOGLE_API_KEY=AI..."
+    );
+  }
+
+  let clientPromise: Promise<{ models: { generateContent: Function } }> | null = null;
+
+  return async (systemPrompt: string, userPrompt: string): Promise<ModelCallResult> => {
+    if (!clientPromise) {
+      clientPromise = import("@google/genai").then(({ GoogleGenAI }) => {
+        const ai = new GoogleGenAI({ apiKey });
+        return { models: ai.models };
+      }).catch((err) => { clientPromise = null; throw err; });
+    }
+    const client = await clientPromise;
+    return withRetry(async () => {
+      const response = await client.models.generateContent({
+        model,
+        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+        config: {
+          systemInstruction: systemPrompt,
+          responseMimeType: "application/json",
+        },
+      });
+      const text = response.text;
+      if (!text) {
+        throw new Error("Gemini returned no content");
+      }
+      const promptTokens = response.usageMetadata?.promptTokenCount ?? 0;
+      const candidatesTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
+      return {
+        text,
+        usage: {
+          input_tokens: promptTokens,
+          output_tokens: candidatesTokens,
+          total_tokens: promptTokens + candidatesTokens,
+          model,
+        },
+      };
+    });
+  };
+}
+
+function createGrokCallFn(model: string): ModelCallFn {
+  const apiKey = process.env.XAI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "XAI_API_KEY environment variable is required for the grok planner.\n" +
+      "Set it with: export XAI_API_KEY=xai-..."
+    );
+  }
+
+  let clientPromise: Promise<InstanceType<typeof import("openai").default>> | null = null;
+
+  return async (systemPrompt: string, userPrompt: string): Promise<ModelCallResult> => {
+    if (!clientPromise) {
+      clientPromise = import("openai").then(
+        ({ default: OpenAI }) => new OpenAI({
+          apiKey,
+          baseURL: "https://api.x.ai/v1",
+        })
+      ).catch((err) => { clientPromise = null; throw err; });
+    }
+    const client = await clientPromise;
+    return withRetry(async () => {
+      const response = await client.chat.completions.create({
+        model,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      });
+      const content = response.choices[0]?.message?.content;
+      if (!content) {
+        throw new Error("Grok returned no content");
+      }
+      const promptTokens = response.usage?.prompt_tokens ?? 0;
+      const completionTokens = response.usage?.completion_tokens ?? 0;
+      return {
+        text: content,
+        usage: {
+          input_tokens: promptTokens,
+          output_tokens: completionTokens,
+          total_tokens: promptTokens + completionTokens,
+          model,
+        },
+      };
+    });
+  };
+}
+
 export function createPlanner(opts: { planner?: string; model?: string; agentic?: boolean; baseURL?: string }): Planner {
   const provider = resolveProvider(opts);
   const model = resolveModel(provider, opts);
@@ -212,6 +310,10 @@ export function createPlanner(opts: { planner?: string; model?: string; agentic?
       return new LLMPlanner(createClaudeCallFn(model), { agentic: opts.agentic });
     case "openai":
       return new LLMPlanner(createOpenAICallFn(model, opts.baseURL), { agentic: opts.agentic });
+    case "gemini":
+      return new LLMPlanner(createGeminiCallFn(model), { agentic: opts.agentic });
+    case "grok":
+      return new LLMPlanner(createGrokCallFn(model), { agentic: opts.agentic });
     case "router": {
       const underlying = new LLMPlanner(createClaudeCallFn(model), { agentic: opts.agentic });
       return new RouterPlanner({ delegate: underlying });
@@ -222,7 +324,7 @@ export function createPlanner(opts: { planner?: string; model?: string; agentic?
     }
     default:
       throw new Error(
-        `Unknown planner type: "${provider}". Valid options: mock, claude, openai, router, if`
+        `Unknown planner type: "${provider}". Valid options: mock, claude, openai, gemini, grok, router, if`
       );
   }
 }

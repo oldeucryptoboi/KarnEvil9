@@ -80,7 +80,7 @@ api, cli, browser-relay     ← Entry points
 - **journal** — Append-only JSONL event log with SHA-256 hash-chain integrity. Supports listeners, session indexing, and optional payload redaction.
 - **permissions** — `domain:action:target` permission strings with multi-level caching (global/session/step scope). Decisions include `allow_once`, `allow_session`, `allow_always`, `allow_constrained`, `allow_observed`, `deny`.
 - **tools** — ToolRegistry + ToolRuntime with circuit breaker pattern (threshold=5, cooldown=30s). Built-in handlers: readFile, writeFile, shellExec, httpRequest, browser. PolicyEnforcer handles SSRF protection, path validation, command filtering.
-- **planner** — MockPlanner (testing), LLMPlanner (Claude/OpenAI with prompt injection prevention via `<<<UNTRUSTED_INPUT>>>` delimiters), RouterPlanner (domain-aware routing).
+- **planner** — MockPlanner (testing), LLMPlanner (Claude/OpenAI/Gemini/Grok with prompt injection prevention via `<<<UNTRUSTED_INPUT>>>` delimiters), RouterPlanner (domain-aware routing).
 - **plugins** — Discovery (`plugin.yaml` manifests), loader, registry. Plugins register tools, hooks (`before_*/after_*`), routes, commands, and services. Hook runner supports continuation, modification, and blocking.
 - **memory** — TaskStateManager (in-session plan/step/artifact tracking), WorkingMemoryManager (KV store), LongTermMemory/ActiveMemory (cross-session lesson persistence in JSONL).
 

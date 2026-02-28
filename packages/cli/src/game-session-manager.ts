@@ -187,8 +187,8 @@ export class GameSessionManager {
       if (emulator) {
         try {
           await emulator.saveGame();
-        } catch (_) {
-          // Best-effort save — don't fail release
+        } catch (err) {
+          process.stderr.write(`[game] save failed (best-effort): ${err instanceof Error ? err.message : String(err)}\n`);
         }
         await emulator.close();
       }

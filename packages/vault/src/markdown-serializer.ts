@@ -48,9 +48,7 @@ export function deserializeVaultObject(markdown: string, filePath: string): Vaul
   const links: VaultLink[] = [];
   const entitiesSection = body.match(/## Entities\n([\s\S]*?)(?:\n## |\n$|$)/);
   if (entitiesSection) {
-    const linkRegex = /- \[\[(.+?)\]\]\s*\((\w+)\)/g;
-    let match = linkRegex.exec(entitiesSection[1]!);
-    while (match !== null) {
+    for (const match of (entitiesSection[1] ?? "").matchAll(/- \[\[(.+?)\]\]\s*\((\w+)\)/g)) {
       links.push({
         link_id: "",
         source_id: fm.object_id,
@@ -59,7 +57,6 @@ export function deserializeVaultObject(markdown: string, filePath: string): Vaul
         confidence: fm.confidence,
         created_at: fm.ingested_at ?? fm.created_at,
       });
-      match = linkRegex.exec(entitiesSection[1]!);
     }
   }
 

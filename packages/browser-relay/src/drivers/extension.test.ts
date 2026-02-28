@@ -76,6 +76,15 @@ function defaultCDPResponder(msg: { id: number; method: string; params?: unknown
   return {};
 }
 
+/** Poll until `fn()` returns true (10ms intervals, 2s max). */
+async function waitFor(fn: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!fn()) {
+    if (Date.now() - start > timeoutMs) throw new Error("waitFor timed out");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 // ── Track drivers for cleanup ──────────────────────────────────────
 
 let drivers: ExtensionDriver[] = [];
@@ -359,20 +368,17 @@ describe("ExtensionDriver (bridge protocol)", () => {
       const ext1 = await connectFakeExtension(driver.getBridgePort());
       ext1.autoRespond(defaultCDPResponder);
       ext1.sendHello();
-      await new Promise((r) => setTimeout(r, 100));
-      expect(driver.isActive()).toBe(true);
+      await waitFor(() => driver.isActive());
 
       // Second extension connects — should replace first
       const ext2 = await connectFakeExtension(driver.getBridgePort());
       ext2.autoRespond(defaultCDPResponder);
       ext2.sendHello();
-      await new Promise((r) => setTimeout(r, 100));
-      expect(driver.isActive()).toBe(true);
+      await waitFor(() => driver.isActive());
 
       // Close second — driver should go inactive
       ext2.close();
-      await new Promise((r) => setTimeout(r, 100));
-      expect(driver.isActive()).toBe(false);
+      await waitFor(() => !driver.isActive());
 
       ext1.close();
     });

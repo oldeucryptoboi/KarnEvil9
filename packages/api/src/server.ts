@@ -758,6 +758,9 @@ export class ApiServer {
         clearTimeout(sessionTimer!);
         this.activeSessions.delete(sessionId);
         setTimeout(() => this.kernels.delete(sessionId), KERNEL_EVICTION_DELAY_MS).unref();
+      })
+      .catch((err) => {
+        logError("runSessionLifecycle unhandled", err);
       });
   }
 

@@ -518,6 +518,31 @@ describe("VaultManager", () => {
       expect(result.wikilink_stubs_created).toBe(0);
     });
 
+    it("finds wikilinks at start of content across multiple entries (regex lastIndex regression)", async () => {
+      const store = manager.getObjectStore();
+      const schema = manager.getSchema();
+      // First entry: wikilink at end of long content (advances regex lastIndex)
+      await store.create("Entry One", "Lots of text before [[Alpha Target]] here", {
+        source: "test",
+        source_id: "wl-regression-1",
+        object_type: "Note",
+        para_category: "resources",
+      }, schema);
+      // Second entry: wikilink at very start (would be skipped if lastIndex carried over)
+      await store.create("Entry Two", "[[Beta Target]] appears at the start", {
+        source: "test",
+        source_id: "wl-regression-2",
+        object_type: "Note",
+        para_category: "resources",
+      }, schema);
+
+      const result = await manager.janitor();
+      expect(result.wikilink_stubs_created).toBe(2);
+      const stubs = manager.search({ source: "janitor-stub" });
+      const stubTitles = stubs.map((s) => s.title).sort();
+      expect(stubTitles).toEqual(["Alpha Target", "Beta Target"]);
+    });
+
     it("stubs have correct frontmatter", async () => {
       const store = manager.getObjectStore();
       const schema = manager.getSchema();

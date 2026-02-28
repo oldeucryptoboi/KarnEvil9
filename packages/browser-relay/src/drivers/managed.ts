@@ -142,8 +142,8 @@ Object.defineProperty(Navigator.prototype, 'plugins', {
       };
       arr.refresh = () => {};
       return arr;
-    } catch (_) {
-      // Fallback if PluginArray/Plugin prototypes not available
+    } catch {
+      // Fallback: PluginArray/Plugin prototypes not available in this environment
       const arr = [
         { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
         { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },

@@ -463,21 +463,18 @@ export class VaultManager {
       titleLookup.set(entry.title.toLowerCase(), entry.object_id);
     }
 
-    const wikilinkPattern = /\[\[([^\]]+)\]\]/g;
     let stubsCreated = 0;
 
     for (const entry of allEntries) {
       const obj = await this.objectStore.get(entry.object_id);
       if (!obj) continue;
 
-      let match: RegExpExecArray | null = wikilinkPattern.exec(obj.content);
-      while (match !== null) {
+      for (const match of obj.content.matchAll(/\[\[([^\]]+)\]\]/g)) {
         const target = match[1]!;
         const targetLower = target.toLowerCase();
 
         // Skip if target already exists
         if (titleLookup.has(targetLower)) {
-          match = wikilinkPattern.exec(obj.content);
           continue;
         }
 
@@ -506,7 +503,6 @@ export class VaultManager {
         // Track in lookup to prevent duplicate stubs within same run
         titleLookup.set(targetLower, stub.frontmatter.object_id);
         stubsCreated++;
-        match = wikilinkPattern.exec(obj.content);
       }
     }
 

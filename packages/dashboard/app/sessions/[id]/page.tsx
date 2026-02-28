@@ -19,8 +19,44 @@ export default function SessionDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    getSession(id).then(setSession).catch((e) => setError(e.message));
-    getJournal(id).then(setJournal).catch(() => {});
+
+    // Fetch journal first — it persists on disk even after API restarts
+    const journalP = getJournal(id).then((events) => {
+      setJournal(events);
+      return events;
+    }).catch(() => [] as JournalEvent[]);
+
+    getSession(id).then(setSession).catch(async () => {
+      // Session not in memory (API restarted). Reconstruct from journal.
+      const events = await journalP;
+      if (events.length === 0) {
+        setError("Session not found");
+        return;
+      }
+
+      const createdEvt = events.find((e) => e.type === "session.created");
+      const terminalEvt = [...events].reverse().find((e) =>
+        e.type === "session.completed" || e.type === "session.failed" || e.type === "session.aborted"
+      );
+      const statusMap: Record<string, string> = {
+        "session.completed": "completed",
+        "session.failed": "failed",
+        "session.aborted": "aborted",
+      };
+      const status = terminalEvt ? (statusMap[terminalEvt.type] ?? "unknown") : "unknown";
+      const taskText = (createdEvt?.payload?.task_text as string)
+        ?? (createdEvt?.payload?.task as string)
+        ?? "";
+
+      setSession({
+        session_id: id,
+        status,
+        created_at: events[0]!.timestamp,
+        task_text: taskText,
+        completed_steps: events.filter((e) => e.type === "step.succeeded").length,
+        total_steps: events.filter((e) => e.type === "step.started").length,
+      });
+    });
   }, [id]);
 
   // Update session status from WS events

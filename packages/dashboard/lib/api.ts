@@ -125,3 +125,51 @@ export const deleteSchedule = (id: string) =>
 
 // Health
 export const getHealth = () => apiFetch<HealthStatus>("/api/health");
+
+// Vault
+export interface VaultObject {
+  object_id: string;
+  object_type: string;
+  source: string;
+  source_id: string;
+  title: string;
+  tags: string[];
+  entities: string[];
+  para_category: string;
+  file_path: string;
+  created_at: string;
+  ingested_at: string;
+}
+
+export interface VaultDashboard {
+  generated_at: string;
+  total_objects: number;
+  total_links: number;
+  unclassified_count: number;
+  embedding_coverage: number;
+  objects_by_type: Record<string, number>;
+  objects_by_category: Record<string, number>;
+  objects_by_source: Record<string, number>;
+  top_entities: Array<{ entity: string; count: number }>;
+  recent_activity: Array<{ object_id: string; title: string; ingested_at: string }>;
+}
+
+export const getVaultDashboard = () => apiFetch<VaultDashboard>("/api/plugins/vault/vault/dashboard");
+
+export const getVaultObjects = async (params?: { limit?: number; object_type?: string; para_category?: string; source?: string }): Promise<{ results: VaultObject[]; total: number }> => {
+  const query = new URLSearchParams();
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.object_type) query.set("object_type", params.object_type);
+  if (params?.para_category) query.set("para_category", params.para_category);
+  if (params?.source) query.set("source", params.source);
+  const qs = query.toString();
+  return apiFetch<{ results: VaultObject[]; total: number }>(`/api/plugins/vault/vault/objects${qs ? `?${qs}` : ""}`);
+};
+
+export const searchVault = async (q: string, params?: { limit?: number; type?: string; category?: string }): Promise<{ results: VaultObject[]; total: number }> => {
+  const query = new URLSearchParams({ q });
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.type) query.set("type", params.type);
+  if (params?.category) query.set("category", params.category);
+  return apiFetch<{ results: VaultObject[]; total: number }>(`/api/plugins/vault/vault/search?${query.toString()}`);
+};

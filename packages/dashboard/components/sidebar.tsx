@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: "/approvals", label: "Approvals", icon: "A" },
   { href: "/schedules", label: "Schedules", icon: "C" },
   { href: "/tools", label: "Tools", icon: "T" },
+  { href: "/vault", label: "Vault", icon: "V" },
 ];
 
 export function Sidebar() {

@@ -73,8 +73,11 @@ export interface HealthStatus {
   sessions_active: number;
 }
 
-// Sessions — no list endpoint exists; return empty array (sessions are created via CLI/API POST)
-export const getSessions = async (): Promise<SessionSummary[]> => [];
+// Sessions
+export const getSessions = async (): Promise<SessionSummary[]> => {
+  const res = await apiFetch<{ sessions: SessionSummary[] }>("/api/sessions");
+  return res.sessions;
+};
 export const getSession = (id: string) => apiFetch<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`);
 export const createSession = (task: string, mode = "mock") =>
   apiFetch<{ session_id: string; status: string }>("/api/sessions", {

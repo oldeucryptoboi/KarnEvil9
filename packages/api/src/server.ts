@@ -886,6 +886,24 @@ export class ApiServer {
       });
     }
 
+    router.get("/sessions", (_req, res) => {
+      const sessions = [];
+      for (const [, kernel] of this.kernels) {
+        const s = kernel.getSession();
+        if (s) {
+          sessions.push({
+            session_id: s.session_id,
+            status: s.status,
+            created_at: s.created_at,
+            updated_at: s.updated_at,
+            task_text: s.task?.text,
+            mode: s.mode,
+          });
+        }
+      }
+      res.json({ sessions });
+    });
+
     router.post("/sessions", async (req, res) => {
       try {
         const validationError = validateSessionInput(req.body);

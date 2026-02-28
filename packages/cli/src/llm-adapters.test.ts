@@ -217,11 +217,10 @@ describe("Claude adapter parameters", () => {
 
     expect(mockClaudeCreate).toHaveBeenCalledOnce();
     const args = mockClaudeCreate.mock.calls[0]![0];
-    expect(args.tools).toEqual([{
-      name: "submit_plan",
-      description: "Submit the execution plan as structured JSON",
-      input_schema: { type: "object" },
-    }]);
+    expect(args.tools).toHaveLength(1);
+    expect(args.tools[0].name).toBe("submit_plan");
+    expect(args.tools[0].input_schema.type).toBe("object");
+    expect(args.tools[0].input_schema.required).toContain("steps");
     expect(args.tool_choice).toEqual({ type: "tool", name: "submit_plan" });
   });
 

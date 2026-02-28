@@ -440,21 +440,11 @@ export class LLMPlanner implements Planner {
     this.agentic = opts?.agentic ?? false;
   }
 
-  async generatePlan(
-    task: Task,
-    toolSchemas: ToolSchemaForPlanner[],
-    stateSnapshot: Record<string, unknown>,
-    constraints: Record<string, unknown>
-  ): Promise<PlanResult> {
-    const systemPrompt = this.agentic
-      ? buildAgenticSystemPrompt(toolSchemas, constraints)
-      : buildSystemPrompt(toolSchemas, constraints);
-    const userPrompt = this.agentic
-      ? buildAgenticUserPrompt(task, stateSnapshot)
-      : buildUserPrompt(task, stateSnapshot);
-
-    const { text: raw, usage } = await this.callModel(systemPrompt, userPrompt);
-    // Guard against excessively large responses before parsing
+  /**
+   * Parse raw model output into a Plan, applying unwrapping, key normalization,
+   * and safe-default filling so that downstream schema validation is more likely to pass.
+   */
+  private parseAndNormalize(raw: string): Plan {
     const MAX_RESPONSE_SIZE = 500_000;
     if (raw.length > MAX_RESPONSE_SIZE) {
       throw new Error(`Planner response too large: ${raw.length} characters (max ${MAX_RESPONSE_SIZE})`);
@@ -474,10 +464,44 @@ export class LLMPlanner implements Planner {
     if (!plan.steps && planAny.plan && typeof planAny.plan === "object") {
       plan = planAny.plan as Plan;
     }
+    // Try to recover steps from alternative keys the model might use
+    if (!Array.isArray(plan.steps)) {
+      const obj = plan as unknown as Record<string, unknown>;
+      for (const alt of ["actions", "tasks", "plan_steps", "task_steps"]) {
+        if (Array.isArray(obj[alt])) {
+          plan.steps = obj[alt] as Plan["steps"];
+          delete obj[alt];
+          break;
+        }
+      }
+      // Last resort: look for any top-level array containing step-like objects
+      if (!Array.isArray(plan.steps)) {
+        for (const [key, val] of Object.entries(obj)) {
+          if (key === "assumptions" || key === "artifacts") continue;
+          if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
+            const first = val[0] as Record<string, unknown>;
+            if (first.tool_ref || first.tool_name) {
+              plan.steps = val as Plan["steps"];
+              delete obj[key];
+              break;
+            }
+          }
+        }
+      }
+    }
+    // Normalize tool_name → tool_ref in steps (some models use tool_name instead)
+    if (Array.isArray(plan.steps)) {
+      for (const step of plan.steps) {
+        const stepObj = step as unknown as Record<string, unknown>;
+        if (!step.tool_ref && stepObj.tool_name) {
+          step.tool_ref = { name: stepObj.tool_name as string };
+          delete stepObj.tool_name;
+        }
+      }
+    }
     // Normalize top-level required fields that models sometimes omit or get wrong
     if (!plan.plan_id) plan.plan_id = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     if (!plan.schema_version) plan.schema_version = "0.1";
-    // LLMs sometimes return schema_version as a number (0.1) instead of string ("0.1")
     if (typeof plan.schema_version === "number") {
       plan.schema_version = String(plan.schema_version);
     }
@@ -496,7 +520,6 @@ export class LLMPlanner implements Planner {
           const { name, version_range } = step.tool_ref as unknown as Record<string, unknown>;
           step.tool_ref = { name: name as string, ...(version_range ? { version_range: version_range as string } : {}) };
         }
-        // Fill missing required step fields with safe defaults
         // Strip extra step properties (additionalProperties: false in StepSchema)
         const STEP_KEYS = new Set(["step_id", "title", "description", "tool_ref", "input", "success_criteria", "failure_policy", "timeout_ms", "max_retries", "depends_on", "input_from"]);
         for (const key of Object.keys(step)) {
@@ -514,6 +537,57 @@ export class LLMPlanner implements Planner {
         }
       }
     }
+    return plan;
+  }
+
+  async generatePlan(
+    task: Task,
+    toolSchemas: ToolSchemaForPlanner[],
+    stateSnapshot: Record<string, unknown>,
+    constraints: Record<string, unknown>
+  ): Promise<PlanResult> {
+    const systemPrompt = this.agentic
+      ? buildAgenticSystemPrompt(toolSchemas, constraints)
+      : buildSystemPrompt(toolSchemas, constraints);
+    const userPrompt = this.agentic
+      ? buildAgenticUserPrompt(task, stateSnapshot)
+      : buildUserPrompt(task, stateSnapshot);
+
+    let totalUsage: UsageMetrics | undefined;
+    const mergeUsage = (u?: UsageMetrics) => {
+      if (!u) return;
+      if (!totalUsage) { totalUsage = { ...u }; return; }
+      totalUsage.input_tokens += u.input_tokens;
+      totalUsage.output_tokens += u.output_tokens;
+      totalUsage.total_tokens += u.total_tokens;
+    };
+
+    const { text: raw, usage } = await this.callModel(systemPrompt, userPrompt);
+    mergeUsage(usage);
+
+    let plan = this.parseAndNormalize(raw);
+
+    // If steps is missing after normalization, retry once with an explicit format correction
+    if (!Array.isArray(plan.steps)) {
+      const retryPrompt = userPrompt +
+        "\n\nCRITICAL: Your previous response was missing the required \"steps\" array. " +
+        "You MUST include \"steps\": [...] in your JSON response. " +
+        "Each step needs: step_id, title, tool_ref: {name}, input, success_criteria. " +
+        "If the task is complete, use \"steps\": [].";
+      const { text: retryRaw, usage: retryUsage } = await this.callModel(systemPrompt, retryPrompt);
+      mergeUsage(retryUsage);
+      plan = this.parseAndNormalize(retryRaw);
+
+      // If still no steps, throw with diagnostic info
+      if (!Array.isArray(plan.steps)) {
+        const keys = Object.keys(plan as unknown as Record<string, unknown>).join(", ");
+        throw new Error(
+          `Planner returned plan without "steps" after retry. ` +
+          `Response keys: [${keys}]. Raw (first 300 chars): ${retryRaw.slice(0, 300)}`
+        );
+      }
+    }
+
     // Agentic "done" signals have empty steps — skip schema validation for those
     // since PlanSchema requires minItems: 1 for real executable plans
     const isAgenticDone = this.agentic && Array.isArray(plan.steps) && plan.steps.length === 0;
@@ -523,16 +597,14 @@ export class LLMPlanner implements Planner {
         throw new Error(`Planner returned invalid plan: ${validation.errors.join("; ")}`);
       }
       // Validate step_id uniqueness to prevent Map collisions in kernel
-      if (Array.isArray(plan.steps)) {
-        const stepIds = new Set<string>();
-        for (const step of plan.steps) {
-          if (stepIds.has(step.step_id)) {
-            throw new Error(`Planner returned duplicate step_id "${step.step_id}" in plan`);
-          }
-          stepIds.add(step.step_id);
+      const stepIds = new Set<string>();
+      for (const step of plan.steps) {
+        if (stepIds.has(step.step_id)) {
+          throw new Error(`Planner returned duplicate step_id "${step.step_id}" in plan`);
         }
+        stepIds.add(step.step_id);
       }
     }
-    return { plan, usage };
+    return { plan, usage: totalUsage };
   }
 }

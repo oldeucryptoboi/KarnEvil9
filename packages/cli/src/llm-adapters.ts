@@ -78,8 +78,40 @@ function createClaudeCallFn(model: string): ModelCallFn {
         messages: [{ role: "user", content: userPrompt }],
         tools: [{
           name: "submit_plan",
-          description: "Submit the execution plan as structured JSON",
-          input_schema: { type: "object" as const },
+          description: "Submit the execution plan as structured JSON. The plan MUST include a steps array.",
+          input_schema: {
+            type: "object" as const,
+            required: ["plan_id", "schema_version", "goal", "steps"],
+            properties: {
+              plan_id: { type: "string" as const, description: "Unique plan identifier" },
+              schema_version: { type: "string" as const, description: "Always '0.1'" },
+              goal: { type: "string" as const, description: "What this plan achieves" },
+              assumptions: { type: "array" as const, items: { type: "string" as const } },
+              steps: {
+                type: "array" as const,
+                description: "Execution steps. Empty array [] means task is complete.",
+                items: {
+                  type: "object" as const,
+                  required: ["step_id", "title", "tool_ref", "input", "success_criteria"],
+                  properties: {
+                    step_id: { type: "string" as const },
+                    title: { type: "string" as const },
+                    tool_ref: {
+                      type: "object" as const,
+                      required: ["name"],
+                      properties: { name: { type: "string" as const } },
+                    },
+                    input: { type: "object" as const },
+                    success_criteria: { type: "array" as const, items: { type: "string" as const } },
+                    failure_policy: { type: "string" as const, enum: ["abort", "continue", "replan"] },
+                    timeout_ms: { type: "number" as const },
+                    max_retries: { type: "number" as const },
+                  },
+                },
+              },
+              artifacts: { type: "array" as const },
+            },
+          },
         }],
         tool_choice: { type: "tool" as const, name: "submit_plan" },
       });

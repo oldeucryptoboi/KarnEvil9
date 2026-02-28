@@ -891,3 +891,201 @@ describe("LLMPlanner", () => {
     expect(plan.created_at).toBeTruthy();
   });
 });
+
+describe("LLMPlanner response normalization", () => {
+  const validStep = {
+    step_id: uuid(),
+    title: "Read file",
+    tool_ref: { name: "read-file" },
+    input: { path: "/tmp/test.txt" },
+    success_criteria: ["File read successfully"],
+    failure_policy: "abort",
+    timeout_ms: 5000,
+    max_retries: 0,
+  };
+
+  it("recovers steps from 'actions' key", async () => {
+    const response = {
+      plan_id: uuid(),
+      schema_version: "0.1",
+      goal: "Test",
+      assumptions: [],
+      actions: [validStep],
+      created_at: new Date().toISOString(),
+    };
+    const callModel = async () => ({ text: JSON.stringify(response) });
+    const planner = new LLMPlanner(callModel);
+    const { plan } = await planner.generatePlan(makeTask(), toolSchemas, {}, {});
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0]!.tool_ref.name).toBe("read-file");
+  });
+
+  it("recovers steps from 'tasks' key", async () => {
+    const response = {
+      plan_id: uuid(),
+      schema_version: "0.1",
+      goal: "Test",
+      assumptions: [],
+      tasks: [validStep],
+      created_at: new Date().toISOString(),
+    };
+    const callModel = async () => ({ text: JSON.stringify(response) });
+    const planner = new LLMPlanner(callModel);
+    const { plan } = await planner.generatePlan(makeTask(), toolSchemas, {}, {});
+    expect(plan.steps).toHaveLength(1);
+  });
+
+  it("recovers steps from any array with tool_ref objects", async () => {
+    const response = {
+      plan_id: uuid(),
+      schema_version: "0.1",
+      goal: "Test",
+      assumptions: [],
+      execution_steps: [validStep],
+      created_at: new Date().toISOString(),
+    };
+    const callModel = async () => ({ text: JSON.stringify(response) });
+    const planner = new LLMPlanner(callModel);
+    const { plan } = await planner.generatePlan(makeTask(), toolSchemas, {}, {});
+    expect(plan.steps).toHaveLength(1);
+  });
+
+  it("normalizes tool_name to tool_ref in steps", async () => {
+    const stepWithToolName = {
+      step_id: uuid(),
+      title: "Read file",
+      tool_name: "read-file",
+      input: { path: "/tmp/test.txt" },
+      success_criteria: ["File read successfully"],
+      failure_policy: "abort",
+      timeout_ms: 5000,
+      max_retries: 0,
+    };
+    const response = {
+      plan_id: uuid(),
+      schema_version: "0.1",
+      goal: "Test",
+      assumptions: [],
+      steps: [stepWithToolName],
+      created_at: new Date().toISOString(),
+    };
+    const callModel = async () => ({ text: JSON.stringify(response) });
+    const planner = new LLMPlanner(callModel);
+    const { plan } = await planner.generatePlan(makeTask(), toolSchemas, {}, {});
+    expect(plan.steps[0]!.tool_ref).toEqual({ name: "read-file" });
+  });
+
+  it("recovers steps from tool_name objects in alternative keys", async () => {
+    const stepWithToolName = {
+      step_id: uuid(),
+      title: "Read file",
+      tool_name: "read-file",
+      input: { path: "/tmp/test.txt" },
+      success_criteria: ["File read successfully"],
+      failure_policy: "abort",
+      timeout_ms: 5000,
+      max_retries: 0,
+    };
+    const response = {
+      plan_id: uuid(),
+      schema_version: "0.1",
+      goal: "Test",
+      assumptions: [],
+      operations: [stepWithToolName],
+      created_at: new Date().toISOString(),
+    };
+    const callModel = async () => ({ text: JSON.stringify(response) });
+    const planner = new LLMPlanner(callModel);
+    const { plan } = await planner.generatePlan(makeTask(), toolSchemas, {}, {});
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0]!.tool_ref).toEqual({ name: "read-file" });
+  });
+});
+
+describe("LLMPlanner retry on missing steps", () => {
+  const validPlan = {
+    plan_id: uuid(),
+    schema_version: "0.1",
+    goal: "Test",
+    assumptions: [],
+    steps: [{
+      step_id: uuid(),
+      title: "Read file",
+      tool_ref: { name: "read-file" },
+      input: { path: "/tmp/test.txt" },
+      success_criteria: ["File read successfully"],
+      failure_policy: "abort",
+      timeout_ms: 5000,
+      max_retries: 0,
+    }],
+    created_at: new Date().toISOString(),
+  };
+
+  it("retries once when first response has no steps, succeeds on retry", async () => {
+    let callCount = 0;
+    const callModel = async () => {
+      callCount++;
+      if (callCount === 1) {
+        // First call: missing steps
+        return { text: JSON.stringify({ plan_id: uuid(), goal: "Test", schema_version: "0.1" }) };
+      }
+      // Retry: valid response
+      return { text: JSON.stringify(validPlan) };
+    };
+    const planner = new LLMPlanner(callModel);
+    const { plan } = await planner.generatePlan(makeTask(), toolSchemas, {}, {});
+    expect(callCount).toBe(2);
+    expect(plan.steps).toHaveLength(1);
+  });
+
+  it("throws with diagnostic info when both attempts fail", async () => {
+    const noSteps = { plan_id: uuid(), goal: "Test", schema_version: "0.1", description: "something" };
+    const callModel = async () => ({ text: JSON.stringify(noSteps) });
+    const planner = new LLMPlanner(callModel);
+    await expect(planner.generatePlan(makeTask(), toolSchemas, {}, {}))
+      .rejects.toThrow(/without "steps" after retry/);
+  });
+
+  it("includes response keys in error message for diagnostics", async () => {
+    const noSteps = { plan_id: uuid(), goal: "Test", schema_version: "0.1", analysis: "stuff" };
+    const callModel = async () => ({ text: JSON.stringify(noSteps) });
+    const planner = new LLMPlanner(callModel);
+    await expect(planner.generatePlan(makeTask(), toolSchemas, {}, {}))
+      .rejects.toThrow(/Response keys:.*analysis/);
+  });
+
+  it("accumulates usage from both attempts on retry", async () => {
+    let callCount = 0;
+    const callModel = async () => {
+      callCount++;
+      const usage = { input_tokens: 100, output_tokens: 50, total_tokens: 150, model: "test" };
+      if (callCount === 1) {
+        return { text: JSON.stringify({ plan_id: uuid(), goal: "Test" }), usage };
+      }
+      return { text: JSON.stringify(validPlan), usage };
+    };
+    const planner = new LLMPlanner(callModel);
+    const { usage } = await planner.generatePlan(makeTask(), toolSchemas, {}, {});
+    expect(usage).toBeDefined();
+    expect(usage!.total_tokens).toBe(300);
+    expect(usage!.input_tokens).toBe(200);
+  });
+
+  it("retry prompt includes CRITICAL format instruction", async () => {
+    const capturedPrompts: string[] = [];
+    let callCount = 0;
+    const callModel = async (_sys: string, user: string) => {
+      callCount++;
+      capturedPrompts.push(user);
+      if (callCount === 1) {
+        return { text: JSON.stringify({ plan_id: uuid(), goal: "Test" }) };
+      }
+      return { text: JSON.stringify(validPlan) };
+    };
+    const planner = new LLMPlanner(callModel);
+    await planner.generatePlan(makeTask(), toolSchemas, {}, {});
+    expect(capturedPrompts).toHaveLength(2);
+    expect(capturedPrompts[1]).toContain("CRITICAL");
+    expect(capturedPrompts[1]).toContain("\"steps\"");
+  });
+});

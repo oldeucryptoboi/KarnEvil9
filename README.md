@@ -321,6 +321,9 @@ Deep dives, experiment writeups, and development notes are published on the [old
 - [Intelligent AI Delegation: From Theory to Working Code](https://oldeucryptoboi.substack.com/p/intelligent-ai-delegation-from-theory-to-working-code) — Reference implementation of the Tomasev et al. (2026) framework
 - [The Three Laws of Safe AI Agents](https://oldeucryptoboi.substack.com/p/the-three-laws-of-safe-ai-agents) — How KarnEvil9 implements Asimov's framework as runtime-enforced guardrails
 - [The Safety System That Wouldn't Let My AI Win at Zork](https://oldeucryptoboi.substack.com/p/the-safety-system-that-wouldnt-let) — What happens when delegation governance meets a text adventure
+- [When Eddie, My AI Agent, Ran Out of Credits and Invented Its Own Cost-Cutting Strategy](https://oldeucryptoboi.substack.com/p/when-eddie-my-ai-agent-ran-out-of) — How KarnEvil9's futility monitor turned an API credit crisis into autonomous cost optimization
+- [From Self-Play to Safety: The Six-Year Arc Between Two DeepMind Papers](https://oldeucryptoboi.substack.com/p/from-self-play-to-safety-the-six) — How "Imitating Interactive Intelligence" (2020) connects to "Intelligent AI Delegation" (2026)
+- [Anthropic Just Validated What KarnEvil9 Has Been Building](https://oldeucryptoboi.substack.com/p/anthropic-just-validated-what-karnevil9) — Agent Skills vs KarnEvil9: capability packaging vs execution governance
 
 ## License
 

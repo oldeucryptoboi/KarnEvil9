@@ -888,12 +888,14 @@ export class ApiServer {
       });
     }
 
-    router.get("/sessions", (_req, res) => {
-      const sessions = [];
+    router.get("/sessions", async (_req, res) => {
+      const sessionMap = new Map<string, Record<string, unknown>>();
+
+      // Active in-memory sessions (authoritative)
       for (const [, kernel] of this.kernels) {
         const s = kernel.getSession();
         if (s) {
-          sessions.push({
+          sessionMap.set(s.session_id, {
             session_id: s.session_id,
             status: s.status,
             created_at: s.created_at,
@@ -903,7 +905,33 @@ export class ApiServer {
           });
         }
       }
-      res.json({ sessions });
+
+      // Historical sessions from journal (fill in what's not in memory)
+      for (const sid of this.journal.getKnownSessionIds()) {
+        if (sessionMap.has(sid)) continue;
+        const events = await this.journal.readSession(sid, { limit: 1 });
+        if (events.length === 0) continue;
+        const first = events[0]!;
+        const allEvents = await this.journal.readSession(sid);
+        const createdEvt = allEvents.find((e) => e.type === "session.created");
+        const terminalEvt = [...allEvents].reverse().find((e) =>
+          e.type === "session.completed" || e.type === "session.failed" || e.type === "session.aborted"
+        );
+        const statusMap: Record<string, string> = {
+          "session.completed": "completed",
+          "session.failed": "failed",
+          "session.aborted": "aborted",
+        };
+        sessionMap.set(sid, {
+          session_id: sid,
+          status: terminalEvt ? (statusMap[terminalEvt.type] ?? "unknown") : "unknown",
+          created_at: first.timestamp,
+          task_text: (createdEvt?.payload?.task_text as string) ?? (createdEvt?.payload?.task as string) ?? undefined,
+          mode: (createdEvt?.payload?.mode as string) ?? undefined,
+        });
+      }
+
+      res.json({ sessions: [...sessionMap.values()] });
     });
 
     router.post("/sessions", async (req, res) => {

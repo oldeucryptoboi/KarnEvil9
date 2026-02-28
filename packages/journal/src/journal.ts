@@ -327,6 +327,10 @@ export class Journal {
     return (this.sessionIndex.get(sessionId) ?? []).length;
   }
 
+  getKnownSessionIds(): string[] {
+    return [...this.sessionIndex.keys()];
+  }
+
   async compact(retainSessionIds?: string[]): Promise<{ before: number; after: number }> {
     let releaseLock: () => void;
     const acquired = new Promise<void>((resolve) => { releaseLock = resolve; });

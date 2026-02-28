@@ -12,6 +12,7 @@
     "lint": "biome lint src"
   },
   "dependencies": {
+    "@homebridge/ciao": "^1.3.5",
     "@karnevil9/journal": "workspace:*",
     "@karnevil9/kernel": "workspace:*",
     "@karnevil9/metrics": "workspace:*",
@@ -22,7 +23,6 @@
     "@karnevil9/swarm": "workspace:*",
     "@karnevil9/tools": "workspace:*",
     "@karnevil9/vault": "workspace:*",
-    "bonjour-service": "^1.3.0",
     "express": "^5.0.0",
     "uuid": "^11.0.0",
     "ws": "^8.0.0"

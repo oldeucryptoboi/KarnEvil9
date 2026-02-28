@@ -17,7 +17,7 @@ import type { ServerResponse, Server, IncomingMessage } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { parse as parseUrl } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
-import { Bonjour, type Service } from "bonjour-service";
+import ciao, { type CiaoService, type Responder } from "@homebridge/ciao";
 
 // ─── Constants ────────────────────────────────────────────────────
 const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
@@ -320,8 +320,8 @@ export class ApiServer {
   private wss?: WebSocketServer;
   private wsClients = new Set<WSClient>();
   private serviceName?: string;
-  private bonjourInstance?: Bonjour;
-  private bonjourService?: Service;
+  private ciaoResponder?: Responder;
+  private ciaoService?: CiaoService;
 
   constructor(config: ApiServerConfig);
   constructor(toolRegistry: ToolRegistry, journal: Journal);
@@ -517,19 +517,17 @@ export class ApiServer {
   private publishBonjour(port: number): void {
     const name = this.serviceName || require("node:os").hostname() as string;
     try {
-      const bonjour = new Bonjour();
-      this.bonjourInstance = bonjour;
-      const service = bonjour.publish({
+      const responder = ciao.getResponder();
+      this.ciaoResponder = responder;
+      const service = responder.createService({
         name,
         type: "karnevil9",
-        protocol: "tcp",
         port,
       });
-      this.bonjourService = service;
-      service.on("up", () => {
+      this.ciaoService = service;
+      service.advertise().then(() => {
         console.log(`Bonjour: advertising "${name}" as _karnevil9._tcp on port ${port}`);
-      });
-      service.on("error", (err: Error) => {
+      }).catch((err: Error) => {
         console.warn(`Bonjour: advertisement error — ${err.message}`);
       });
     } catch (err) {
@@ -572,8 +570,8 @@ export class ApiServer {
     // Wait for pending journal writes to flush
     await this.journal.close();
     // Unpublish Bonjour service
-    this.bonjourService?.stop?.();
-    if (this.bonjourInstance) this.bonjourInstance.destroy();
+    if (this.ciaoService) await this.ciaoService.end();
+    if (this.ciaoResponder) this.ciaoResponder.shutdown();
     // Close HTTP server
     if (this.httpServer) {
       await new Promise<void>((resolve) => this.httpServer!.close(() => resolve()));

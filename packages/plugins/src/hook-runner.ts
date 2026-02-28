@@ -12,6 +12,7 @@ const BLOCKABLE_HOOKS: Set<HookName> = new Set([
   "before_session_start", "before_plan", "before_step", "before_tool_call",
 ]);
 const MAX_HOOK_DATA_SIZE = 64 * 1024; // 64KB max for hook data
+const DISALLOWED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function validateHookResult(result: unknown, hookName: HookName, pluginId: string): HookResult {
   if (!result || typeof result !== "object") {
@@ -33,7 +34,12 @@ function validateHookResult(result: unknown, hookName: HookName, pluginId: strin
       throw new Error(`Plugin "${pluginId}" hook "${hookName}" data exceeds ${MAX_HOOK_DATA_SIZE} bytes`);
     }
     // Deep clone to prevent reference sharing between plugins
-    r.data = JSON.parse(serialized);
+    const cloned = JSON.parse(serialized) as Record<string, unknown>;
+    // Strip prototype pollution keys
+    for (const key of DISALLOWED_KEYS) {
+      if (key in cloned) delete cloned[key];
+    }
+    r.data = cloned;
   }
   return result as HookResult;
 }

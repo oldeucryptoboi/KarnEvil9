@@ -14,6 +14,8 @@ import type {
   PluginService,
 } from "@karnevil9/schemas";
 
+const ALLOWED_HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+
 export class PluginApiImpl implements PluginApi {
   readonly id: string;
   readonly config: Readonly<Record<string, unknown>>;
@@ -62,6 +64,12 @@ export class PluginApiImpl implements PluginApi {
   }
 
   registerRoute(method: string, path: string, handler: RouteHandler): void {
+    const upperMethod = method.toUpperCase();
+    if (!ALLOWED_HTTP_METHODS.has(upperMethod)) {
+      throw new Error(
+        `Plugin "${this.id}" tried to register route with invalid HTTP method "${method}"`
+      );
+    }
     const declaredRoutes = this.manifest.provides.routes ?? [];
     const routeName = path.replace(/^\//, "");
     if (!declaredRoutes.includes(routeName) && !declaredRoutes.includes(path)) {
@@ -94,7 +102,7 @@ export class PluginApiImpl implements PluginApi {
         clearTimeout(timer!);
       }
     };
-    this._routes.push({ method: method.toUpperCase(), path, handler: wrappedHandler });
+    this._routes.push({ method: upperMethod, path, handler: wrappedHandler });
   }
 
   registerCommand(name: string, opts: CommandOptions): void {

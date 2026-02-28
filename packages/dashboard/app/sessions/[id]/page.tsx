@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getSession, getJournal, abortSession, type SessionDetail, type JournalEvent } from "@/lib/api";
@@ -17,8 +17,17 @@ export default function SessionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [showRawJournal, setShowRawJournal] = useState(false);
   const [eventTypeFilter, setEventTypeFilter] = useState<string>("all");
+  const [copied, setCopied] = useState(false);
   const { events, connected } = useWebSocket(id);
   const stepsEndRef = useRef<HTMLDivElement>(null);
+
+  const copySessionId = useCallback(() => {
+    if (!id) return;
+    navigator.clipboard.writeText(id).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
@@ -147,6 +156,13 @@ export default function SessionDetailPage() {
         <Link href="/" className="text-[var(--muted)] hover:text-[var(--foreground)] text-sm">&larr; Sessions</Link>
         <span className="text-[var(--muted)]">/</span>
         <span className="font-mono text-sm">{id?.slice(0, 8)}...</span>
+        <button
+          onClick={copySessionId}
+          className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-0.5 transition-colors"
+          title="Copy full session ID"
+        >
+          {copied ? "Copied!" : "Copy ID"}
+        </button>
         <div className="ml-auto flex items-center gap-3">
           <span className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} title={connected ? "Live" : "Disconnected"} />
           {session && (session.status === "running" || session.status === "planning") && (
@@ -217,14 +233,44 @@ export default function SessionDetailPage() {
       {/* Task Text */}
       {session && (session.task_text ?? session.task?.text) && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 mb-4">
-          <p className="text-xs text-[var(--muted)] mb-1">Task</p>
-          <p className="text-sm">{session.task_text ?? session.task?.text}</p>
+          <div className="flex items-start gap-3">
+            <span className="text-lg mt-0.5" aria-hidden="true">{"\u{1F4CB}"}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-[var(--muted)] mb-1 uppercase tracking-wider font-semibold">Task</p>
+              <p className="text-base leading-relaxed">{session.task_text ?? session.task?.text}</p>
+            </div>
+          </div>
         </div>
       )}
 
+      {/* Error Details */}
+      {session?.status === "failed" && (() => {
+        const failedEvt = [...allEvents].reverse().find((e) => e.type === "session.failed");
+        const errorMsg = (failedEvt?.payload?.error as string)
+          ?? (failedEvt?.payload?.message as string)
+          ?? (failedEvt?.payload?.reason as string);
+        if (!errorMsg) return null;
+        return (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 mb-4">
+            <div className="flex items-start gap-3">
+              <span className="text-lg mt-0.5 flex-shrink-0" aria-hidden="true">{"\u26A0"}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-red-400 mb-1 uppercase tracking-wider font-semibold">Failure Reason</p>
+                <p className="text-sm text-red-300">{errorMsg}</p>
+                {typeof failedEvt?.payload?.code === "string" && (
+                  <p className="text-xs font-mono text-red-400/70 mt-1">
+                    Code: {failedEvt.payload.code}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Plan Viewer */}
       <div className="mb-4">
-        <PlanViewer plan={plan} />
+        <PlanViewer plan={plan} events={allEvents} />
       </div>
 
       {/* Step Timeline */}

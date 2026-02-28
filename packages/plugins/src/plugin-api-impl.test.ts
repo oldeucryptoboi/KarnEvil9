@@ -1,7 +1,39 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { PluginManifest, ToolManifest } from "@karnevil9/schemas";
 import { PluginApiImpl } from "./plugin-api-impl.js";
 import { PluginLoggerImpl } from "./plugin-logger.js";
+
+describe("PluginLoggerImpl — log injection prevention", () => {
+  it("sanitizes control characters and newlines from plugin ID", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const logger = new PluginLoggerImpl("evil\nplugin\rid\x00");
+      logger.info("test message");
+      expect(spy).toHaveBeenCalledTimes(1);
+      const loggedPrefix = spy.mock.calls[0]![0] as string;
+      expect(loggedPrefix).not.toContain("\n");
+      expect(loggedPrefix).not.toContain("\r");
+      expect(loggedPrefix).not.toContain("\x00");
+      expect(loggedPrefix).toContain("[plugin:evil_plugin_id_]");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("truncates excessively long plugin IDs", () => {
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const longId = "a".repeat(300);
+      const logger = new PluginLoggerImpl(longId);
+      logger.warn("test");
+      const loggedPrefix = spy.mock.calls[0]![0] as string;
+      // prefix = "[plugin:" + id + "]", id should be truncated to 128
+      expect(loggedPrefix.length).toBeLessThan(150);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
 
 describe("PluginApiImpl", () => {
   function makeManifest(provides?: PluginManifest["provides"]): PluginManifest {
@@ -148,5 +180,33 @@ describe("PluginApiImpl", () => {
 
     expect(api.config.key).toBe("value");
     expect(() => { (api.config as any).key = "other"; }).toThrow();
+  });
+
+  it("rejects invalid HTTP method in registerRoute", () => {
+    const manifest = makeManifest({ routes: ["status"] });
+    const api = new PluginApiImpl(manifest, {}, new PluginLoggerImpl("test-plugin"));
+
+    expect(() => {
+      api.registerRoute("PROPFIND", "status", async () => {});
+    }).toThrow("invalid HTTP method");
+
+    expect(() => {
+      api.registerRoute("CONNECT", "status", async () => {});
+    }).toThrow("invalid HTTP method");
+  });
+
+  it("accepts valid HTTP methods in registerRoute", () => {
+    const manifest = makeManifest({ routes: ["status", "data", "item", "partial", "resource", "info", "cors"] });
+    const api = new PluginApiImpl(manifest, {}, new PluginLoggerImpl("test-plugin"));
+
+    // All standard methods should work
+    api.registerRoute("GET", "status", async () => {});
+    api.registerRoute("POST", "data", async () => {});
+    api.registerRoute("PUT", "item", async () => {});
+    api.registerRoute("PATCH", "partial", async () => {});
+    api.registerRoute("DELETE", "resource", async () => {});
+    api.registerRoute("head", "info", async () => {}); // lowercase should also work
+    api.registerRoute("options", "cors", async () => {});
+    expect(api._routes).toHaveLength(7);
   });
 });

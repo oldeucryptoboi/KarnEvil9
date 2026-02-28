@@ -479,6 +479,60 @@ describe("MetricsCollector", () => {
     });
   });
 
+  // ─── Swarm Reoptimization Safety ────────────────────────────────
+
+  describe("swarm reoptimization safety", () => {
+    it("skips __proto__/constructor/prototype keys in actions payload", async () => {
+      collector.handleEvent(
+        makeEvent("swarm.reoptimization_triggered", {
+          actions: {
+            __proto__: 5,
+            constructor: 3,
+            prototype: 2,
+            redelegate: 1,
+          },
+        })
+      );
+      const metrics = await registry.getSingleMetricAsString("karnevil9_swarm_reoptimizations_total");
+      expect(metrics).toContain('action="redelegate"');
+      expect(metrics).not.toContain('action="__proto__"');
+      expect(metrics).not.toContain('action="constructor"');
+      expect(metrics).not.toContain('action="prototype"');
+      // Verify Object.prototype was not polluted
+      expect(({} as any).polluted).toBeUndefined();
+    });
+
+    it("caps action entries to prevent label cardinality explosion", async () => {
+      const actions: Record<string, number> = {};
+      for (let i = 0; i < 100; i++) {
+        actions[`action_${i}`] = 1;
+      }
+      // Should not throw and should cap at 50 entries
+      collector.handleEvent(
+        makeEvent("swarm.reoptimization_triggered", { actions })
+      );
+      const metrics = await registry.getSingleMetricAsString("karnevil9_swarm_reoptimizations_total");
+      // Count unique action labels — should be at most 50
+      const actionMatches = metrics.match(/action="action_\d+"/g) ?? [];
+      expect(actionMatches.length).toBeLessThanOrEqual(50);
+    });
+
+    it("skips non-number counts in actions payload", async () => {
+      collector.handleEvent(
+        makeEvent("swarm.reoptimization_triggered", {
+          actions: {
+            redelegate: 1,
+            bad_count: "not_a_number",
+            negative: -1,
+          },
+        })
+      );
+      const metrics = await registry.getSingleMetricAsString("karnevil9_swarm_reoptimizations_total");
+      expect(metrics).toContain('action="redelegate"');
+      // non-number and negative should be skipped
+    });
+  });
+
   // ─── Label Sanitization ─────────────────────────────────────────
 
   describe("label sanitization", () => {

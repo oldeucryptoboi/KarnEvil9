@@ -855,9 +855,14 @@ export class MetricsCollector {
 
       case "swarm.reoptimization_triggered": {
         const actions = event.payload.actions as Record<string, number> | undefined;
-        if (actions) {
+        if (actions && typeof actions === "object") {
+          let entryCount = 0;
           for (const [action, count] of Object.entries(actions)) {
-            if (count > 0) this.swarmReoptimizationsTotal.inc({ action: sanitizeLabel(action) }, count);
+            if (entryCount++ >= 50) break; // Cap iteration to prevent label explosion
+            if (action === "__proto__" || action === "constructor" || action === "prototype") continue;
+            if (typeof count === "number" && count > 0) {
+              this.swarmReoptimizationsTotal.inc({ action: sanitizeLabel(action) }, count);
+            }
           }
         }
         break;

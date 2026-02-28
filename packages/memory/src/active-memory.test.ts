@@ -553,3 +553,65 @@ describe("extractLesson", () => {
     expect(lesson!.task_summary).not.toContain("-----BEGIN PRIVATE KEY-----");
   });
 });
+
+describe("ActiveMemory — search input caps (CPU DoS prevention)", () => {
+  it("caps input length to 2000 chars and handles gracefully", async () => {
+    const mem = new ActiveMemory(TEST_FILE);
+    await mem.load();
+    mem.addLesson(makeLesson({ task_summary: "Read configuration data from server" }));
+
+    // Build a massive input string with a matching word buried in it
+    const hugeInput = "configuration ".repeat(500); // 7000+ chars
+    const results = mem.search(hugeInput);
+    // Should still work and not hang — the matching word is within the first 2000 chars
+    expect(results.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("caps word count to 50 to prevent excessive iteration", async () => {
+    const mem = new ActiveMemory(TEST_FILE);
+    await mem.load();
+    mem.addLesson(makeLesson({ task_summary: "needle haystack" }));
+
+    // 100 unique 5-char words + the needle at the end
+    const words = Array.from({ length: 100 }, (_, i) => `word${String(i).padStart(3, "0")}`);
+    words.push("needle");
+    const input = words.join(" ");
+    // Should complete without hanging — at most 50 words checked
+    const results = mem.search(input);
+    // "needle" is at position 101 so after cap of 50 words, it won't be found
+    // This verifies the cap is enforced
+    expect(results.length).toBe(0);
+  });
+});
+
+describe("ActiveMemory — load caps lines from disk", () => {
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    await mkdir(TEST_DIR, { recursive: true });
+  });
+
+  afterEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("caps loaded lessons at 2x MAX_LESSONS (200)", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    // Write 300 valid lesson lines
+    const lines: string[] = [];
+    for (let i = 0; i < 300; i++) {
+      lines.push(JSON.stringify({
+        lesson_id: `l${i}`, task_summary: `Task ${i}`, outcome: "succeeded",
+        lesson: `Did task ${i}`, tool_names: ["read-file"],
+        created_at: new Date().toISOString(), session_id: `s${i}`, relevance_count: 1,
+      }));
+    }
+    await writeFile(TEST_FILE, lines.join("\n") + "\n", "utf-8");
+
+    const mem = new ActiveMemory(TEST_FILE);
+    await mem.load();
+    // Should load at most 200 (2 * MAX_LESSONS=100) from the 300 on disk
+    expect(mem.getLessons().length).toBeLessThanOrEqual(200);
+    // Verify it didn't load all 300
+    expect(mem.getLessons().length).toBeLessThan(300);
+  });
+});

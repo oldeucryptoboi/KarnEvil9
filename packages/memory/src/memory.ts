@@ -87,13 +87,21 @@ export class TaskStateManager {
 }
 
 export class WorkingMemoryManager {
+  static readonly MAX_ENTRIES = 10_000;
+
   private memory: WorkingMemory;
 
   constructor(sessionId: string) {
     this.memory = { session_id: sessionId, entries: new Map() };
   }
 
-  set(key: string, value: unknown): void { this.memory.entries.set(key, value); }
+  set(key: string, value: unknown): void {
+    if (this.memory.entries.size >= WorkingMemoryManager.MAX_ENTRIES && !this.memory.entries.has(key)) {
+      const oldest = this.memory.entries.keys().next().value;
+      if (oldest !== undefined) this.memory.entries.delete(oldest);
+    }
+    this.memory.entries.set(key, value);
+  }
   get(key: string): unknown { return this.memory.entries.get(key); }
   has(key: string): boolean { return this.memory.entries.has(key); }
   delete(key: string): boolean { return this.memory.entries.delete(key); }
@@ -167,7 +175,10 @@ export class ActiveMemory {
       const content = await readFile(this.filePath, "utf-8");
       const lines = content.trim().split("\n").filter(l => l.length > 0);
       this.lessons = [];
+      // Cap loaded lines to 2x MAX_LESSONS to prevent memory exhaustion from huge files
+      const maxLoad = MAX_LESSONS * 2;
       for (const line of lines) {
+        if (this.lessons.length >= maxLoad) break;
         try {
           this.lessons.push(JSON.parse(line) as MemoryLesson);
         } catch {
@@ -219,8 +230,9 @@ export class ActiveMemory {
   }
 
   search(taskText: string, toolNames?: string[]): MemoryLesson[] {
-    const lower = taskText.toLowerCase();
-    const words = lower.split(/\s+/).filter(w => w.length > 3);
+    // Cap input length and word count to prevent CPU DoS from massive inputs
+    const lower = taskText.slice(0, 2000).toLowerCase();
+    const words = lower.split(/\s+/).filter(w => w.length > 3).slice(0, 50);
 
     const scored = this.lessons.map(lesson => {
       let score = 0;

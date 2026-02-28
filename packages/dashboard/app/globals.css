@@ -17,3 +17,8 @@ body {
   color: var(--foreground);
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+/* Custom left-border width for step cards */
+.border-l-3 {
+  border-left-width: 3px;
+}

@@ -72,10 +72,37 @@ export function StepTimeline({ events }: { events: JournalEvent[] }) {
     );
   }
 
+  const succeeded = steps.filter((s) => s.status === "succeeded").length;
+  const failed = steps.filter((s) => s.status === "failed").length;
+  const running = steps.filter((s) => s.status === "running").length;
+
   return (
     <div className="space-y-2">
-      {steps.map((step) => (
-        <StepCard key={step.step_id} step={step} />
+      {/* Summary bar */}
+      <div className="flex items-center gap-3 text-xs text-[var(--muted)] mb-1">
+        <span>{steps.length} step{steps.length !== 1 ? "s" : ""}</span>
+        {succeeded > 0 && <span className="text-green-400">{succeeded} succeeded</span>}
+        {failed > 0 && <span className="text-red-400">{failed} failed</span>}
+        {running > 0 && <span className="text-yellow-400">{running} running</span>}
+      </div>
+
+      {/* Progress bar */}
+      {steps.length > 0 && (
+        <div className="flex h-1.5 rounded-full overflow-hidden bg-[var(--border)]">
+          {succeeded > 0 && (
+            <div className="bg-green-500 transition-all duration-500" style={{ width: `${(succeeded / steps.length) * 100}%` }} />
+          )}
+          {failed > 0 && (
+            <div className="bg-red-500 transition-all duration-500" style={{ width: `${(failed / steps.length) * 100}%` }} />
+          )}
+          {running > 0 && (
+            <div className="bg-yellow-500 animate-pulse transition-all duration-500" style={{ width: `${(running / steps.length) * 100}%` }} />
+          )}
+        </div>
+      )}
+
+      {steps.map((step, i) => (
+        <StepCard key={step.step_id} step={step} index={i} />
       ))}
     </div>
   );

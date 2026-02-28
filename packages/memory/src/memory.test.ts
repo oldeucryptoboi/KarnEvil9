@@ -281,3 +281,32 @@ describe("LongTermMemory", () => {
     expect(ltm.search("nonexistent")).toHaveLength(0);
   });
 });
+
+describe("WorkingMemoryManager — bounded entries", () => {
+  it("evicts oldest entry when at capacity", () => {
+    const wm = new WorkingMemoryManager("sess-evict");
+    const max = WorkingMemoryManager.MAX_ENTRIES;
+    for (let i = 0; i < max; i++) {
+      wm.set(`key-${i}`, i);
+    }
+    expect(wm.list()).toHaveLength(max);
+
+    // Adding one more should evict the oldest (key-0)
+    wm.set("key-overflow", "new");
+    expect(wm.list()).toHaveLength(max);
+    expect(wm.has("key-0")).toBe(false);
+    expect(wm.get("key-overflow")).toBe("new");
+  });
+
+  it("updating existing key does not trigger eviction", () => {
+    const wm = new WorkingMemoryManager("sess-update");
+    const max = WorkingMemoryManager.MAX_ENTRIES;
+    for (let i = 0; i < max; i++) {
+      wm.set(`key-${i}`, i);
+    }
+    // Update existing key — should not evict
+    wm.set("key-0", "updated");
+    expect(wm.list()).toHaveLength(max);
+    expect(wm.get("key-0")).toBe("updated");
+  });
+});

@@ -220,4 +220,51 @@ describe("HookRunner", () => {
     result = await runner.run("before_step", ctx);
     expect(result.action).toBe("continue");
   });
+
+  it("strips constructor and prototype keys from hook data", async () => {
+    // A plugin could return data with dangerous keys that survive JSON roundtrip
+    runner.register({
+      plugin_id: "polluter", hook: "before_step",
+      handler: async () => ({
+        action: "modify",
+        data: {
+          "constructor": { polluted: true },
+          "prototype": { polluted: true },
+          "safe_key": "safe_value",
+        },
+      }),
+      priority: 100, timeout_ms: 5000,
+    });
+
+    const result = await runner.run("before_step", ctx);
+    expect(result.action).toBe("modify");
+    const data = (result as { data: Record<string, unknown> }).data;
+    expect(data.safe_key).toBe("safe_value");
+    // Dangerous keys should be stripped
+    expect(Object.hasOwn(data, "constructor")).toBe(false);
+    expect(Object.hasOwn(data, "prototype")).toBe(false);
+    // Verify global Object.prototype was not polluted
+    expect(({} as any).polluted).toBeUndefined();
+  });
+
+  it("strips __proto__ key when present as own property via JSON.parse", async () => {
+    // Simulate a plugin that constructs its response via JSON.parse (where __proto__ becomes an own property)
+    const maliciousData = JSON.parse('{"__proto__":{"polluted":true},"safe_key":"ok"}');
+    runner.register({
+      plugin_id: "json-polluter", hook: "before_step",
+      handler: async () => ({
+        action: "modify",
+        data: maliciousData,
+      }),
+      priority: 100, timeout_ms: 5000,
+    });
+
+    const result = await runner.run("before_step", ctx);
+    expect(result.action).toBe("modify");
+    const data = (result as { data: Record<string, unknown> }).data;
+    expect(data.safe_key).toBe("ok");
+    // __proto__ should be stripped to prevent prototype pollution when spread into mergedData
+    expect(Object.hasOwn(data, "__proto__")).toBe(false);
+    expect(({} as any).polluted).toBeUndefined();
+  });
 });

@@ -399,7 +399,7 @@ export class ApiServer {
         const origin = req.headers.origin;
         const allowed = typeof origins === "string"
           ? origins === "*" || origin === origins
-          : origin !== undefined && origins.includes(origin);
+          : origin !== undefined && (origins.includes("*") || origins.includes(origin));
         if (allowed && origin) {
           res.setHeader("Access-Control-Allow-Origin", origin);
           res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");

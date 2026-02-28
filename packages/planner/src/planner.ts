@@ -450,6 +450,7 @@ export class LLMPlanner implements Planner {
       throw new Error(`Planner response too large: ${raw.length} characters (max ${MAX_RESPONSE_SIZE})`);
     }
     let jsonStr = raw.trim();
+    // Strip leading/trailing markdown fences
     if (jsonStr.startsWith("```")) {
       jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
     }
@@ -457,7 +458,28 @@ export class LLMPlanner implements Planner {
     try {
       plan = JSON.parse(jsonStr) as Plan;
     } catch {
-      throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}...`);
+      // Try extracting JSON from within prose/markdown (model may wrap JSON in commentary)
+      const fenceMatch = raw.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/);
+      if (fenceMatch) {
+        try {
+          plan = JSON.parse(fenceMatch[1]!) as Plan;
+        } catch {
+          throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}...`);
+        }
+      } else {
+        // Try finding a JSON object anywhere in the response
+        const braceStart = raw.indexOf("{");
+        const braceEnd = raw.lastIndexOf("}");
+        if (braceStart >= 0 && braceEnd > braceStart) {
+          try {
+            plan = JSON.parse(raw.slice(braceStart, braceEnd + 1)) as Plan;
+          } catch {
+            throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}...`);
+          }
+        } else {
+          throw new Error(`Planner returned invalid JSON: ${jsonStr.slice(0, 200)}...`);
+        }
+      }
     }
     // Unwrap nested plan if model wrapped it in an extra object (e.g. { plan: { ... } })
     const planAny = plan as unknown as Record<string, unknown>;

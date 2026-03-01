@@ -153,7 +153,7 @@ export const getSession = (id: string) => apiFetch<SessionDetail>(`/api/sessions
 export const createSession = (task: string, mode = "mock") =>
   apiFetch<{ session_id: string; status: string }>("/api/sessions", {
     method: "POST",
-    body: JSON.stringify({ task, mode }),
+    body: JSON.stringify({ text: task, mode }),
   });
 export const abortSession = (id: string) =>
   apiFetch<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}/abort`, { method: "POST" });

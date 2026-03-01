@@ -93,6 +93,7 @@ export default function SessionsPage() {
           <h2 className="text-xl font-semibold">Sessions</h2>
           <button
             onClick={handleOpenNew}
+            data-testid="new-session-btn"
             className="bg-[var(--accent)] text-white rounded px-3 py-1.5 text-sm hover:opacity-90"
           >
             New Session
@@ -100,6 +101,7 @@ export default function SessionsPage() {
           <button
             onClick={handleImportClick}
             disabled={importing}
+            data-testid="import-btn"
             className="rounded bg-[var(--accent)]/10 px-3 py-1.5 text-sm text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
           >
             <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -198,7 +200,7 @@ export default function SessionsPage() {
             {sessions.map((s) => {
               const isSelected = compareSelection.has(s.session_id);
               return (
-                <tr key={s.session_id} className={`hover:bg-white/[0.02] transition-colors ${isSelected ? "bg-purple-500/[0.04]" : ""}`}>
+                <tr key={s.session_id} data-testid="session-row" className={`hover:bg-white/[0.02] transition-colors ${isSelected ? "bg-purple-500/[0.04]" : ""}`}>
                   <td className="p-3 text-center">
                     <button
                       onClick={() => toggleCompare(s.session_id)}

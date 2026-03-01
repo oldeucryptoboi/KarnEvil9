@@ -199,6 +199,7 @@ export default function SchedulesPage() {
         </div>
         <button
           onClick={handleCreate}
+          data-testid="new-schedule-btn"
           className="bg-[var(--accent)] text-white rounded px-4 py-2 text-sm hover:opacity-90 transition-opacity flex items-center gap-2"
         >
           <span className="text-lg leading-none">+</span>

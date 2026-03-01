@@ -323,6 +323,28 @@ describe("ExternalTriggerHandler", () => {
       expect(listener).not.toHaveBeenCalled();
     });
 
+    it("should cap listeners per type at 100 with FIFO eviction", async () => {
+      const listeners: Array<ReturnType<typeof vi.fn>> = [];
+      for (let i = 0; i < 101; i++) {
+        const listener = vi.fn();
+        listeners.push(listener);
+        handler.on("task_cancel", listener);
+      }
+
+      await handler.dispatch({
+        type: "task_cancel",
+        task_id: "task-1",
+        timestamp: new Date().toISOString(),
+      });
+
+      // The first listener (index 0) should have been evicted
+      expect(listeners[0]!).not.toHaveBeenCalled();
+      // The second listener (index 1) should still be registered
+      expect(listeners[1]!).toHaveBeenCalled();
+      // The last listener (index 100) should be registered
+      expect(listeners[100]!).toHaveBeenCalled();
+    });
+
     it("should support multiple listeners", async () => {
       const listener1 = vi.fn();
       const listener2 = vi.fn();

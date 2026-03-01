@@ -14,6 +14,7 @@ interface TrackedDelegation {
 export class RedelegationMonitor {
   private config: RedelegationConfig;
   private delegations = new Map<string, TrackedDelegation>();
+  private static readonly MAX_TRACKED_DELEGATIONS = 10_000;
 
   constructor(config?: Partial<RedelegationConfig>) {
     this.config = {
@@ -29,6 +30,11 @@ export class RedelegationMonitor {
     sessionId: string,
     constraints?: SwarmTaskConstraints,
   ): void {
+    // Cap tracked delegations to prevent unbounded memory growth
+    if (this.delegations.size >= RedelegationMonitor.MAX_TRACKED_DELEGATIONS && !this.delegations.has(taskId)) {
+      const firstKey = this.delegations.keys().next().value;
+      if (firstKey !== undefined) this.delegations.delete(firstKey);
+    }
     this.delegations.set(taskId, {
       task_id: taskId,
       peer_node_id: peerNodeId,

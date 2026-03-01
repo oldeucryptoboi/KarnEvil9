@@ -164,6 +164,12 @@ export default function SessionDetailPage() {
           {copied ? "Copied!" : "Copy ID"}
         </button>
         <div className="ml-auto flex items-center gap-3">
+          <Link
+            href={`/sessions/${id}/replay`}
+            className="rounded bg-[var(--accent)]/10 px-3 py-1 text-xs text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors"
+          >
+            Replay
+          </Link>
           <span className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} title={connected ? "Live" : "Disconnected"} />
           {session && (session.status === "running" || session.status === "planning") && (
             <button onClick={handleAbort} className="rounded bg-red-500/10 px-3 py-1 text-xs text-red-400 hover:bg-red-500/20">

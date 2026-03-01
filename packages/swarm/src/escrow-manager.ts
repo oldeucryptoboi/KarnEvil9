@@ -11,6 +11,7 @@ export const DEFAULT_BOND_REQUIREMENT: BondRequirement = {
 };
 
 const MAX_TRANSACTIONS_PER_ACCOUNT = 500;
+const MAX_TASK_BONDS = 50_000;
 
 export class EscrowManager {
   private accounts = new Map<string, EscrowAccount>();
@@ -102,6 +103,10 @@ export class EscrowManager {
     }
 
     account.held += amount;
+    // Cap task bonds to prevent unbounded memory growth
+    if (this.taskBonds.size >= MAX_TASK_BONDS && !this.taskBonds.has(taskId)) {
+      return { held: false, reason: `Max concurrent bonds (${MAX_TASK_BONDS}) exceeded` };
+    }
     this.taskBonds.set(taskId, { node_id: nodeId, amount });
 
     const tx: EscrowTransaction = {

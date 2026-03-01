@@ -35,11 +35,18 @@ export class ExternalTriggerHandler {
     this.budgetAlertThreshold = config.budgetAlertThreshold ?? 0.8;
   }
 
+  private static readonly MAX_LISTENERS_PER_TYPE = 100;
+
   on(type: TriggerType, listener: TriggerListener): () => void {
     let set = this.listeners.get(type);
     if (!set) {
       set = new Set();
       this.listeners.set(type, set);
+    }
+    // Cap listeners per type to prevent unbounded memory growth
+    if (set.size >= ExternalTriggerHandler.MAX_LISTENERS_PER_TYPE) {
+      const firstListener = set.values().next().value;
+      if (firstListener !== undefined) set.delete(firstListener);
     }
     set.add(listener);
     return () => { set!.delete(listener); };

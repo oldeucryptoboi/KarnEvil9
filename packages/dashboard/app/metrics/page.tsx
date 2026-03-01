@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { getMetricsText } from "@/lib/api";
+import { getMetricsText, getCoverage } from "@/lib/api";
+import type { CoverageReport, CoverageMetric } from "@/lib/api";
 
 /* ── Prometheus text parser ─────────────────────────────────────────── */
 
@@ -561,6 +562,125 @@ function extractTokenBreakdown(
   return { input, output };
 }
 
+/* ── Coverage helpers ───────────────────────────────────────────────── */
+
+function coverageColor(pct: number): string {
+  if (pct >= 80) return "#22c55e";
+  if (pct >= 60) return "#eab308";
+  return "#ef4444";
+}
+
+function coverageTextColor(pct: number): string {
+  if (pct >= 80) return "text-green-400";
+  if (pct >= 60) return "text-yellow-400";
+  return "text-red-400";
+}
+
+function CoverageBar({ label, metric }: { label: string; metric: CoverageMetric }) {
+  const pct = metric.pct;
+  const color = coverageColor(pct);
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-xs text-[var(--muted)] font-mono w-24 text-right shrink-0">
+        {label}
+      </span>
+      <div className="flex-1 h-5 rounded bg-white/[0.04] overflow-hidden relative">
+        <div
+          className="h-full rounded transition-all duration-500 ease-out"
+          style={{
+            width: `${Math.max(pct, 1)}%`,
+            backgroundColor: color,
+            opacity: 0.7,
+          }}
+        />
+      </div>
+      <span className={`text-xs font-mono font-semibold w-14 text-right shrink-0 ${coverageTextColor(pct)}`}>
+        {pct.toFixed(1)}%
+      </span>
+      <span className="text-[10px] text-[var(--muted)] font-mono w-20 text-right shrink-0">
+        {metric.covered}/{metric.total}
+      </span>
+    </div>
+  );
+}
+
+function CoverageSection({ coverage }: { coverage: CoverageReport | null }) {
+  const [showPackages, setShowPackages] = useState(false);
+
+  if (!coverage) {
+    return (
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-6">
+        <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider mb-3">
+          Test Coverage
+        </h3>
+        <div className="text-center text-[var(--muted)] py-4">
+          <p className="mb-2">No coverage data available.</p>
+          <p className="text-xs">
+            Run <code className="bg-white/[0.06] px-1.5 py-0.5 rounded font-mono text-[var(--foreground)]">pnpm test:coverage</code> to generate a coverage report.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const packageNames = Object.keys(coverage.packages).sort();
+
+  return (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wider">
+          Test Coverage
+        </h3>
+        <span className="text-[10px] text-[var(--muted)]">
+          Generated {new Date(coverage.generated_at).toLocaleString()}
+        </span>
+      </div>
+
+      {/* Overall totals */}
+      <div className="space-y-2 mb-4">
+        <CoverageBar label="Statements" metric={coverage.total.statements} />
+        <CoverageBar label="Branches" metric={coverage.total.branches} />
+        <CoverageBar label="Functions" metric={coverage.total.functions} />
+        <CoverageBar label="Lines" metric={coverage.total.lines} />
+      </div>
+
+      {/* Per-package breakdown */}
+      {packageNames.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowPackages(!showPackages)}
+            className="text-xs text-[var(--accent)] hover:underline mb-3"
+          >
+            {showPackages ? "Hide" : "Show"} per-package breakdown ({packageNames.length} packages)
+          </button>
+
+          {showPackages && (
+            <div className="space-y-4 border-t border-[var(--border)] pt-3">
+              {packageNames.map((pkg) => {
+                const pkgData = coverage.packages[pkg]!;
+                return (
+                  <div key={pkg}>
+                    <div className="text-xs font-mono font-semibold text-[var(--foreground)] mb-1.5">
+                      @karnevil9/{pkg}
+                    </div>
+                    <div className="space-y-1 pl-2">
+                      <CoverageBar label="Stmts" metric={pkgData.statements} />
+                      <CoverageBar label="Branch" metric={pkgData.branches} />
+                      <CoverageBar label="Funcs" metric={pkgData.functions} />
+                      <CoverageBar label="Lines" metric={pkgData.lines} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Main page ──────────────────────────────────────────────────────── */
 
 export default function MetricsPage() {
@@ -568,6 +688,7 @@ export default function MetricsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [coverage, setCoverage] = useState<CoverageReport | null>(null);
 
   // Sparkline history buffers
   const activeSessionsHistory = useRef<number[]>([]);
@@ -576,6 +697,13 @@ export default function MetricsPage() {
   const sessionsHistory = useRef<number[]>([]);
   // Force re-render on history update
   const [historyTick, setHistoryTick] = useState(0);
+
+  // Fetch coverage data (once on mount, not polled)
+  useEffect(() => {
+    getCoverage()
+      .then(setCoverage)
+      .catch(() => setCoverage(null));
+  }, []);
 
   const fetchMetrics = useCallback(async () => {
     try {
@@ -804,6 +932,11 @@ export default function MetricsPage() {
       {grouped["other"] && grouped["other"].length > 0 && (
         <MetricGroup label="Other Metrics" metrics={grouped["other"]} />
       )}
+
+      {/* Test Coverage section */}
+      <div className="mb-6">
+        <CoverageSection coverage={coverage} />
+      </div>
 
       {parsed.length === 0 && !loading && !error && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-8 text-center text-[var(--muted)]">

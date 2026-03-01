@@ -171,6 +171,28 @@ describe("MonitoringStream", () => {
     expect(res2.getChunks().length).toBe(1);
   });
 
+  it("sanitizes SSE event_type to prevent SSE injection via newlines and control chars", () => {
+    const res = makeResponse();
+    stream.subscribe(res);
+    // Event type with injected newlines that attempt SSE protocol injection
+    const maliciousEvent = makeEvent({ event_type: "evil\r\ndata: injected\n\nevent: spoofed" as never });
+    stream.publish(maliciousEvent);
+    const chunks = res.getChunks();
+    const lastChunk = chunks[chunks.length - 1]!;
+    // The SSE event: line must NOT contain any raw newlines from the attacker,
+    // which would allow injecting extra SSE frames.
+    // The sanitized event type should be on one line (no \r\n injection).
+    const lines = lastChunk.split("\n");
+    const eventLine = lines.find(l => l.startsWith("event: "));
+    expect(eventLine).toBeDefined();
+    // The event line should be a single line with all control chars stripped
+    expect(eventLine).toBe("event: evildata: injectedevent: spoofed");
+    // Critically: there should be exactly one "event:" prefix in the chunk
+    // (not two, which would mean the attacker injected a second SSE event)
+    const eventLineCount = lines.filter(l => l.startsWith("event:")).length;
+    expect(eventLineCount).toBe(1);
+  });
+
   it("subscriber counter resets before overflow to prevent MAX_SAFE_INTEGER exhaustion", () => {
     // Import and manipulate the module-level counter is tricky, but we can
     // verify that after many subscribes/unsubscribes the system still works.

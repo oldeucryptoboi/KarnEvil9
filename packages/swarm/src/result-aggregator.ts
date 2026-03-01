@@ -14,6 +14,7 @@ export interface AggregationEntry {
 
 export class ResultAggregator {
   private pending = new Map<string, AggregationEntry>();
+  private static readonly MAX_PENDING_AGGREGATIONS = 1_000;
 
   /**
    * Create an aggregation that waits for `expectedCount` results.
@@ -25,6 +26,10 @@ export class ResultAggregator {
     expectedCount: number,
     timeoutMs: number,
   ): Promise<CheckpointFinding[]> {
+    // Reject if too many pending aggregations to prevent unbounded memory growth
+    if (this.pending.size >= ResultAggregator.MAX_PENDING_AGGREGATIONS && !this.pending.has(correlationId)) {
+      return Promise.reject(new Error(`Max pending aggregations (${ResultAggregator.MAX_PENDING_AGGREGATIONS}) exceeded`));
+    }
     return new Promise<CheckpointFinding[]>((resolve, reject) => {
       const timer = setTimeout(() => {
         const entry = this.pending.get(correlationId);

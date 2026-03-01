@@ -1,5 +1,11 @@
 import type { MonitoringEvent, MonitoringEventType, MonitoringLevel, LeveledMonitoringEvent } from "./types.js";
 
+/** Strip newlines and control characters from SSE field values to prevent SSE injection. */
+function sanitizeSSEField(value: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional sanitization of control chars
+  return value.replace(/[\r\n\x00-\x1f\x7f]/g, "");
+}
+
 export interface MonitoringStreamConfig {
   max_connections?: number;     // max concurrent SSE clients (default 10)
   heartbeat_interval_ms?: number; // SSE keepalive (default 15000)
@@ -88,7 +94,8 @@ export class MonitoringStream {
   publish(event: MonitoringEvent): void {
     for (const subscriber of this.subscribers.values()) {
       if (this.matchesFilter(event, subscriber.filter)) {
-        const sseData = `event: ${event.event_type}\ndata: ${JSON.stringify(event)}\n\n`;
+        const safeEventType = sanitizeSSEField(event.event_type);
+        const sseData = `event: ${safeEventType}\ndata: ${JSON.stringify(event)}\n\n`;
         try {
           subscriber.write(sseData);
         } catch {
@@ -110,7 +117,8 @@ export class MonitoringStream {
       }
 
       const filtered = filterEventForLevel(event, subscriber.filter?.level ?? "L3_FULL_STATE");
-      const sseData = `event: ${filtered.event_type}\ndata: ${JSON.stringify(filtered)}\n\n`;
+      const safeEventType = sanitizeSSEField(filtered.event_type);
+      const sseData = `event: ${safeEventType}\ndata: ${JSON.stringify(filtered)}\n\n`;
       try {
         subscriber.write(sseData);
       } catch {

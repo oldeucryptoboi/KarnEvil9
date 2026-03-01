@@ -260,6 +260,31 @@ describe("AntiGamingDetector", () => {
     expect(profile!.last_evaluated_at).toBeDefined();
   });
 
+  // ─── Node Cap ──────────────────────────────────────────────────────
+
+  it("should cap completions map at 10,000 nodes with LRU eviction", () => {
+    for (let i = 0; i < 10_001; i++) {
+      detector.recordTaskCompletion(`peer-${i}`, "low");
+    }
+    // The first peer should have been evicted
+    expect(detector.getProfile("peer-0")).toBeUndefined();
+    // The last peer should exist
+    expect(detector.getProfile("peer-10000")).toBeDefined();
+  });
+
+  it("should cap rejections map at 10,000 nodes with LRU eviction", () => {
+    for (let i = 0; i < 10_001; i++) {
+      detector.recordTaskRejection(`peer-${i}`, "high");
+    }
+    // Rejections map is separate from completions map
+    // peer-0 rejection should have been evicted
+    const profile0 = detector.evaluatePeer("peer-0");
+    expect(profile0.tasks_rejected_by_complexity.high).toBe(0);
+    // peer-10000 rejection should exist
+    const profile10000 = detector.evaluatePeer("peer-10000");
+    expect(profile10000.tasks_rejected_by_complexity.high).toBe(1);
+  });
+
   // ─── Custom Config ──────────────────────────────────────────────────
 
   it("should respect custom cherry_pick_threshold", () => {

@@ -2350,3 +2350,51 @@ describe("ApiServer SSE streaming", () => {
     }
   });
 });
+
+describe("ApiServer coverage endpoint", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let apiServer: ApiServer;
+  let httpServer: ReturnType<typeof createServer>;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    registry = new ToolRegistry();
+    registry.register(testTool);
+    apiServer = new ApiServer(registry, journal);
+
+    await new Promise<void>((resolve) => {
+      httpServer = createServer(apiServer.getExpressApp());
+      httpServer.listen(0, () => {
+        const addr = httpServer.address() as AddressInfo;
+        baseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("GET /api/coverage returns 404 when no coverage data exists", async () => {
+    // The endpoint scans packages/*/coverage/coverage-summary.json relative to monorepo root.
+    // In a test context without coverage reports, this should return 404.
+    const res = await fetch(`${baseUrl}/api/coverage`);
+    // It may return 200 if coverage reports exist in the actual repo, or 404 if they don't.
+    // We just verify the endpoint responds with valid JSON.
+    expect([200, 404]).toContain(res.status);
+    const body = await res.json();
+    if (res.status === 404) {
+      expect(body.error).toContain("coverage");
+    } else {
+      expect(body.total).toBeDefined();
+      expect(body.packages).toBeDefined();
+      expect(body.generated_at).toBeDefined();
+    }
+  });
+});

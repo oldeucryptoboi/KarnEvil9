@@ -17,6 +17,7 @@ export const DEFAULT_ANTI_GAMING_CONFIG: AntiGamingConfig = {
 };
 
 const MAX_RECORDS_PER_NODE = 500;
+const MAX_TRACKED_NODES = 10_000;
 
 export class AntiGamingDetector {
   private config: AntiGamingConfig;
@@ -28,7 +29,13 @@ export class AntiGamingDetector {
   }
 
   recordTaskCompletion(nodeId: string, complexity: "low" | "medium" | "high", taskId?: string): void {
-    if (!this.completions.has(nodeId)) this.completions.set(nodeId, []);
+    if (!this.completions.has(nodeId)) {
+      if (this.completions.size >= MAX_TRACKED_NODES) {
+        const firstKey = this.completions.keys().next().value;
+        if (firstKey !== undefined) this.completions.delete(firstKey);
+      }
+      this.completions.set(nodeId, []);
+    }
     const arr = this.completions.get(nodeId)!;
     arr.push({ task_id: taskId ?? `task-${Date.now()}`, complexity, completed_at: new Date().toISOString() });
     if (arr.length > MAX_RECORDS_PER_NODE) {
@@ -37,7 +44,13 @@ export class AntiGamingDetector {
   }
 
   recordTaskRejection(nodeId: string, complexity: "low" | "medium" | "high", taskId?: string): void {
-    if (!this.rejections.has(nodeId)) this.rejections.set(nodeId, []);
+    if (!this.rejections.has(nodeId)) {
+      if (this.rejections.size >= MAX_TRACKED_NODES) {
+        const firstKey = this.rejections.keys().next().value;
+        if (firstKey !== undefined) this.rejections.delete(firstKey);
+      }
+      this.rejections.set(nodeId, []);
+    }
     const arr = this.rejections.get(nodeId)!;
     arr.push({ task_id: taskId ?? `task-${Date.now()}`, complexity, completed_at: new Date().toISOString() });
     if (arr.length > MAX_RECORDS_PER_NODE) {

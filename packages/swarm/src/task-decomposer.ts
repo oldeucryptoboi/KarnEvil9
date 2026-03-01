@@ -285,13 +285,15 @@ export class TaskDecomposer {
       return decomposition;
     }
 
-    // Re-decompose unverifiable subtasks
+    // Re-decompose unverifiable subtasks (cap total to max_sub_tasks)
     const refinedSubTasks: SubTaskSpec[] = [];
     for (const subtask of decomposition.sub_tasks) {
+      if (refinedSubTasks.length >= this.config.max_sub_tasks) break;
       const assessment = this.assessVerifiability(subtask.task_text, subtask.attributes);
       if (assessment.level === "unverifiable" && currentDepth < maxDepth - 1 && assessment.suggested_decomposition) {
-        // Replace with suggested decomposition
+        // Replace with suggested decomposition (respecting global cap)
         for (const suggestedText of assessment.suggested_decomposition) {
+          if (refinedSubTasks.length >= this.config.max_sub_tasks) break;
           const subAttrs = this.analyze(suggestedText);
           refinedSubTasks.push({
             sub_task_id: uuid(),

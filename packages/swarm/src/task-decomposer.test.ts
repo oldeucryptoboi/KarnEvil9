@@ -258,6 +258,24 @@ describe("TaskDecomposer", () => {
       expect(new Set(ids).size).toBe(ids.length);
     });
 
+    it("decomposeRecursive respects max_sub_tasks cap during refinement", () => {
+      const td = new TaskDecomposer({ complexity_floor_words: 1, max_sub_tasks: 3 });
+      // Create a task with many low-verifiability subtasks that will expand via suggested_decomposition
+      // Each "brainstorm" subtask generates 3 suggested subtasks, but total should be capped at 3
+      const text = "Complete these items:\n" +
+        "1. Brainstorm ideas for the new product design and think about possibilities\n" +
+        "2. Brainstorm approaches for the marketing plan and consider alternatives\n" +
+        "3. Brainstorm strategies for user engagement and think creatively\n" +
+        "4. Test the final implementation and verify the results";
+      const result = td.decomposeRecursive({
+        task_text: text,
+        available_peers: [{ node_id: "peer-1", capabilities: ["read-file"], trust_score: 0.8 }],
+      });
+      // Without the cap, unverifiable tasks expand to 3 each = 9+1 = 10+ subtasks
+      // With cap of 3, should stop at 3
+      expect(result.sub_tasks.length).toBeLessThanOrEqual(3);
+    });
+
     it("propagates tool_allowlist from parent constraints", () => {
       const td = new TaskDecomposer({ complexity_floor_words: 1 });
       const text = "Handle:\n1. Read the configuration file settings\n2. Write the processed output data";

@@ -133,6 +133,22 @@ describe("RedelegationMonitor", () => {
     expect(monitor.getRedelegationCount("unknown")).toBe(0);
   });
 
+  // ─── Delegation Map Cap ──────────────────────────────────────────
+
+  it("should cap tracked delegations at 10,000 with LRU eviction", () => {
+    const monitor = new RedelegationMonitor();
+    // Fill to capacity (use small sample to test eviction, but simulate cap behavior)
+    // We test that when we exceed the limit, the oldest entry gets evicted
+    // Access the private static field via the class behavior
+    for (let i = 0; i < 10_001; i++) {
+      monitor.trackDelegation(`task-${i}`, `peer-${i}`, `text-${i}`, `session-${i}`);
+    }
+    // Size should be capped at 10,000 (the 10,001th entry evicts the first)
+    expect(monitor.size).toBe(10_000);
+    // The first tracked delegation should have been evicted
+    expect(monitor.getRedelegationCount("task-0")).toBe(0); // Returns 0 for missing
+  });
+
   // ─── Default config ───────────────────────────────────────────────
 
   it("should use default config values", () => {

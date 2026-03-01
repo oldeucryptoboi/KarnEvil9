@@ -123,6 +123,27 @@ describe("ResultAggregator", () => {
     expect(findings).toHaveLength(1);
   });
 
+  it("should reject when max pending aggregations (1000) exceeded", async () => {
+    // Create 1000 pending aggregations (use a long timeout so they stay pending)
+    // Attach .catch() to each to prevent unhandled rejection on cancelAll()
+    const promises: Promise<unknown>[] = [];
+    for (let i = 0; i < 1000; i++) {
+      const p = aggregator.createAggregation(`corr-${i}`, 2, 600_000);
+      p.catch(() => {}); // swallow cancellation errors
+      promises.push(p);
+    }
+    expect(aggregator.pendingCount).toBe(1000);
+
+    // The 1001st should be rejected
+    await expect(aggregator.createAggregation("corr-overflow", 1, 5000)).rejects.toThrow(
+      "Max pending aggregations",
+    );
+    expect(aggregator.pendingCount).toBe(1000);
+
+    // Cleanup
+    aggregator.cancelAll();
+  });
+
   it("should not complete before expected count", () => {
     aggregator.createAggregation("corr-1", 3, 5000);
     const first = aggregator.addResult("corr-1", makeResult({ peer_node_id: "p1" }));

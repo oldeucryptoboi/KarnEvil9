@@ -109,6 +109,34 @@ describe("DataAccessGuard", () => {
     });
   });
 
+  describe("deepRedact hardening", () => {
+    it("stops recursing at MAX_REDACT_DEPTH (20) to prevent stack overflow", () => {
+      const guard = new DataAccessGuard({ sensitive_fields: ["secret"] });
+      // Build a deeply nested object (30 levels)
+      let obj: Record<string, unknown> = { secret: "deep-secret" };
+      for (let i = 0; i < 30; i++) {
+        obj = { nested: obj };
+      }
+      // Should not throw (would overflow without depth guard)
+      const redacted = guard.redactSensitiveFields(obj);
+      // At depth 20 the recursion stops and returns the raw object;
+      // levels < 20 should still traverse normally
+      expect(redacted).toBeDefined();
+    });
+
+    it("skips __proto__, constructor, and prototype keys to prevent pollution", () => {
+      const guard = new DataAccessGuard({ sensitive_fields: ["token"] });
+      const data = JSON.parse('{"__proto__": {"polluted": true}, "constructor": {"bad": true}, "prototype": {"evil": true}, "token": "abc", "safe": 1}');
+      const redacted = guard.redactSensitiveFields(data);
+      expect(redacted.safe).toBe(1);
+      expect(redacted.token).toBe("[REDACTED]");
+      // Pollution keys should be stripped
+      expect(Object.hasOwn(redacted, "__proto__")).toBe(false);
+      expect(Object.hasOwn(redacted, "constructor")).toBe(false);
+      expect(Object.hasOwn(redacted, "prototype")).toBe(false);
+    });
+  });
+
   describe("getScope", () => {
     it("returns a copy of the scope", () => {
       const scope = { allowed_paths: ["/data/"], sensitive_fields: ["password"] };

@@ -33,6 +33,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
+    "test:coverage": "pnpm -r --filter=!@karnevil9/dashboard test -- --coverage",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "clean": "pnpm -r clean",
     "dev": "pnpm -r --parallel dev",

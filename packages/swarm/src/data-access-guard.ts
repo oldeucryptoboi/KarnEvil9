@@ -80,13 +80,17 @@ export class DataAccessGuard {
     return path === pattern;
   }
 
-  private deepRedact(obj: Record<string, unknown>, sensitiveFields: Set<string>): Record<string, unknown> {
+  private static readonly MAX_REDACT_DEPTH = 20;
+
+  private deepRedact(obj: Record<string, unknown>, sensitiveFields: Set<string>, depth = 0): Record<string, unknown> {
+    if (depth >= DataAccessGuard.MAX_REDACT_DEPTH) return obj;
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj)) {
+      if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
       if (sensitiveFields.has(key)) {
         result[key] = "[REDACTED]";
       } else if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-        result[key] = this.deepRedact(value as Record<string, unknown>, sensitiveFields);
+        result[key] = this.deepRedact(value as Record<string, unknown>, sensitiveFields, depth + 1);
       } else {
         result[key] = value;
       }

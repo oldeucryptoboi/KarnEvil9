@@ -27,6 +27,7 @@ export class BehavioralScorer {
   private observations = new Map<string, BehavioralObservation[]>();
   private cachedMetrics = new Map<string, BehavioralMetrics>();
   private emitEvent?: (type: JournalEventType, payload: Record<string, unknown>) => void;
+  private static readonly MAX_TRACKED_NODES = 10_000;
 
   constructor(emitEvent?: (type: JournalEventType, payload: Record<string, unknown>) => void) {
     this.emitEvent = emitEvent;
@@ -34,6 +35,14 @@ export class BehavioralScorer {
 
   recordObservation(nodeId: string, observation: BehavioralObservation): void {
     if (!this.observations.has(nodeId)) {
+      // Cap tracked nodes to prevent unbounded memory growth
+      if (this.observations.size >= BehavioralScorer.MAX_TRACKED_NODES) {
+        const firstKey = this.observations.keys().next().value;
+        if (firstKey !== undefined) {
+          this.observations.delete(firstKey);
+          this.cachedMetrics.delete(firstKey);
+        }
+      }
       this.observations.set(nodeId, []);
     }
     const obs = this.observations.get(nodeId)!;

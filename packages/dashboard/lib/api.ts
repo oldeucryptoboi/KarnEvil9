@@ -37,6 +37,8 @@ export interface JournalEvent {
   type: string;
   timestamp: string;
   payload: Record<string, unknown>;
+  seq?: number;
+  hash_prev?: string;
 }
 
 export interface ApprovalRequest {
@@ -139,6 +141,36 @@ export const getJournal = async (sessionId: string): Promise<JournalEvent[]> => 
   return Array.isArray(res) ? res : res.events;
 };
 
+export interface JournalPage {
+  events: JournalEvent[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export const getJournalPage = async (
+  sessionId: string,
+  offset = 0,
+  limit = 100,
+): Promise<JournalPage> => {
+  const res = await apiFetch<JournalPage>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/journal?offset=${offset}&limit=${limit}`,
+  );
+  return res;
+};
+
+/** Fetch journal events from multiple sessions and merge them sorted by timestamp descending. */
+export const getJournalAcrossSessions = async (
+  sessionIds: string[],
+): Promise<JournalEvent[]> => {
+  const pages = await Promise.all(
+    sessionIds.map((sid) => getJournal(sid).catch(() => [] as JournalEvent[])),
+  );
+  const all = pages.flat();
+  all.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  return all;
+};
+
 // Approvals
 export const getApprovals = async (): Promise<ApprovalRequest[]> => {
   const res = await apiFetch<{ pending: Array<{ request_id: string; request: ApprovalRequest }> }>("/api/approvals");
@@ -157,7 +189,46 @@ export const getTools = async (): Promise<ToolInfo[]> => {
 };
 
 // Plugins
-export const getPlugins = () => apiFetch<Array<{ id: string; status: string; manifest: Record<string, unknown> }>>("/api/plugins");
+export interface PluginProvides {
+  tools?: string[];
+  hooks?: string[];
+  routes?: string[];
+  commands?: string[];
+  planners?: string[];
+  services?: string[];
+}
+
+export interface PluginManifestInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  entry: string;
+  permissions: string[];
+  config_schema?: Record<string, unknown>;
+  provides: PluginProvides;
+}
+
+export type PluginStatus = "discovered" | "loading" | "active" | "failed" | "unloaded";
+
+export interface PluginInfo {
+  id: string;
+  manifest: PluginManifestInfo;
+  status: PluginStatus;
+  loaded_at?: string;
+  failed_at?: string;
+  error?: string;
+  config: Record<string, unknown>;
+}
+
+export const getPlugins = async (): Promise<PluginInfo[]> => {
+  const res = await apiFetch<{ plugins: PluginInfo[] }>("/api/plugins");
+  return res.plugins;
+};
+
+export const getPlugin = async (id: string): Promise<PluginInfo> => {
+  return apiFetch<PluginInfo>(`/api/plugins/${encodeURIComponent(id)}`);
+};
 
 // Schedules — API returns { schedules: [...], total: N }
 export const getSchedules = async (): Promise<Schedule[]> => {
@@ -259,6 +330,28 @@ export const searchVault = async (q: string, params?: { limit?: number; type?: s
   if (params?.category) query.set("category", params.category);
   return apiFetch<{ results: VaultObject[]; total: number }>(`/api/plugins/vault/vault/search?${query.toString()}`);
 };
+
+// Coverage
+export interface CoverageMetric {
+  total: number;
+  covered: number;
+  pct: number;
+}
+
+export interface CoverageTotal {
+  statements: CoverageMetric;
+  branches: CoverageMetric;
+  functions: CoverageMetric;
+  lines: CoverageMetric;
+}
+
+export interface CoverageReport {
+  total: CoverageTotal;
+  packages: Record<string, CoverageTotal>;
+  generated_at: string;
+}
+
+export const getCoverage = () => apiFetch<CoverageReport>("/api/coverage");
 
 // Swarm
 export type PeerStatus = "active" | "suspected" | "unreachable" | "left";

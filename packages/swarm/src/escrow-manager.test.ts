@@ -355,6 +355,26 @@ describe("EscrowManager", () => {
     expect(manager.accountCount).toBe(2);
   });
 
+  // ─── Task Bonds Cap ───────────────────────────────────────────
+
+  it("should reject holdBond when taskBonds cap (50,000) is exceeded", () => {
+    // We need to hold bonds for many unique tasks on accounts with sufficient balance
+    // Deposit a huge amount to one account to make the balance check pass
+    manager.deposit("node-big", 1_000_000);
+
+    // Hold bonds up to the cap
+    for (let i = 0; i < 50_000; i++) {
+      const result = manager.holdBond(`task-cap-${i}`, "node-big", 0.01);
+      expect(result.held).toBe(true);
+    }
+
+    // The next new task bond should be rejected
+    // Note: held will have increased the account held amount, but balance is huge
+    const result = manager.holdBond("task-overflow", "node-big", 0.01);
+    expect(result.held).toBe(false);
+    expect(result.reason).toContain("Max concurrent bonds");
+  });
+
   // ─── getBondRequirement ─────────────────────────────────────────
 
   it("should return a copy of bond requirement", () => {

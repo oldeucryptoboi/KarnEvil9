@@ -16,8 +16,8 @@ import type { MeshManager } from "@karnevil9/swarm";
 import type { ServerResponse, Server, IncomingMessage } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { parse as parseUrl } from "node:url";
-import { readFileSync } from "node:fs";
-import { resolve as pathResolve, dirname as pathDirname } from "node:path";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { resolve as pathResolve, dirname as pathDirname, join as pathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { WebSocketServer, WebSocket } from "ws";
@@ -1478,6 +1478,83 @@ export class ApiServer {
         const result = await this.journal.compact(retain_sessions);
         res.json(result);
       } catch (err) { logError("POST /journal/compact", err); res.status(500).json({ error: "Internal server error" }); }
+    });
+
+    // ─── Coverage Report ──────────────────────────────────────────────
+    router.get("/coverage", (_req, res) => {
+      try {
+        // Find the monorepo root (3 levels up from packages/api/src)
+        const __filename = fileURLToPath(import.meta.url);
+        const monorepoRoot = pathResolve(pathDirname(__filename), "../../..");
+
+        const packagesDir = pathJoin(monorepoRoot, "packages");
+        if (!existsSync(packagesDir)) {
+          res.status(404).json({ error: "No coverage data found. Run `pnpm test:coverage` to generate." });
+          return;
+        }
+
+        const packages: Record<string, unknown> = {};
+        const total: Record<string, { total: number; covered: number; pct: number }> = {
+          statements: { total: 0, covered: 0, pct: 0 },
+          branches: { total: 0, covered: 0, pct: 0 },
+          functions: { total: 0, covered: 0, pct: 0 },
+          lines: { total: 0, covered: 0, pct: 0 },
+        };
+
+        let foundAny = false;
+        let latestTimestamp = 0;
+
+        const pkgDirs = readdirSync(packagesDir);
+        for (const pkgName of pkgDirs) {
+          const summaryPath = pathJoin(packagesDir, pkgName, "coverage", "coverage-summary.json");
+          if (!existsSync(summaryPath)) continue;
+
+          try {
+            const raw = readFileSync(summaryPath, "utf-8");
+            const summary = JSON.parse(raw) as Record<string, Record<string, { total: number; covered: number; pct: number }>>;
+            const pkgTotal = summary.total;
+            if (!pkgTotal) continue;
+
+            foundAny = true;
+            packages[pkgName] = pkgTotal;
+
+            // Accumulate totals
+            for (const key of ["statements", "branches", "functions", "lines"] as const) {
+              const entry = pkgTotal[key];
+              if (entry) {
+                total[key]!.total += entry.total;
+                total[key]!.covered += entry.covered;
+              }
+            }
+
+            // Track latest modification time for "last generated" timestamp
+            const st = statSync(summaryPath);
+            if (st.mtimeMs > latestTimestamp) latestTimestamp = st.mtimeMs;
+          } catch {
+            // Skip malformed coverage files
+          }
+        }
+
+        if (!foundAny) {
+          res.status(404).json({ error: "No coverage data found. Run `pnpm test:coverage` to generate." });
+          return;
+        }
+
+        // Calculate overall percentages
+        for (const key of ["statements", "branches", "functions", "lines"] as const) {
+          const entry = total[key]!;
+          entry.pct = entry.total > 0 ? Math.round((entry.covered / entry.total) * 10000) / 100 : 0;
+        }
+
+        res.json({
+          total,
+          packages,
+          generated_at: new Date(latestTimestamp).toISOString(),
+        });
+      } catch (err) {
+        logError("GET /coverage", err);
+        res.status(500).json({ error: "Internal server error" });
+      }
     });
 
     this.app.use("/api", router);

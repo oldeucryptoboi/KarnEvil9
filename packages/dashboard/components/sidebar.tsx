@@ -8,8 +8,10 @@ import { useApprovals } from "@/lib/approvals-context";
 const NAV_ITEMS = [
   { href: "/", label: "Sessions", icon: "S" },
   { href: "/approvals", label: "Approvals", icon: "A" },
+  { href: "/journal", label: "Journal", icon: "J" },
   { href: "/schedules", label: "Schedules", icon: "C" },
   { href: "/tools", label: "Tools", icon: "T" },
+  { href: "/plugins", label: "Plugins", icon: "P" },
   { href: "/vault", label: "Vault", icon: "V" },
   { href: "/swarm", label: "Swarm", icon: "W" },
   { href: "/metrics", label: "Metrics", icon: "M" },

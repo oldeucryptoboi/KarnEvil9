@@ -39,6 +39,7 @@ export class OptimizationLoop {
   private running = false;
   private timer?: ReturnType<typeof setInterval>;
   private taskStates = new Map<string, TaskState>();
+  private static readonly MAX_TASK_STATES = 10_000;
 
   constructor(params: {
     workDistributor: WorkDistributor;
@@ -90,6 +91,11 @@ export class OptimizationLoop {
       // We may not be tracking this task — register it from active delegations
       const delegation = this.workDistributor.getActiveDelegation(taskId);
       if (!delegation) return;
+      // Cap task states to prevent unbounded memory growth
+      if (this.taskStates.size >= OptimizationLoop.MAX_TASK_STATES) {
+        const firstKey = this.taskStates.keys().next().value;
+        if (firstKey !== undefined) this.taskStates.delete(firstKey);
+      }
       const isHit = checkpoint.status === "running";
       this.taskStates.set(taskId, {
         task_id: taskId,

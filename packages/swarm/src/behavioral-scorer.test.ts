@@ -216,6 +216,19 @@ describe("BehavioralScorer", () => {
     expect(metrics!.protocol_compliance).toBe(0.0); // violated
   });
 
+  // ─── Node Cap ──────────────────────────────────────────────────────
+
+  it("should cap tracked nodes at 10,000 with LRU eviction", () => {
+    const capped = new BehavioralScorer();
+    for (let i = 0; i < 10_001; i++) {
+      capped.recordObservation(`node-${i}`, { type: "safety_compliant", timestamp: new Date().toISOString() });
+    }
+    // The first node should have been evicted
+    expect(capped.getMetrics("node-0")).toBeUndefined();
+    // The last node should exist
+    expect(capped.getMetrics("node-10000")).toBeDefined();
+  });
+
   // ─── Bounded Score ────────────────────────────────────────────────
 
   it("should produce a composite score between 0 and 1 after many mixed observations", () => {

@@ -339,6 +339,35 @@ describe("OptimizationLoop", () => {
     expect(results.size).toBe(0);
   });
 
+  it("caps taskStates at 10,000 with LRU eviction via onCheckpointData", () => {
+    const loop = new OptimizationLoop({
+      workDistributor: distributor,
+      meshManager: mesh,
+    });
+
+    // Each call to onCheckpointData with a new task creates a new taskState entry
+    for (let i = 0; i < 10_001; i++) {
+      (distributor.getActiveDelegation as ReturnType<typeof vi.fn>).mockReturnValue({
+        task_id: `task-${i}`,
+        peer_node_id: `peer-${i}`,
+        sent_at: Date.now() - 5000,
+      });
+      loop.onCheckpointData(`task-${i}`, {
+        task_id: `task-${i}`,
+        status: "running",
+        last_activity_at: new Date().toISOString(),
+      });
+    }
+
+    // After exceeding the cap, the first entry should have been evicted.
+    // We can verify by checking evaluateTask for the first task returns "No active delegation"
+    // since the taskState was evicted and we mock getActiveDelegation to undefined for it.
+    (distributor.getActiveDelegation as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    const result = loop.evaluateTask("task-0");
+    expect(result.action).toBe("keep");
+    expect(result.reason).toContain("No active delegation");
+  });
+
   it("overhead factor raises effective threshold", () => {
     const now = Date.now();
     (distributor.getActiveDelegation as ReturnType<typeof vi.fn>).mockReturnValue({

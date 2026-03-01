@@ -442,4 +442,30 @@ describe("AuctionGuard", () => {
       expect(result.reason).toContain("Rate limit");
     });
   });
+
+  describe("unbounded map caps", () => {
+    it("caps bidTimestamps map at MAX_TRACKED_NODES (10k)", () => {
+      // Add bids from many distinct nodes to trigger eviction
+      for (let i = 0; i < 10_001; i++) {
+        guard.checkBidRate(`node-${i}`);
+      }
+      // The oldest node should have been evicted to make room
+      // We verify by checking the rate limit works for the newest node
+      const result = guard.checkBidRate("node-10000");
+      expect(result.allowed).toBe(true);
+    });
+
+    it("caps nodeTimelines map at MAX_TRACKED_NODES (10k) without crashing", () => {
+      // Add bids from many distinct nodes — nodeTimelines should be capped
+      // We can't directly inspect nodeTimelines size, but we verify it doesn't crash
+      // and the commitBid still works for the latest node
+      for (let i = 0; i < 10_001; i++) {
+        const sealed = makeSealedBid({ bidder_node_id: `node-${i}`, bid_id: `bid-${i}` });
+        const result = guard.commitBid(sealed);
+        expect(result.accepted).toBe(true);
+      }
+      // The latest node should still have a valid commitment
+      expect(guard.getCommitment("bid-10000")).toBeDefined();
+    });
+  });
 });

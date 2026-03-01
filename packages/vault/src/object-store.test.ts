@@ -438,4 +438,19 @@ describe("ObjectStore", () => {
       }
     });
   });
+
+  describe("getStats prototype safety", () => {
+    it("uses null-prototype objects that do not leak inherited properties", async () => {
+      await store.create("Test", "content", {
+        object_id: uuid(),
+        object_type: "Note",
+        para_category: "inbox",
+        source: "test",
+      }, schema);
+      const stats = store.getStats();
+      // Null-prototype objects should not have inherited properties like toString
+      expect(Object.getPrototypeOf(stats.by_type)).toBeNull();
+      expect(Object.getPrototypeOf(stats.by_category)).toBeNull();
+    });
+  });
 });

@@ -32,8 +32,8 @@ export class DashboardGenerator {
     const storeStats = this.objectStore.getStats();
     const allEntries = this.objectStore.search({});
 
-    // Objects by source
-    const bySource: Record<string, number> = {};
+    // Objects by source (null-prototype object prevents prototype key collision)
+    const bySource: Record<string, number> = Object.create(null) as Record<string, number>;
     for (const entry of allEntries) {
       const src = entry.source || "unknown";
       bySource[src] = (bySource[src] ?? 0) + 1;

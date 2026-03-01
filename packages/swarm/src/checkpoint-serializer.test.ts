@@ -244,6 +244,36 @@ describe("CheckpointSerializer", () => {
     expect(cp.timestamp).toBe(input.timestamp);
   });
 
+  // ─── Task Map Cap ─────────────────────────────────────────────
+
+  it("should evict oldest task when exceeding MAX_TRACKED_TASKS (5000)", () => {
+    // We can't easily test 5000 entries, so verify the eviction logic works
+    // by adding many distinct tasks and checking the oldest is evicted
+    for (let i = 0; i < 5001; i++) {
+      serializer.saveCheckpoint(makeCheckpointInput({ task_id: `task-${i}` }));
+    }
+    // task-0 should have been evicted to make room for task-5000
+    expect(serializer.canResume("task-0")).toBe(false);
+    expect(serializer.canResume("task-5000")).toBe(true);
+    expect(serializer.taskCount).toBe(5000);
+  });
+
+  // ─── Write Lock (concurrent saves) ──────────────────────────
+
+  it("should serialize concurrent save() calls without data loss", async () => {
+    serializer.saveCheckpoint(makeCheckpointInput({ task_id: "task-a", findings_so_far: 1 }));
+    serializer.saveCheckpoint(makeCheckpointInput({ task_id: "task-b", findings_so_far: 2 }));
+
+    // Fire two saves concurrently — the write lock should serialize them
+    await Promise.all([serializer.save(), serializer.save()]);
+
+    const serializer2 = new CheckpointSerializer(join(tmpDir, "checkpoints.jsonl"));
+    await serializer2.load();
+    expect(serializer2.taskCount).toBe(2);
+    expect(serializer2.canResume("task-a")).toBe(true);
+    expect(serializer2.canResume("task-b")).toBe(true);
+  });
+
   // ─── All Fields Populated ───────────────────────────────────────
 
   it("should handle saveCheckpoint with all fields populated", () => {

@@ -5,6 +5,7 @@ import { DEFAULT_AUCTION_GUARD_CONFIG } from "./types.js";
 
 const MAX_COMMITMENTS = 5000;
 const MAX_TIMELINE_ENTRIES = 200;
+const MAX_TRACKED_NODES = 10_000;
 
 export class AuctionGuard {
   private config: AuctionGuardConfig;
@@ -55,6 +56,11 @@ export class AuctionGuard {
     // Track timestamps for front-running detection
     const ts = new Date(sealedBid.timestamp).getTime();
     if (!this.nodeTimelines.has(sealedBid.bidder_node_id)) {
+      // Cap tracked nodes to prevent unbounded memory growth
+      if (this.nodeTimelines.size >= MAX_TRACKED_NODES) {
+        const firstKey = this.nodeTimelines.keys().next().value;
+        if (firstKey !== undefined) this.nodeTimelines.delete(firstKey);
+      }
       this.nodeTimelines.set(sealedBid.bidder_node_id, []);
     }
     const timeline = this.nodeTimelines.get(sealedBid.bidder_node_id)!;
@@ -110,6 +116,11 @@ export class AuctionGuard {
   checkBidRate(nodeId: string): { allowed: boolean; reason?: string } {
     const now = Date.now();
     if (!this.bidTimestamps.has(nodeId)) {
+      // Cap tracked nodes to prevent unbounded memory growth
+      if (this.bidTimestamps.size >= MAX_TRACKED_NODES) {
+        const firstKey = this.bidTimestamps.keys().next().value;
+        if (firstKey !== undefined) this.bidTimestamps.delete(firstKey);
+      }
       this.bidTimestamps.set(nodeId, []);
     }
     const timestamps = this.bidTimestamps.get(nodeId)!;

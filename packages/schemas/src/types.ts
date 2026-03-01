@@ -483,6 +483,9 @@ export type JournalEventType =
   | "vault.insights_generated"
   | "vault.dropzone_processed"
   | "vault.error"
+  | "auth.failed"
+  | "auth.rate_limited"
+  | "auth.key_rotated"
   | "journal.disk_warning"
   | "journal.disk_critical";
 

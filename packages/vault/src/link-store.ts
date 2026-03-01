@@ -8,6 +8,7 @@ export class LinkStore {
   private filePath: string;
   private links = new Map<string, VaultLink>();
   private adjacency = new Map<string, Set<string>>(); // object_id → Set<link_id>
+  private writeLock: Promise<void> = Promise.resolve();
 
   constructor(filePath: string) {
     this.filePath = filePath;
@@ -56,8 +57,16 @@ export class LinkStore {
     this.links.set(link.link_id, link);
     this.addToAdjacency(link);
 
-    await mkdir(dirname(this.filePath), { recursive: true });
-    await appendFile(this.filePath, JSON.stringify(link) + "\n", "utf-8");
+    const prev = this.writeLock;
+    let release!: () => void;
+    this.writeLock = new Promise<void>((r) => { release = r; });
+    try {
+      await prev;
+      await mkdir(dirname(this.filePath), { recursive: true });
+      await appendFile(this.filePath, JSON.stringify(link) + "\n", "utf-8");
+    } finally {
+      release();
+    }
 
     return link;
   }
@@ -147,20 +156,28 @@ export class LinkStore {
   }
 
   async save(): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true });
-    const content = Array.from(this.links.values())
-      .map((l) => JSON.stringify(l))
-      .join("\n") + (this.links.size > 0 ? "\n" : "");
-
-    const tmpPath = this.filePath + ".tmp";
-    const fh = await open(tmpPath, "w");
+    const prev = this.writeLock;
+    let release!: () => void;
+    this.writeLock = new Promise<void>((r) => { release = r; });
     try {
-      await fh.writeFile(content, "utf-8");
-      await fh.sync();
+      await prev;
+      await mkdir(dirname(this.filePath), { recursive: true });
+      const content = Array.from(this.links.values())
+        .map((l) => JSON.stringify(l))
+        .join("\n") + (this.links.size > 0 ? "\n" : "");
+
+      const tmpPath = this.filePath + ".tmp";
+      const fh = await open(tmpPath, "w");
+      try {
+        await fh.writeFile(content, "utf-8");
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
+      await rename(tmpPath, this.filePath);
     } finally {
-      await fh.close();
+      release();
     }
-    await rename(tmpPath, this.filePath);
   }
 
   size(): number {
@@ -184,7 +201,15 @@ export class LinkStore {
   }
 
   private removeFromAdjacency(link: VaultLink): void {
-    this.adjacency.get(link.source_id)?.delete(link.link_id);
-    this.adjacency.get(link.target_id)?.delete(link.link_id);
+    const srcSet = this.adjacency.get(link.source_id);
+    if (srcSet) {
+      srcSet.delete(link.link_id);
+      if (srcSet.size === 0) this.adjacency.delete(link.source_id);
+    }
+    const tgtSet = this.adjacency.get(link.target_id);
+    if (tgtSet) {
+      tgtSet.delete(link.link_id);
+      if (tgtSet.size === 0) this.adjacency.delete(link.target_id);
+    }
   }
 }

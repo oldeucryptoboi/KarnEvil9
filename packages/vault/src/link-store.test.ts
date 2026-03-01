@@ -168,6 +168,34 @@ describe("LinkStore", () => {
     });
   });
 
+  describe("adjacency cleanup on removeLink", () => {
+    it("evicts empty adjacency sets after removing the last link for an object", async () => {
+      const link = await store.addLink({ source_id: "x", target_id: "y", link_type: "uses", confidence: 0.9 });
+      expect(store.getLinksForObject("x").length).toBe(1);
+      expect(store.getLinksForObject("y").length).toBe(1);
+
+      store.removeLink(link.link_id);
+      // After removing the only link, getLinksForObject should return empty array
+      // and the adjacency entry should be cleaned up (no memory leak)
+      expect(store.getLinksForObject("x")).toEqual([]);
+      expect(store.getLinksForObject("y")).toEqual([]);
+    });
+  });
+
+  describe("concurrent writes (write lock)", () => {
+    it("serializes concurrent save() calls without data corruption", async () => {
+      await store.addLink({ source_id: "a", target_id: "b", link_type: "uses", confidence: 0.5 });
+      await store.addLink({ source_id: "c", target_id: "d", link_type: "uses", confidence: 0.6 });
+
+      // Fire two saves concurrently — the write lock should serialize them
+      await Promise.all([store.save(), store.save()]);
+
+      const store2 = new LinkStore(join(tmpDir, "links.jsonl"));
+      await store2.init();
+      expect(store2.size()).toBe(2);
+    });
+  });
+
   describe("persistence", () => {
     it("persists links across init cycles", async () => {
       const filePath = join(tmpDir, "persist-links.jsonl");

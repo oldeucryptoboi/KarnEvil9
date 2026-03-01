@@ -224,6 +224,37 @@ export class PluginRegistry {
     return [...this.plugins.values()];
   }
 
+  /** Return all discovered plugin manifests (including those not yet loaded). */
+  listDiscovered(): DiscoveredPlugin[] {
+    return [...this.discoveredCache.values()];
+  }
+
+  /** Re-run directory scan and update the discovered cache. Returns all discovered plugins. */
+  async refreshDiscovered(): Promise<DiscoveredPlugin[]> {
+    const discovered = await this.discovery.scanDirectory(this.config.pluginsDir);
+    for (const d of discovered) {
+      if (!this.discoveredCache.has(d.manifest.id)) {
+        this.discoveredCache.set(d.manifest.id, d);
+      }
+    }
+    return this.listDiscovered();
+  }
+
+  /** Install (load) a plugin that was discovered but not yet loaded. */
+  async installPlugin(pluginId: string): Promise<PluginState> {
+    const existing = this.plugins.get(pluginId);
+    if (existing && existing.status === "active") {
+      throw new Error(`Plugin "${pluginId}" is already loaded`);
+    }
+
+    const discovered = this.discoveredCache.get(pluginId);
+    if (!discovered) {
+      throw new Error(`Plugin "${pluginId}" not found in discovered plugins`);
+    }
+
+    return this.loadDiscovered(discovered);
+  }
+
   getRoutes(): Array<{ pluginId: string; method: string; path: string; handler: RouteHandler }> {
     return this.allRoutes;
   }

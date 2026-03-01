@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
-import { getPlugins, type PluginInfo, type PluginStatus } from "@/lib/api";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import {
+  getPluginsCatalog,
+  reloadPlugin,
+  unloadPlugin,
+  installPlugin,
+  type PluginInfo,
+  type PluginStatus,
+} from "@/lib/api";
 
 const STATUS_STYLES: Record<string, string> = {
   active: "bg-green-500/10 text-green-400",
@@ -9,6 +16,7 @@ const STATUS_STYLES: Record<string, string> = {
   failed: "bg-red-500/10 text-red-400",
   unloaded: "bg-gray-500/10 text-gray-400",
   discovered: "bg-blue-500/10 text-blue-400",
+  available: "bg-gray-500/10 text-gray-400",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -17,7 +25,66 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "Failed",
   unloaded: "Unloaded",
   discovered: "Discovered",
+  available: "Available",
 };
+
+// ─── Toast Notification System ──────────────────────────────────
+
+interface Toast {
+  id: number;
+  message: string;
+  type: "success" | "error";
+}
+
+let toastId = 0;
+
+function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: number) => void }) {
+  return (
+    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className={`rounded-lg border px-4 py-3 text-sm shadow-lg transition-all animate-in slide-in-from-right ${
+            t.type === "success"
+              ? "bg-green-500/10 border-green-500/20 text-green-400"
+              : "bg-red-500/10 border-red-500/20 text-red-400"
+          }`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <span>{t.message}</span>
+            <button
+              onClick={() => onDismiss(t.id)}
+              className="text-[var(--muted)] hover:text-[var(--foreground)] shrink-0"
+            >
+              x
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Spinner ────────────────────────────────────────────────────
+
+function Spinner({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      className="animate-spin"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+    >
+      <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+      <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ─── Sub-components ─────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: PluginStatus }) {
   return (
@@ -65,12 +132,40 @@ function ProvidesList({
   );
 }
 
+function ActionButton({
+  label,
+  colorClass,
+  loading,
+  onClick,
+}: {
+  label: string;
+  colorClass: string;
+  loading: boolean;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading}
+      className={`rounded-md px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${colorClass}`}
+    >
+      {loading ? <Spinner size={12} /> : label}
+    </button>
+  );
+}
+
+// ─── Detail Panel ───────────────────────────────────────────────
+
 function PluginDetailPanel({
   plugin,
   onClose,
+  onAction,
+  actionLoading,
 }: {
   plugin: PluginInfo;
   onClose: () => void;
+  onAction: (id: string, action: "reload" | "unload" | "install") => void;
+  actionLoading: string | null;
 }) {
   const { manifest } = plugin;
   const provides = manifest.provides;
@@ -85,12 +180,46 @@ function PluginDetailPanel({
           </div>
           <div className="text-xs text-[var(--muted)] font-mono">{manifest.id}</div>
         </div>
-        <button
-          onClick={onClose}
-          className="rounded-md border border-[var(--border)] px-3 py-1 text-sm text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-white/5 transition-colors"
-        >
-          Close
-        </button>
+        <div className="flex items-center gap-2">
+          {plugin.status === "active" && (
+            <>
+              <ActionButton
+                label="Reload"
+                colorClass="bg-blue-500/10 text-blue-400 hover:bg-blue-500/20"
+                loading={actionLoading === `${plugin.id}:reload`}
+                onClick={(e) => { e.stopPropagation(); onAction(plugin.id, "reload"); }}
+              />
+              <ActionButton
+                label="Unload"
+                colorClass="bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                loading={actionLoading === `${plugin.id}:unload`}
+                onClick={(e) => { e.stopPropagation(); onAction(plugin.id, "unload"); }}
+              />
+            </>
+          )}
+          {plugin.status === "failed" && (
+            <ActionButton
+              label="Reload"
+              colorClass="bg-blue-500/10 text-blue-400 hover:bg-blue-500/20"
+              loading={actionLoading === `${plugin.id}:reload`}
+              onClick={(e) => { e.stopPropagation(); onAction(plugin.id, "reload"); }}
+            />
+          )}
+          {plugin.status === "available" && (
+            <ActionButton
+              label="Install"
+              colorClass="bg-green-500/10 text-green-400 hover:bg-green-500/20"
+              loading={actionLoading === `${plugin.id}:install`}
+              onClick={(e) => { e.stopPropagation(); onAction(plugin.id, "install"); }}
+            />
+          )}
+          <button
+            onClick={onClose}
+            className="rounded-md border border-[var(--border)] px-3 py-1 text-sm text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-white/5 transition-colors"
+          >
+            Close
+          </button>
+        </div>
       </div>
 
       {/* Manifest info */}
@@ -196,28 +325,90 @@ function PluginDetailPanel({
   );
 }
 
+// ─── Main Page ──────────────────────────────────────────────────
+
 type FilterStatus = PluginStatus | "all";
 
 export default function PluginsPage() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastTimeouts = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+
+  const addToast = useCallback((message: string, type: "success" | "error") => {
+    const id = ++toastId;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    const timeout = setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+      toastTimeouts.current.delete(id);
+    }, 5000);
+    toastTimeouts.current.set(id, timeout);
+  }, []);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+    const timeout = toastTimeouts.current.get(id);
+    if (timeout) { clearTimeout(timeout); toastTimeouts.current.delete(id); }
+  }, []);
+
+  const fetchPlugins = useCallback(async () => {
+    try {
+      const res = await getPluginsCatalog();
+      // Merge loaded and available into a single list for unified display
+      const all: PluginInfo[] = [...res.plugins, ...res.available];
+      setPlugins(all);
+      setError(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
 
   useEffect(() => {
-    getPlugins()
-      .then(setPlugins)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
+    fetchPlugins().finally(() => setLoading(false));
+  }, [fetchPlugins]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchPlugins();
+    setRefreshing(false);
+  }, [fetchPlugins]);
+
+  const handleAction = useCallback(async (pluginId: string, action: "reload" | "unload" | "install") => {
+    const key = `${pluginId}:${action}`;
+    setActionLoading(key);
+    try {
+      if (action === "reload") {
+        await reloadPlugin(pluginId);
+        addToast(`Plugin "${pluginId}" reloaded successfully`, "success");
+      } else if (action === "unload") {
+        await unloadPlugin(pluginId);
+        addToast(`Plugin "${pluginId}" unloaded successfully`, "success");
+      } else if (action === "install") {
+        await installPlugin(pluginId);
+        addToast(`Plugin "${pluginId}" installed successfully`, "success");
+      }
+      // Refresh the list after action
+      await fetchPlugins();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      addToast(`Failed to ${action} "${pluginId}": ${msg}`, "error");
+    } finally {
+      setActionLoading(null);
+    }
+  }, [fetchPlugins, addToast]);
 
   // Compute stats
   const stats = useMemo(() => {
     const totalPlugins = plugins.length;
     const activeCount = plugins.filter((p) => p.status === "active").length;
     const failedCount = plugins.filter((p) => p.status === "failed").length;
+    const availableCount = plugins.filter((p) => p.status === "available").length;
     const totalTools = plugins.reduce(
       (sum, p) => sum + (p.manifest.provides.tools?.length ?? 0),
       0,
@@ -226,7 +417,7 @@ export default function PluginsPage() {
       (sum, p) => sum + (p.manifest.provides.hooks?.length ?? 0),
       0,
     );
-    return { totalPlugins, activeCount, failedCount, totalTools, totalHooks };
+    return { totalPlugins, activeCount, failedCount, availableCount, totalTools, totalHooks };
   }, [plugins]);
 
   // Filter plugins
@@ -244,7 +435,14 @@ export default function PluginsPage() {
           p.manifest.description.toLowerCase().includes(q),
       );
     }
-    return list.sort((a, b) => a.manifest.name.localeCompare(b.manifest.name));
+    // Sort: active first, then available, then others
+    const statusOrder: Record<string, number> = { active: 0, failed: 1, loading: 2, available: 3, unloaded: 4, discovered: 5 };
+    return list.sort((a, b) => {
+      const orderA = statusOrder[a.status] ?? 99;
+      const orderB = statusOrder[b.status] ?? 99;
+      if (orderA !== orderB) return orderA - orderB;
+      return a.manifest.name.localeCompare(b.manifest.name);
+    });
   }, [plugins, statusFilter, searchQuery]);
 
   const selectedPlugin = useMemo(
@@ -276,13 +474,25 @@ export default function PluginsPage() {
 
   return (
     <div>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-semibold">Plugins</h2>
-        {plugins.length > 0 && (
-          <span className="text-xs text-[var(--muted)]">
-            {stats.activeCount} active of {stats.totalPlugins} plugins
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {plugins.length > 0 && (
+            <span className="text-xs text-[var(--muted)]">
+              {stats.activeCount} active, {stats.availableCount} available of {stats.totalPlugins} total
+            </span>
+          )}
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+          >
+            {refreshing ? <Spinner size={14} /> : null}
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -293,9 +503,10 @@ export default function PluginsPage() {
 
       {/* Stats summary */}
       {plugins.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
           <StatCard label="Total Plugins" value={stats.totalPlugins} />
           <StatCard label="Active" value={stats.activeCount} />
+          <StatCard label="Available" value={stats.availableCount} />
           <StatCard label="Failed" value={stats.failedCount} />
           <StatCard label="Total Tools" value={stats.totalTools} />
           <StatCard label="Total Hooks" value={stats.totalHooks} />
@@ -332,6 +543,8 @@ export default function PluginsPage() {
         <PluginDetailPanel
           plugin={selectedPlugin}
           onClose={() => setSelectedPluginId(null)}
+          onAction={handleAction}
+          actionLoading={actionLoading}
         />
       )}
 
@@ -356,65 +569,122 @@ export default function PluginsPage() {
           const isSelected = selectedPluginId === plugin.id;
 
           return (
-            <button
+            <div
               key={plugin.id}
-              onClick={() => handleCardClick(plugin.id)}
-              className={`rounded-lg border bg-[var(--card)] p-4 text-left transition-colors ${
+              className={`rounded-lg border bg-[var(--card)] p-4 transition-colors ${
                 isSelected
                   ? "border-[var(--accent)] ring-1 ring-[var(--accent)]"
                   : "border-[var(--border)] hover:border-[var(--accent)]/50"
               }`}
             >
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="font-medium text-sm truncate flex-1 mr-2">
-                  {manifest.name}
-                </h4>
-                <StatusBadge status={plugin.status} />
-              </div>
-
-              <div className="text-[11px] text-[var(--muted)] font-mono mb-1">
-                {manifest.id} v{manifest.version}
-              </div>
-
-              <p className="text-xs text-[var(--muted)] mb-3 line-clamp-2">
-                {manifest.description}
-              </p>
-
-              {/* Quick summary of what plugin provides */}
-              <div className="flex items-center gap-2 flex-wrap">
-                {toolCount > 0 && (
-                  <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-400">
-                    {toolCount} {toolCount === 1 ? "tool" : "tools"}
-                  </span>
-                )}
-                {hookCount > 0 && (
-                  <span className="rounded bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-purple-400">
-                    {hookCount} {hookCount === 1 ? "hook" : "hooks"}
-                  </span>
-                )}
-                {routeCount > 0 && (
-                  <span className="rounded bg-cyan-500/10 px-1.5 py-0.5 text-[10px] text-cyan-400">
-                    {routeCount} {routeCount === 1 ? "route" : "routes"}
-                  </span>
-                )}
-                {serviceCount > 0 && (
-                  <span className="rounded bg-pink-500/10 px-1.5 py-0.5 text-[10px] text-pink-400">
-                    {serviceCount} {serviceCount === 1 ? "service" : "services"}
-                  </span>
-                )}
-                {manifest.permissions.length > 0 && (
-                  <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400">
-                    {manifest.permissions.length} {manifest.permissions.length === 1 ? "perm" : "perms"}
-                  </span>
-                )}
-              </div>
-
-              {plugin.error && (
-                <div className="text-[10px] text-red-400 mt-2 truncate" title={plugin.error}>
-                  {plugin.error}
+              {/* Clickable header area */}
+              <button
+                onClick={() => handleCardClick(plugin.id)}
+                className="w-full text-left"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-medium text-sm truncate flex-1 mr-2">
+                    {manifest.name}
+                  </h4>
+                  <StatusBadge status={plugin.status} />
                 </div>
-              )}
-            </button>
+
+                <div className="text-[11px] text-[var(--muted)] font-mono mb-1">
+                  {manifest.id} v{manifest.version}
+                </div>
+
+                <p className="text-xs text-[var(--muted)] mb-3 line-clamp-2">
+                  {manifest.description}
+                </p>
+
+                {/* Quick summary of what plugin provides */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {toolCount > 0 && (
+                    <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] text-blue-400">
+                      {toolCount} {toolCount === 1 ? "tool" : "tools"}
+                    </span>
+                  )}
+                  {hookCount > 0 && (
+                    <span className="rounded bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-purple-400">
+                      {hookCount} {hookCount === 1 ? "hook" : "hooks"}
+                    </span>
+                  )}
+                  {routeCount > 0 && (
+                    <span className="rounded bg-cyan-500/10 px-1.5 py-0.5 text-[10px] text-cyan-400">
+                      {routeCount} {routeCount === 1 ? "route" : "routes"}
+                    </span>
+                  )}
+                  {serviceCount > 0 && (
+                    <span className="rounded bg-pink-500/10 px-1.5 py-0.5 text-[10px] text-pink-400">
+                      {serviceCount} {serviceCount === 1 ? "service" : "services"}
+                    </span>
+                  )}
+                  {manifest.permissions.length > 0 && (
+                    <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400">
+                      {manifest.permissions.length} {manifest.permissions.length === 1 ? "perm" : "perms"}
+                    </span>
+                  )}
+                </div>
+
+                {plugin.error && (
+                  <div className="text-[10px] text-red-400 mt-2 truncate" title={plugin.error}>
+                    {plugin.error}
+                  </div>
+                )}
+              </button>
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-2 mt-3 pt-3 border-t border-[var(--border)]">
+                {plugin.status === "active" && (
+                  <>
+                    <ActionButton
+                      label="Reload"
+                      colorClass="bg-blue-500/10 text-blue-400 hover:bg-blue-500/20"
+                      loading={actionLoading === `${plugin.id}:reload`}
+                      onClick={(e) => { e.stopPropagation(); handleAction(plugin.id, "reload"); }}
+                    />
+                    <ActionButton
+                      label="Unload"
+                      colorClass="bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                      loading={actionLoading === `${plugin.id}:unload`}
+                      onClick={(e) => { e.stopPropagation(); handleAction(plugin.id, "unload"); }}
+                    />
+                  </>
+                )}
+                {plugin.status === "failed" && (
+                  <>
+                    <ActionButton
+                      label="Reload"
+                      colorClass="bg-blue-500/10 text-blue-400 hover:bg-blue-500/20"
+                      loading={actionLoading === `${plugin.id}:reload`}
+                      onClick={(e) => { e.stopPropagation(); handleAction(plugin.id, "reload"); }}
+                    />
+                    <ActionButton
+                      label="Unload"
+                      colorClass="bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                      loading={actionLoading === `${plugin.id}:unload`}
+                      onClick={(e) => { e.stopPropagation(); handleAction(plugin.id, "unload"); }}
+                    />
+                  </>
+                )}
+                {plugin.status === "available" && (
+                  <ActionButton
+                    label="Install"
+                    colorClass="bg-green-500/10 text-green-400 hover:bg-green-500/20"
+                    loading={actionLoading === `${plugin.id}:install`}
+                    onClick={(e) => { e.stopPropagation(); handleAction(plugin.id, "install"); }}
+                  />
+                )}
+                {plugin.status === "unloaded" && (
+                  <ActionButton
+                    label="Install"
+                    colorClass="bg-green-500/10 text-green-400 hover:bg-green-500/20"
+                    loading={actionLoading === `${plugin.id}:install`}
+                    onClick={(e) => { e.stopPropagation(); handleAction(plugin.id, "install"); }}
+                  />
+                )}
+              </div>
+            </div>
           );
         })}
       </div>
@@ -422,7 +692,7 @@ export default function PluginsPage() {
       {/* Empty state */}
       {plugins.length === 0 && !error && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-8 text-center">
-          <div className="text-[var(--foreground)] font-medium mb-2">No plugins loaded</div>
+          <div className="text-[var(--foreground)] font-medium mb-2">No plugins found</div>
           <p className="text-sm text-[var(--muted)] max-w-md mx-auto">
             Plugins are discovered from the <code className="text-xs bg-white/5 rounded px-1.5 py-0.5">plugins/</code> directory.
             Each plugin needs a <code className="text-xs bg-white/5 rounded px-1.5 py-0.5">plugin.yaml</code> manifest

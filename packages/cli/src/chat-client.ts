@@ -48,6 +48,9 @@ export interface ChatClientConfig {
   initialReconnectDelay?: number;
 }
 
+const MAX_APPROVAL_QUEUE = 200;
+const MAX_OUTPUT_BUFFER = 500;
+
 export class ChatClient {
   private _running = false;
   private _currentSessionId: string | null = null;
@@ -273,6 +276,13 @@ export class ChatClient {
           ? perms.map((p: unknown) => String((p as Record<string, unknown>).scope ?? "")).join(", ")
           : "";
         if (requestId) {
+          // Cap the approval queue to prevent unbounded memory growth
+          if (this._approvalQueue.length >= MAX_APPROVAL_QUEUE) {
+            const dropped = this._approvalQueue.shift();
+            if (dropped && this._ws) {
+              this._ws.send(JSON.stringify({ type: "approve", request_id: dropped.requestId, decision: "deny" }));
+            }
+          }
           this._approvalQueue.push({ requestId, toolName, scopes });
           this.processApprovalQueue();
         }
@@ -360,7 +370,10 @@ export class ChatClient {
 
   private printAbove(text: string): void {
     if (this._approvalActive) {
-      this._outputBuffer.push(text);
+      // Cap output buffer to prevent unbounded memory growth during long approval waits
+      if (this._outputBuffer.length < MAX_OUTPUT_BUFFER) {
+        this._outputBuffer.push(text);
+      }
       if (this._outputBuffer.length === 5) {
         // Hint that events are being buffered
         this._terminal.writeLine(dim(`  (buffering events while waiting for approval...)`));

@@ -158,6 +158,33 @@ export const createSession = (task: string, mode = "mock") =>
 export const abortSession = (id: string) =>
   apiFetch<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}/abort`, { method: "POST" });
 
+// Session Export / Import
+export interface SessionExportBundle {
+  version: number;
+  exported_at: string;
+  session: Record<string, unknown>;
+  events: JournalEvent[];
+  plan: Record<string, unknown> | null;
+}
+
+export const exportSession = async (id: string): Promise<Blob> => {
+  const headers: Record<string, string> = {
+    ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+  };
+  const res = await fetch(`${BASE_URL}/api/sessions/${encodeURIComponent(id)}/export`, { headers });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${body}`);
+  }
+  return res.blob();
+};
+
+export const importSession = (bundle: unknown) =>
+  apiFetch<{ session_id: string; events_imported: number }>("/api/sessions/import", {
+    method: "POST",
+    body: JSON.stringify(bundle),
+  });
+
 // Journal
 export const getJournal = async (sessionId: string): Promise<JournalEvent[]> => {
   const res = await apiFetch<JournalEvent[] | { events: JournalEvent[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/journal`);
@@ -232,7 +259,7 @@ export interface PluginManifestInfo {
   provides: PluginProvides;
 }
 
-export type PluginStatus = "discovered" | "loading" | "active" | "failed" | "unloaded";
+export type PluginStatus = "discovered" | "loading" | "active" | "failed" | "unloaded" | "available";
 
 export interface PluginInfo {
   id: string;
@@ -244,13 +271,34 @@ export interface PluginInfo {
   config: Record<string, unknown>;
 }
 
+export interface PluginListResponse {
+  plugins: PluginInfo[];
+  available: PluginInfo[];
+}
+
+export const getPluginsCatalog = async (): Promise<PluginListResponse> => {
+  return apiFetch<PluginListResponse>("/api/plugins");
+};
+
 export const getPlugins = async (): Promise<PluginInfo[]> => {
-  const res = await apiFetch<{ plugins: PluginInfo[] }>("/api/plugins");
+  const res = await apiFetch<PluginListResponse>("/api/plugins");
   return res.plugins;
 };
 
 export const getPlugin = async (id: string): Promise<PluginInfo> => {
   return apiFetch<PluginInfo>(`/api/plugins/${encodeURIComponent(id)}`);
+};
+
+export const reloadPlugin = async (id: string): Promise<PluginInfo> => {
+  return apiFetch<PluginInfo>(`/api/plugins/${encodeURIComponent(id)}/reload`, { method: "POST" });
+};
+
+export const unloadPlugin = async (id: string): Promise<{ status: string; id: string }> => {
+  return apiFetch<{ status: string; id: string }>(`/api/plugins/${encodeURIComponent(id)}/unload`, { method: "POST" });
+};
+
+export const installPlugin = async (id: string): Promise<PluginInfo> => {
+  return apiFetch<PluginInfo>(`/api/plugins/${encodeURIComponent(id)}/install`, { method: "POST" });
 };
 
 // Schedules — API returns { schedules: [...], total: N }

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { getMetricsText, getCoverage } from "@/lib/api";
 import type { CoverageReport, CoverageMetric } from "@/lib/api";
+import { LiveMetricsPanel } from "@/components/metrics-live";
 
 /* ── Prometheus text parser ─────────────────────────────────────────── */
 
@@ -918,6 +919,11 @@ export default function MetricsPage() {
           )}
         </div>
       )}
+
+      {/* Live real-time metrics charts */}
+      <div className="mb-6">
+        <LiveMetricsPanel />
+      </div>
 
       {/* Metric groups */}
       {Object.entries(METRIC_GROUPS).map(([key, { label }]) => {

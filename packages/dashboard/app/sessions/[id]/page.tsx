@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { getSession, getJournal, abortSession, type SessionDetail, type JournalEvent } from "@/lib/api";
+import { getSession, getJournal, abortSession, exportSession, type SessionDetail, type JournalEvent } from "@/lib/api";
 import { useWebSocket } from "@/lib/use-websocket";
 import { PhaseIndicator } from "@/components/phase-indicator";
 import { PlanViewer } from "@/components/plan-viewer";
@@ -149,6 +149,23 @@ export default function SessionDetailPage() {
     }
   };
 
+  const handleExport = async () => {
+    if (!id) return;
+    try {
+      const blob = await exportSession(id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `session-${id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Export failed");
+    }
+  };
+
   return (
     <div>
       {/* Header */}
@@ -170,6 +187,16 @@ export default function SessionDetailPage() {
           >
             Replay
           </Link>
+          <button
+            onClick={handleExport}
+            className="rounded bg-[var(--accent)]/10 px-3 py-1 text-xs text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors flex items-center gap-1"
+            title="Export session"
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 2v8M5 7l3 3 3-3M3 12v1.5h10V12" />
+            </svg>
+            Export
+          </button>
           <span className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} title={connected ? "Live" : "Disconnected"} />
           {session && (session.status === "running" || session.status === "planning") && (
             <button onClick={handleAbort} className="rounded bg-red-500/10 px-3 py-1 text-xs text-red-400 hover:bg-red-500/20">

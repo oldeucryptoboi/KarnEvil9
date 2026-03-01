@@ -5,10 +5,12 @@ import type { JournalEventType } from "@karnevil9/schemas";
 import type { TaskCheckpoint } from "./types.js";
 
 const MAX_CHECKPOINTS_PER_TASK = 10;
+const MAX_TRACKED_TASKS = 5_000;
 
 export class CheckpointSerializer {
   private checkpoints = new Map<string, TaskCheckpoint[]>(); // task_id -> checkpoints
   private filePath: string;
+  private writeLock: Promise<void> = Promise.resolve();
   private emitEvent?: (type: JournalEventType, payload: Record<string, unknown>) => void;
 
   constructor(filePath: string, emitEvent?: (type: JournalEventType, payload: Record<string, unknown>) => void) {
@@ -38,21 +40,29 @@ export class CheckpointSerializer {
   }
 
   async save(): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true });
-    const allCheckpoints: TaskCheckpoint[] = [];
-    for (const cps of this.checkpoints.values()) {
-      allCheckpoints.push(...cps);
-    }
-    const content = allCheckpoints.map(c => JSON.stringify(c)).join("\n") + (allCheckpoints.length > 0 ? "\n" : "");
-    const tmpPath = this.filePath + ".tmp";
-    const fh = await open(tmpPath, "w");
+    const prev = this.writeLock;
+    let release!: () => void;
+    this.writeLock = new Promise<void>((r) => { release = r; });
     try {
-      await fh.writeFile(content, "utf-8");
-      await fh.sync();
+      await prev;
+      await mkdir(dirname(this.filePath), { recursive: true });
+      const allCheckpoints: TaskCheckpoint[] = [];
+      for (const cps of this.checkpoints.values()) {
+        allCheckpoints.push(...cps);
+      }
+      const content = allCheckpoints.map(c => JSON.stringify(c)).join("\n") + (allCheckpoints.length > 0 ? "\n" : "");
+      const tmpPath = this.filePath + ".tmp";
+      const fh = await open(tmpPath, "w");
+      try {
+        await fh.writeFile(content, "utf-8");
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
+      await rename(tmpPath, this.filePath);
     } finally {
-      await fh.close();
+      release();
     }
-    await rename(tmpPath, this.filePath);
   }
 
   saveCheckpoint(checkpoint: Omit<TaskCheckpoint, "checkpoint_id">): TaskCheckpoint {
@@ -62,6 +72,11 @@ export class CheckpointSerializer {
     };
 
     if (!this.checkpoints.has(cp.task_id)) {
+      // Evict oldest task entry when map grows too large
+      if (this.checkpoints.size >= MAX_TRACKED_TASKS) {
+        const firstKey = this.checkpoints.keys().next().value;
+        if (firstKey !== undefined) this.checkpoints.delete(firstKey);
+      }
       this.checkpoints.set(cp.task_id, []);
     }
     const list = this.checkpoints.get(cp.task_id)!;

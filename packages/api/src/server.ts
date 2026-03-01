@@ -6,6 +6,7 @@ import type { ToolRegistry, ToolRuntime } from "@karnevil9/tools";
 import type { Journal } from "@karnevil9/journal";
 import type { PermissionEngine } from "@karnevil9/permissions";
 import type { Planner, Task, ApprovalDecision, ExecutionMode, SessionLimits, PolicyProfile, JournalEvent } from "@karnevil9/schemas";
+import { validateJournalEventData } from "@karnevil9/schemas";
 import type { PluginRegistry } from "@karnevil9/plugins";
 import type { ActiveMemory } from "@karnevil9/memory";
 import type { MetricsCollector } from "@karnevil9/metrics";
@@ -14,7 +15,7 @@ import type { Scheduler } from "@karnevil9/scheduler";
 import { createSchedulerRoutes } from "@karnevil9/scheduler";
 import type { MeshManager } from "@karnevil9/swarm";
 import type { ServerResponse, Server, IncomingMessage } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeEqual, randomUUID } from "node:crypto";
 import { parse as parseUrl } from "node:url";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { resolve as pathResolve, dirname as pathDirname, join as pathJoin } from "node:path";
@@ -35,7 +36,9 @@ const RATE_LIMITER_PRUNE_INTERVAL_MS = 60_000;
 const MAX_JOURNAL_PAGE = 500;
 const MAX_REPLAY_EVENTS = 1000;
 const MAX_PLUGIN_BODY_BYTES = 1024 * 1024;         // 1 MB for plugin route bodies
+const MAX_IMPORT_BUNDLE_BYTES = 10 * 1024 * 1024;  // 10 MB for session import bundles
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SAFE_SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
 /** Structured error logging — omits stack traces in production. */
 function logError(label: string, err: unknown): void {
@@ -47,12 +50,17 @@ function logError(label: string, err: unknown): void {
   }
 }
 
-// ─── Rate Limiter ──────────────────────────────────────────────────
+// ─── Rate Limiter (Sliding Window) ──────────────────────────────────
 
 export class RateLimiter {
-  private windows = new Map<string, { count: number; resetAt: number }>();
-  private maxRequests: number;
-  private windowMs: number;
+  private windows = new Map<string, number[]>();
+  /** Insertion-order tracking for LRU eviction */
+  private accessOrder: string[] = [];
+  readonly maxRequests: number;
+  readonly windowMs: number;
+
+  /** Maximum tracked IPs to prevent memory exhaustion */
+  static readonly MAX_IPS = 10_000;
 
   constructor(maxRequests = 100, windowMs = 60000) {
     this.maxRequests = maxRequests;
@@ -61,32 +69,96 @@ export class RateLimiter {
 
   check(key: string): { allowed: boolean; remaining: number; resetAt: number } {
     const now = Date.now();
-    const entry = this.windows.get(key);
-    if (!entry || now >= entry.resetAt) {
-      this.windows.set(key, { count: 1, resetAt: now + this.windowMs });
-      return { allowed: true, remaining: this.maxRequests - 1, resetAt: now + this.windowMs };
-    }
-    entry.count++;
-    const remaining = Math.max(0, this.maxRequests - entry.count);
-    return { allowed: entry.count <= this.maxRequests, remaining, resetAt: entry.resetAt };
-  }
+    const cutoff = now - this.windowMs;
 
-  private static readonly MAX_WINDOWS = 100_000;
+    let timestamps = this.windows.get(key);
+    if (!timestamps) {
+      // LRU eviction: if at capacity, drop the oldest-accessed IP
+      if (this.windows.size >= RateLimiter.MAX_IPS) {
+        this.evictOldest();
+      }
+      timestamps = [];
+      this.windows.set(key, timestamps);
+    }
+
+    // Slide window: remove timestamps older than the window
+    while (timestamps.length > 0 && timestamps[0]! < cutoff) {
+      timestamps.shift();
+    }
+
+    // Update LRU access order
+    this.touchAccessOrder(key);
+
+    // Record this request
+    timestamps.push(now);
+
+    const count = timestamps.length;
+    const remaining = Math.max(0, this.maxRequests - count);
+    // resetAt: when the oldest request in the window will expire
+    const resetAt = timestamps.length > 0 ? timestamps[0]! + this.windowMs : now + this.windowMs;
+    const allowed = count <= this.maxRequests;
+
+    return { allowed, remaining, resetAt };
+  }
 
   /** Periodically prune expired entries to prevent memory leak */
   prune(): void {
     const now = Date.now();
-    for (const [key, entry] of this.windows) {
-      if (now >= entry.resetAt) this.windows.delete(key);
-    }
-    // Hard cap: evict oldest entries if still over limit after pruning
-    if (this.windows.size > RateLimiter.MAX_WINDOWS) {
-      let toEvict = this.windows.size - RateLimiter.MAX_WINDOWS;
-      for (const key of this.windows.keys()) {
-        if (toEvict-- <= 0) break;
+    const cutoff = now - this.windowMs;
+    for (const [key, timestamps] of this.windows) {
+      // Remove expired timestamps
+      while (timestamps.length > 0 && timestamps[0]! < cutoff) {
+        timestamps.shift();
+      }
+      // Delete entries with no remaining timestamps
+      if (timestamps.length === 0) {
         this.windows.delete(key);
       }
     }
+    // Hard cap: evict oldest-accessed entries if still over limit
+    while (this.windows.size > RateLimiter.MAX_IPS) {
+      this.evictOldest();
+    }
+  }
+
+  /** Evict the least-recently-used IP from the windows map */
+  private evictOldest(): void {
+    // Walk accessOrder from front (oldest) to find one still in the map
+    while (this.accessOrder.length > 0) {
+      const oldest = this.accessOrder.shift()!;
+      if (this.windows.has(oldest)) {
+        this.windows.delete(oldest);
+        return;
+      }
+    }
+    // Fallback: evict first key from map iteration order
+    const firstKey = this.windows.keys().next().value;
+    if (firstKey !== undefined) this.windows.delete(firstKey);
+  }
+
+  /** Move key to end of access order (most recently used) */
+  private touchAccessOrder(key: string): void {
+    this.accessOrder.push(key);
+    // Periodically compact to avoid unbounded growth of the access order array
+    if (this.accessOrder.length > RateLimiter.MAX_IPS * 3) {
+      const seen = new Set<string>();
+      const compacted: string[] = [];
+      // Walk from end (most recent) to front, keeping only the last occurrence
+      for (let i = this.accessOrder.length - 1; i >= 0; i--) {
+        const k = this.accessOrder[i]!;
+        if (!seen.has(k) && this.windows.has(k)) {
+          seen.add(k);
+          compacted.push(k);
+        }
+      }
+      compacted.reverse();
+      this.accessOrder = compacted;
+    }
+  }
+
+  /** For testing: return current size of tracked IPs */
+  get size(): number {
+    return this.windows.size;
   }
 }
 
@@ -248,6 +320,8 @@ export interface ApiServerConfig {
   trustedProxies?: string[];
   /** Name advertised via Bonjour/mDNS (e.g. "EDDIE"). Defaults to OS hostname. */
   serviceName?: string;
+  /** Rate limiter configuration. */
+  rateLimit?: { windowMs?: number; maxRequests?: number };
 }
 
 /** Validate numeric config values at startup to fail fast on misconfigurations. */
@@ -326,6 +400,10 @@ export class ApiServer {
   private wsClients = new Set<WSClient>();
   private serviceName?: string;
   private dnssdProcess?: ChildProcess;
+  /** API key rotation: old keys kept for a grace period */
+  private rotatedKeys = new Map<string, ReturnType<typeof setTimeout>>();
+  private static readonly KEY_ROTATION_GRACE_MS = 5 * 60 * 1000; // 5 minutes
+  private insecureMode: boolean = false;
 
   constructor(config: ApiServerConfig);
   constructor(toolRegistry: ToolRegistry, journal: Journal);
@@ -354,6 +432,7 @@ export class ApiServer {
       this.maxSseClientsPerSession = 10;
       this.agentic = false;
       this.approvalTimeoutMs = 300000; // 5 minutes
+      this.insecureMode = true;
       this.rateLimiter = new RateLimiter();
       this.rateLimiterPruneInterval = setInterval(() => this.rateLimiter.prune(), RATE_LIMITER_PRUNE_INTERVAL_MS);
       this.rateLimiterPruneInterval.unref();
@@ -384,7 +463,10 @@ export class ApiServer {
       this.corsOrigins = config.corsOrigins;
       this.trustedProxies = config.trustedProxies;
       this.serviceName = config.serviceName;
-      this.rateLimiter = new RateLimiter();
+      this.insecureMode = config.insecure === true;
+      const rlWindow = config.rateLimit?.windowMs ?? 60000;
+      const rlMax = config.rateLimit?.maxRequests ?? 100;
+      this.rateLimiter = new RateLimiter(rlMax, rlWindow);
       this.rateLimiterPruneInterval = setInterval(() => this.rateLimiter.prune(), RATE_LIMITER_PRUNE_INTERVAL_MS);
       this.rateLimiterPruneInterval.unref();
     }
@@ -572,6 +654,9 @@ export class ApiServer {
     if (this.journalUnsubscribe) this.journalUnsubscribe();
     // Stop rate limiter pruning
     if (this.rateLimiterPruneInterval) clearInterval(this.rateLimiterPruneInterval);
+    // Clear rotated key grace timers
+    for (const timer of this.rotatedKeys.values()) clearTimeout(timer);
+    this.rotatedKeys.clear();
     // Stop scheduler
     if (this.scheduler) await this.scheduler.stop();
     // Detach metrics
@@ -966,19 +1051,38 @@ export class ApiServer {
 
     // Bearer token auth middleware — applied to all routes after /health
     if (this.apiToken) {
-      const token = this.apiToken;
       router.use((req, res, next) => {
         const auth = req.headers.authorization;
+        const clientIp = getClientIP(req, this.trustedProxies);
+        const safePath = req.path.replace(/[\r\n]/g, "");
         if (!auth || !auth.startsWith("Bearer ")) {
-          console.warn(`[api] AUTH_FAIL: missing/malformed Authorization header from ${getClientIP(req, this.trustedProxies)} ${req.method} ${req.path.replace(/[\r\n]/g, "")}`);
-
+          console.warn(`[api] AUTH_FAIL: missing/malformed Authorization header from ${clientIp} ${req.method} ${safePath}`);
+          this.journal.emit("_system", "auth.failed", { ip: clientIp, method: req.method, path: safePath, reason: "missing_or_malformed_header" }).catch(() => {});
           res.status(401).json({ error: "Unauthorized" });
           return;
         }
-        const provided = Buffer.from(auth.slice(7));
-        const expected = Buffer.from(token);
-        if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-          console.warn(`[api] AUTH_FAIL: invalid token from ${getClientIP(req, this.trustedProxies)} ${req.method} ${req.path.replace(/[\r\n]/g, "")}`);
+        const providedToken = auth.slice(7);
+        const provided = Buffer.from(providedToken);
+
+        // Check current API token
+        const expected = Buffer.from(this.apiToken!);
+        const currentMatch = provided.length === expected.length && timingSafeEqual(provided, expected);
+
+        // Check rotated (grace period) keys
+        let rotatedMatch = false;
+        if (!currentMatch) {
+          for (const oldKey of this.rotatedKeys.keys()) {
+            const oldBuf = Buffer.from(oldKey);
+            if (provided.length === oldBuf.length && timingSafeEqual(provided, oldBuf)) {
+              rotatedMatch = true;
+              break;
+            }
+          }
+        }
+
+        if (!currentMatch && !rotatedMatch) {
+          console.warn(`[api] AUTH_FAIL: invalid token from ${clientIp} ${req.method} ${safePath}`);
+          this.journal.emit("_system", "auth.failed", { ip: clientIp, method: req.method, path: safePath, reason: "invalid_token" }).catch(() => {});
           res.status(401).json({ error: "Unauthorized" });
           return;
         }
@@ -989,16 +1093,44 @@ export class ApiServer {
     }
 
     // Rate limiting — applied after auth, before business routes
+    // Health endpoint is exempt from rate limiting
     router.use((req, res, next) => {
+      if (req.path === "/health") { next(); return; }
       const ip = getClientIP(req, this.trustedProxies);
       const result = this.rateLimiter.check(ip);
+      res.setHeader("X-RateLimit-Limit", String(this.rateLimiter.maxRequests));
       res.setHeader("X-RateLimit-Remaining", String(result.remaining));
       res.setHeader("X-RateLimit-Reset", String(Math.ceil(result.resetAt / 1000)));
       if (!result.allowed) {
+        const retryAfterSec = Math.ceil((result.resetAt - Date.now()) / 1000);
+        res.setHeader("Retry-After", String(Math.max(1, retryAfterSec)));
+        this.journal.emit("_system", "auth.rate_limited", { ip, method: req.method, path: req.path.replace(/[\r\n]/g, "") }).catch(() => {});
         res.status(429).json({ error: "Rate limit exceeded. Try again later." });
         return;
       }
       next();
+    });
+
+    // ─── API Key Rotation ──────────────────────────────────────────────
+    router.post("/auth/rotate-key", (req, res) => {
+      if (this.insecureMode || !this.apiToken) {
+        res.status(403).json({ error: "Key rotation is only available when authentication is enabled" });
+        return;
+      }
+      const oldKey = this.apiToken;
+      const newKey = randomUUID();
+      this.apiToken = newKey;
+
+      // Keep old key valid for 5-minute grace period
+      const graceTimer = setTimeout(() => {
+        this.rotatedKeys.delete(oldKey);
+      }, ApiServer.KEY_ROTATION_GRACE_MS);
+      graceTimer.unref();
+      this.rotatedKeys.set(oldKey, graceTimer);
+
+      const rotatedAt = new Date().toISOString();
+      this.journal.emit("_system", "auth.key_rotated", { rotated_at: rotatedAt, ip: getClientIP(req, this.trustedProxies) }).catch(() => {});
+      res.json({ new_key: newKey, rotated_at: rotatedAt });
     });
 
     // Metrics endpoint (behind auth)
@@ -1348,11 +1480,146 @@ export class ApiServer {
       } catch (err) { logError("POST /sessions/:id/recover", err); res.status(500).json({ error: "Internal server error" }); }
     });
 
+    // ─── Session Export / Import ─────────────────────────────────────
+
+    router.get("/sessions/:id/export", async (req, res) => {
+      try {
+        const rawId = req.params.id!;
+        // Sanitize session ID to prevent path traversal
+        if (!SAFE_SESSION_ID_RE.test(rawId)) { res.status(400).json({ error: "Invalid session ID format" }); return; }
+
+        // Try in-memory kernel first, then fall back to journal
+        const kernel = this.kernels.get(rawId);
+        const session = kernel ? kernel.getSession() : null;
+        const events = await this.journal.readSession(rawId);
+
+        if (!session && events.length === 0) {
+          res.status(404).json({ error: "Session not found" });
+          return;
+        }
+
+        // Reconstruct session from journal if not in memory
+        let sessionObj: Record<string, unknown>;
+        if (session) {
+          sessionObj = { ...session };
+        } else {
+          const createdEvt = events.find((e) => e.type === "session.created");
+          const terminalEvt = [...events].reverse().find((e) =>
+            e.type === "session.completed" || e.type === "session.failed" || e.type === "session.aborted"
+          );
+          const statusMap: Record<string, string> = {
+            "session.completed": "completed",
+            "session.failed": "failed",
+            "session.aborted": "aborted",
+          };
+          sessionObj = {
+            session_id: rawId,
+            status: terminalEvt ? (statusMap[terminalEvt.type] ?? "unknown") : "unknown",
+            created_at: events[0]!.timestamp,
+            task_text: (createdEvt?.payload?.task_text as string) ?? (createdEvt?.payload?.task as string) ?? undefined,
+            mode: (createdEvt?.payload?.mode as string) ?? undefined,
+          };
+        }
+
+        // Extract plan from journal events
+        const planEvent = [...events].reverse().find((e) => e.type === "plan.accepted");
+        const plan = (planEvent?.payload?.plan as Record<string, unknown> | undefined) ?? null;
+
+        const bundle = {
+          version: 1,
+          exported_at: new Date().toISOString(),
+          session: sessionObj,
+          events,
+          plan,
+        };
+
+        res.setHeader("Content-Disposition", `attachment; filename="session-${rawId}.json"`);
+        res.json(bundle);
+      } catch (err) { logError("GET /sessions/:id/export", err); res.status(500).json({ error: "Internal server error" }); }
+    });
+
+    router.post("/sessions/import", express.json({ limit: "10mb" }), async (req, res) => {
+      try {
+        // Check content-length before parsing (defense in depth — express.json handles parsing limit)
+        const contentLength = parseInt(req.headers["content-length"] ?? "0", 10);
+        if (contentLength > MAX_IMPORT_BUNDLE_BYTES) {
+          res.status(413).json({ error: "Import bundle too large (max 10MB)" });
+          return;
+        }
+
+        const body = req.body;
+        if (!body || typeof body !== "object") {
+          res.status(400).json({ error: "Request body must be a JSON object" });
+          return;
+        }
+
+        const { version, session, events } = body as {
+          version?: unknown;
+          session?: unknown;
+          events?: unknown;
+        };
+
+        // Validate required fields
+        if (version === undefined || version === null) {
+          res.status(400).json({ error: "Missing required field: version" });
+          return;
+        }
+        if (typeof version !== "number" || version !== 1) {
+          res.status(400).json({ error: "Unsupported bundle version" });
+          return;
+        }
+        if (!session || typeof session !== "object") {
+          res.status(400).json({ error: "Missing or invalid required field: session" });
+          return;
+        }
+        if (!Array.isArray(events)) {
+          res.status(400).json({ error: "Missing or invalid required field: events" });
+          return;
+        }
+
+        // Validate each event against the schema
+        for (let i = 0; i < events.length; i++) {
+          const evt = events[i];
+          const validation = validateJournalEventData(evt);
+          if (!validation.valid) {
+            res.status(400).json({ error: `Invalid event at index ${i}: ${validation.errors.join(", ")}` });
+            return;
+          }
+        }
+
+        // Create a new session ID for the imported session
+        const newSessionId = `imported-${uuid()}`;
+
+        // Replay all events into the journal under the new session ID
+        let imported = 0;
+        for (const evt of events as JournalEvent[]) {
+          await this.journal.emit(newSessionId, evt.type, evt.payload);
+          imported++;
+        }
+
+        res.json({ session_id: newSessionId, events_imported: imported });
+      } catch (err) { logError("POST /sessions/import", err); res.status(500).json({ error: "Internal server error" }); }
+    });
+
     // ─── Plugin Management Routes ─────────────────────────────────────
 
-    router.get("/plugins", (_req, res) => {
-      if (!this.pluginRegistry) { res.json({ plugins: [] }); return; }
-      res.json({ plugins: this.pluginRegistry.listPlugins() });
+    router.get("/plugins", async (_req, res) => {
+      if (!this.pluginRegistry) { res.json({ plugins: [], available: [] }); return; }
+      // Refresh discovered to pick up any new plugins on disk
+      try { await this.pluginRegistry.refreshDiscovered(); } catch { /* non-critical */ }
+      const loaded = this.pluginRegistry.listPlugins();
+      const loadedIds = new Set(loaded.map((p) => p.id));
+      const discovered = this.pluginRegistry.listDiscovered();
+      // Build "available" list: discovered plugins that are not in the loaded set
+      const available = discovered
+        .filter((d) => !loadedIds.has(d.manifest.id))
+        .map((d) => ({
+          id: d.manifest.id,
+          manifest: d.manifest,
+          status: "available" as const,
+          config: {},
+        }));
+      res.json({ plugins: loaded, available });
     });
 
     router.get("/plugins/:id", (req, res) => {
@@ -1364,20 +1631,54 @@ export class ApiServer {
 
     router.post("/plugins/:id/reload", async (req, res) => {
       if (!this.pluginRegistry) { res.status(404).json({ error: "Plugin system not configured" }); return; }
+      const pluginId = req.params.id!;
+      const existing = this.pluginRegistry.getPlugin(pluginId);
+      if (!existing || existing.status === "unloaded") {
+        res.status(404).json({ error: `Plugin "${pluginId}" is not loaded` });
+        return;
+      }
       try {
-        console.log(`[api] PLUGIN_RELOAD: plugin_id=${req.params.id!} source_ip=${getClientIP(req, this.trustedProxies)}`);
-        const state = await this.pluginRegistry.reloadPlugin(req.params.id!);
+        console.log(`[api] PLUGIN_RELOAD: plugin_id=${pluginId} source_ip=${getClientIP(req, this.trustedProxies)}`);
+        const state = await this.pluginRegistry.reloadPlugin(pluginId);
         res.json(state);
-      } catch (err) { logError("POST /plugins/:id/reload", err); res.status(500).json({ error: "Internal server error" }); }
+      } catch (err) { logError("POST /plugins/:id/reload", err); res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" }); }
     });
 
     router.post("/plugins/:id/unload", async (req, res) => {
       if (!this.pluginRegistry) { res.status(404).json({ error: "Plugin system not configured" }); return; }
+      const pluginId = req.params.id!;
+      const existing = this.pluginRegistry.getPlugin(pluginId);
+      if (!existing || existing.status === "unloaded") {
+        res.status(404).json({ error: `Plugin "${pluginId}" is not loaded` });
+        return;
+      }
       try {
-        console.log(`[api] PLUGIN_UNLOAD: plugin_id=${req.params.id!} source_ip=${getClientIP(req, this.trustedProxies)}`);
-        await this.pluginRegistry.unloadPlugin(req.params.id!);
-        res.json({ status: "unloaded" });
-      } catch (err) { logError("POST /plugins/:id/unload", err); res.status(500).json({ error: "Internal server error" }); }
+        console.log(`[api] PLUGIN_UNLOAD: plugin_id=${pluginId} source_ip=${getClientIP(req, this.trustedProxies)}`);
+        await this.pluginRegistry.unloadPlugin(pluginId);
+        res.json({ status: "unloaded", id: pluginId });
+      } catch (err) { logError("POST /plugins/:id/unload", err); res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" }); }
+    });
+
+    router.post("/plugins/:id/install", async (req, res) => {
+      if (!this.pluginRegistry) { res.status(404).json({ error: "Plugin system not configured" }); return; }
+      const pluginId = req.params.id!;
+      try {
+        // Refresh discovered to ensure we have the latest
+        await this.pluginRegistry.refreshDiscovered();
+        console.log(`[api] PLUGIN_INSTALL: plugin_id=${pluginId} source_ip=${getClientIP(req, this.trustedProxies)}`);
+        const state = await this.pluginRegistry.installPlugin(pluginId);
+        res.json(state);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("already loaded")) {
+          res.status(409).json({ error: message });
+        } else if (message.includes("not found")) {
+          res.status(404).json({ error: message });
+        } else {
+          logError("POST /plugins/:id/install", err);
+          res.status(500).json({ error: message });
+        }
+      }
     });
 
     // ─── Plugin-Provided Routes ─────────────────────────────────────

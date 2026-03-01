@@ -237,8 +237,8 @@ export class ObjectStore {
   }
 
   getStats(): { total: number; by_type: Record<string, number>; by_category: Record<string, number> } {
-    const by_type: Record<string, number> = {};
-    const by_category: Record<string, number> = {};
+    const by_type: Record<string, number> = Object.create(null) as Record<string, number>;
+    const by_category: Record<string, number> = Object.create(null) as Record<string, number>;
 
     for (const entry of this.index.values()) {
       by_type[entry.object_type] = (by_type[entry.object_type] ?? 0) + 1;

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { getSessions, compactJournal, type SessionSummary } from "@/lib/api";
+import { getSessions, compactJournal, importSession, type SessionSummary } from "@/lib/api";
 import { type SessionTemplate } from "@/lib/templates";
 import { StatusBadge } from "@/components/status-badge";
 import { CreateSessionDialog } from "@/components/create-session-dialog";
@@ -17,6 +17,9 @@ export default function SessionsPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [activeTemplate, setActiveTemplate] = useState<SessionTemplate | null>(null);
   const [compareSelection, setCompareSelection] = useState<Set<string>>(new Set());
+  const [importResult, setImportResult] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const { connected } = useWSContext();
 
   const toggleCompare = (sessionId: string) => {
@@ -59,6 +62,30 @@ export default function SessionsPage() {
     setShowCreateDialog(true);
   };
 
+  const handleImportClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const text = await file.text();
+      const bundle = JSON.parse(text);
+      const result = await importSession(bundle);
+      setImportResult(`Imported session ${result.session_id.slice(0, 16)}... (${result.events_imported} events)`);
+      getSessions().then(setSessions).catch(() => {});
+    } catch (err) {
+      setImportResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setImporting(false);
+      // Reset file input so the same file can be selected again
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  }, []);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -70,6 +97,23 @@ export default function SessionsPage() {
           >
             New Session
           </button>
+          <button
+            onClick={handleImportClick}
+            disabled={importing}
+            className="rounded bg-[var(--accent)]/10 px-3 py-1.5 text-sm text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 10V2M5 5l3-3 3 3M3 12v1.5h10V12" />
+            </svg>
+            {importing ? "Importing..." : "Import"}
+          </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={handleImportFile}
+          />
           {compareSelection.size > 0 && (
             <div className="flex items-center gap-2 ml-2">
               <span className="text-xs text-[var(--muted)]">
@@ -118,6 +162,22 @@ export default function SessionsPage() {
       {error && (
         <div className="rounded-md bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-400 mb-4">
           {error}
+        </div>
+      )}
+
+      {importResult && (
+        <div className={`rounded-md p-3 text-sm mb-4 flex items-center justify-between ${
+          importResult.startsWith("Error")
+            ? "bg-red-500/10 border border-red-500/20 text-red-400"
+            : "bg-green-500/10 border border-green-500/20 text-green-400"
+        }`}>
+          <span>{importResult}</span>
+          <button
+            onClick={() => setImportResult(null)}
+            className="text-xs opacity-60 hover:opacity-100 ml-3"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

@@ -41,6 +41,8 @@ export interface PluginReloadError {
  * - "reload" (PluginReloadEvent) on successful reload
  * - "error"  (PluginReloadError) on failed reload
  */
+const MAX_CONTENT_HASHES = 1_000;
+
 export class PluginWatcher extends EventEmitter {
   private config: PluginWatcherConfig;
   private debounceMs: number;
@@ -223,6 +225,10 @@ export class PluginWatcher extends EventEmitter {
           if (discovered) {
             try {
               await this.config.registry.loadPlugin(subDir);
+              if (this.contentHashes.size >= MAX_CONTENT_HASHES) {
+                const firstKey = this.contentHashes.keys().next().value;
+                if (firstKey !== undefined) this.contentHashes.delete(firstKey);
+              }
               this.contentHashes.set(discovered.manifest.id, discovered.contentHash);
 
               const event: PluginReloadEvent = {
@@ -313,7 +319,11 @@ export class PluginWatcher extends EventEmitter {
         await this.config.registry.loadPlugin(pluginDir);
       }
 
-      // Update content hash
+      // Update content hash (cap map size to prevent unbounded growth)
+      if (!this.contentHashes.has(pluginId) && this.contentHashes.size >= MAX_CONTENT_HASHES) {
+        const firstKey = this.contentHashes.keys().next().value;
+        if (firstKey !== undefined) this.contentHashes.delete(firstKey);
+      }
       this.contentHashes.set(pluginId, discovered.contentHash);
 
       const event: PluginReloadEvent = {

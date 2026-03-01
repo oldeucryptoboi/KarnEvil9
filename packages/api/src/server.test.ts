@@ -36,7 +36,7 @@ async function fetch(url: string, opts?: { method?: string; body?: unknown; head
   const { method = "GET", body, headers: extraHeaders } = opts ?? {};
   const _parsed = new URL(url);
   const headers: Record<string, string> = { ...(body ? { "Content-Type": "application/json" } : {}), ...extraHeaders };
-  return new Promise<{ status: number; json: () => Promise<any>; text: () => Promise<string> }>((resolve, reject) => {
+  return new Promise<{ status: number; headers: Record<string, string>; json: () => Promise<any>; text: () => Promise<string> }>((resolve, reject) => {
     const req = http.request(
       url,
       { method, headers },
@@ -46,6 +46,7 @@ async function fetch(url: string, opts?: { method?: string; body?: unknown; head
         res.on("end", () => {
           resolve({
             status: res.statusCode,
+            headers: res.headers as Record<string, string>,
             json: async () => JSON.parse(data),
             text: async () => data,
           });
@@ -770,13 +771,15 @@ export async function register(api) {
     try { await rm(pluginsDir, { recursive: true }); } catch { /* ok */ }
   });
 
-  it("GET /api/plugins lists plugins", async () => {
+  it("GET /api/plugins lists plugins with status and available", async () => {
     const res = await fetch(`${baseUrl}/api/plugins`);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.plugins).toHaveLength(1);
     expect(body.plugins[0].id).toBe("api-test-plugin");
     expect(body.plugins[0].status).toBe("active");
+    // available array is present (may be empty if all plugins are loaded)
+    expect(Array.isArray(body.available)).toBe(true);
   });
 
   it("GET /api/plugins/:id returns single plugin", async () => {
@@ -808,23 +811,85 @@ export async function register(api) {
     expect(body.checks.plugins.failed).toBe(0);
   });
 
-  it("POST /api/plugins/:id/reload reloads a plugin", async () => {
+  it("POST /api/plugins/:id/reload returns updated state", async () => {
     const res = await fetch(`${baseUrl}/api/plugins/api-test-plugin/reload`, { method: "POST" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe("active");
+    expect(body.id).toBe("api-test-plugin");
   });
 
-  it("POST /api/plugins/:id/unload unloads a plugin", async () => {
+  it("POST /api/plugins/:id/unload removes plugin", async () => {
     const res = await fetch(`${baseUrl}/api/plugins/api-test-plugin/unload`, { method: "POST" });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe("unloaded");
+    expect(body.id).toBe("api-test-plugin");
 
     // Plugin should show as unloaded now
     const listRes = await fetch(`${baseUrl}/api/plugins`);
     const listBody = await listRes.json();
     expect(listBody.plugins[0].status).toBe("unloaded");
+  });
+
+  it("POST /api/plugins/:id/reload returns 404 for unknown plugin", async () => {
+    const res = await fetch(`${baseUrl}/api/plugins/nonexistent-plugin/reload`, { method: "POST" });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toContain("not loaded");
+  });
+
+  it("POST /api/plugins/:id/unload returns 404 for unknown plugin", async () => {
+    const res = await fetch(`${baseUrl}/api/plugins/nonexistent-plugin/unload`, { method: "POST" });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toContain("not loaded");
+  });
+
+  it("POST /api/plugins/:id/install loads available plugin", async () => {
+    // First, create a second plugin that we won't load initially
+    const installPluginDir = join(pluginsDir, "installable-plugin");
+    await mkdir(installPluginDir, { recursive: true });
+    await writeFile(join(installPluginDir, "plugin.yaml"), `
+id: installable-plugin
+name: Installable Plugin
+version: "1.0.0"
+description: A plugin to test install
+entry: index.js
+permissions: []
+provides:
+  hooks:
+    - before_step
+`);
+    await writeFile(join(installPluginDir, "index.js"), `
+export async function register(api) {
+  api.registerHook("before_step", async (ctx) => ({ action: "observe" }));
+}
+`);
+
+    // Unload the existing plugin first so we can test install with it
+    await fetch(`${baseUrl}/api/plugins/api-test-plugin/unload`, { method: "POST" });
+
+    // Now install it back via the install endpoint
+    const res = await fetch(`${baseUrl}/api/plugins/api-test-plugin/install`, { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.id).toBe("api-test-plugin");
+    expect(body.status).toBe("active");
+  });
+
+  it("POST /api/plugins/:id/install returns 409 for already loaded plugin", async () => {
+    const res = await fetch(`${baseUrl}/api/plugins/api-test-plugin/install`, { method: "POST" });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toContain("already loaded");
+  });
+
+  it("POST /api/plugins/:id/install returns 404 for unknown plugin", async () => {
+    const res = await fetch(`${baseUrl}/api/plugins/nonexistent-plugin/install`, { method: "POST" });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toContain("not found");
   });
 });
 
@@ -1819,7 +1884,7 @@ describe("ApiServer B3: session timer cleanup", () => {
   });
 });
 
-// ─── RateLimiter Unit Tests ─────────────────────────────────────────
+// ─── RateLimiter Unit Tests (Sliding Window) ────────────────────────
 
 describe("RateLimiter", () => {
   it("allows requests within the limit", () => {
@@ -1854,7 +1919,7 @@ describe("RateLimiter", () => {
     expect(r3.allowed).toBe(true);
   });
 
-  it("resets window after expiry", () => {
+  it("resets window after expiry (sliding window)", () => {
     vi.useFakeTimers();
     try {
       const limiter = new RateLimiter(1, 1000);
@@ -1878,17 +1943,21 @@ describe("RateLimiter", () => {
       const limiter = new RateLimiter(10, 500);
       limiter.check("client-f");
       limiter.check("client-g");
+      expect(limiter.size).toBe(2);
 
+      // Before expiry, prune should keep entries
       limiter.prune();
-      const rf = limiter.check("client-f");
-      expect(rf.remaining).toBe(8); // 10 - 2
+      expect(limiter.size).toBe(2);
 
       vi.advanceTimersByTime(600);
       limiter.prune();
 
+      // Both entries should be removed (timestamps expired)
+      expect(limiter.size).toBe(0);
+
       const rf2 = limiter.check("client-f");
       expect(rf2.allowed).toBe(true);
-      expect(rf2.remaining).toBe(9); // fresh window
+      expect(rf2.remaining).toBe(9); // fresh window: 10 - 1
     } finally {
       vi.useRealTimers();
     }
@@ -1899,25 +1968,233 @@ describe("RateLimiter", () => {
     try {
       const limiter = new RateLimiter(5, 2000);
       const result = limiter.check("client-h");
+      // Sliding window: resetAt = oldest timestamp + windowMs = 10000 + 2000
       expect(result.resetAt).toBe(12000);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("prune enforces hard cap on windows map", () => {
+  it("prune enforces hard cap (MAX_IPS) on windows map", () => {
     const limiter = new RateLimiter(100, 60000);
     // Fill well beyond what should be a reasonable size
     for (let i = 0; i < 200; i++) {
       limiter.check(`flood-${i}`);
     }
-    // After prune, windows should be at most MAX_WINDOWS (100_000)
+    // After prune, windows should be at most MAX_IPS (10,000)
     // but in practice the 200 entries are all fresh so prune won't expire them.
-    // The hard cap kicks in at 100_000 — verify no crash with many entries
+    // The hard cap kicks in at 10,000 — verify no crash with many entries
     limiter.prune();
     // Limiter should still function correctly
     const result = limiter.check("after-flood");
     expect(result.allowed).toBe(true);
+  });
+
+  it("exposes maxRequests and windowMs as readonly properties", () => {
+    const limiter = new RateLimiter(50, 30000);
+    expect(limiter.maxRequests).toBe(50);
+    expect(limiter.windowMs).toBe(30000);
+  });
+});
+
+// ─── Rate Limiting Integration Tests (Sliding Window) ───────────────
+
+describe("ApiServer rate limiting (sliding window)", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let apiServer: ApiServer;
+  let httpServer: ReturnType<typeof createServer>;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    registry = new ToolRegistry();
+    registry.register(testTool);
+    apiServer = new ApiServer({
+      toolRegistry: registry,
+      journal,
+      insecure: true,
+      rateLimit: { maxRequests: 5, windowMs: 60000 },
+    });
+
+    await new Promise<void>((resolve) => {
+      httpServer = createServer(apiServer.getExpressApp());
+      httpServer.listen(0, () => {
+        const addr = httpServer.address() as AddressInfo;
+        baseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("allows requests under the limit", async () => {
+    const res = await fetch(`${baseUrl}/api/tools`);
+    expect(res.status).toBe(200);
+  });
+
+  it("returns 429 when rate limit exceeded", async () => {
+    // 5 requests allowed, 6th should be rejected
+    for (let i = 0; i < 5; i++) {
+      const res = await fetch(`${baseUrl}/api/tools`);
+      expect(res.status).toBe(200);
+    }
+    const res = await fetch(`${baseUrl}/api/tools`);
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error).toContain("Rate limit exceeded");
+  });
+
+  it("includes correct X-RateLimit-* headers", async () => {
+    const res = await fetch(`${baseUrl}/api/tools`);
+    expect(res.status).toBe(200);
+    expect(res.headers["x-ratelimit-limit"]).toBe("5");
+    expect(res.headers["x-ratelimit-remaining"]).toBe("4");
+    expect(res.headers["x-ratelimit-reset"]).toBeTruthy();
+    // Reset should be a future Unix timestamp in seconds
+    const resetTs = parseInt(res.headers["x-ratelimit-reset"]!, 10);
+    expect(resetTs).toBeGreaterThan(Math.floor(Date.now() / 1000) - 1);
+  });
+
+  it("includes Retry-After header when rate-limited", async () => {
+    for (let i = 0; i < 5; i++) {
+      await fetch(`${baseUrl}/api/tools`);
+    }
+    const res = await fetch(`${baseUrl}/api/tools`);
+    expect(res.status).toBe(429);
+    expect(res.headers["retry-after"]).toBeTruthy();
+    const retryAfter = parseInt(res.headers["retry-after"]!, 10);
+    expect(retryAfter).toBeGreaterThanOrEqual(1);
+  });
+
+  it("exempts health endpoint from rate limiting", async () => {
+    // Exhaust the rate limit
+    for (let i = 0; i < 6; i++) {
+      await fetch(`${baseUrl}/api/tools`);
+    }
+    // Health should still work
+    const res = await fetch(`${baseUrl}/api/health`);
+    expect(res.status).toBe(200);
+    // Health should NOT have rate limit headers (since it is exempt)
+    expect(res.headers["x-ratelimit-limit"]).toBeUndefined();
+  });
+});
+
+// ─── API Key Rotation Tests ─────────────────────────────────────────
+
+describe("ApiServer key rotation", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let apiServer: ApiServer;
+  let httpServer: ReturnType<typeof createServer>;
+  let baseUrl: string;
+  const API_TOKEN = "rotation-test-token-12345";
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    registry = new ToolRegistry();
+    registry.register(testTool);
+    apiServer = new ApiServer({
+      toolRegistry: registry,
+      journal,
+      apiToken: API_TOKEN,
+    });
+
+    await new Promise<void>((resolve) => {
+      httpServer = createServer(apiServer.getExpressApp());
+      httpServer.listen(0, () => {
+        const addr = httpServer.address() as AddressInfo;
+        baseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("returns new key when auth is enabled", async () => {
+    const res = await fetch(`${baseUrl}/api/auth/rotate-key`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${API_TOKEN}` },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.new_key).toBeTruthy();
+    expect(typeof body.new_key).toBe("string");
+    expect(body.rotated_at).toBeTruthy();
+    // New key should be a UUID format
+    expect(body.new_key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  });
+
+  it("rejects unauthenticated rotation requests", async () => {
+    const res = await fetch(`${baseUrl}/api/auth/rotate-key`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("old key works during grace period after rotation", async () => {
+    // Rotate the key
+    const rotateRes = await fetch(`${baseUrl}/api/auth/rotate-key`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${API_TOKEN}` },
+    });
+    expect(rotateRes.status).toBe(200);
+    const { new_key } = await rotateRes.json();
+
+    // Old key should still work (grace period)
+    const oldKeyRes = await fetch(`${baseUrl}/api/tools`, {
+      headers: { Authorization: `Bearer ${API_TOKEN}` },
+    });
+    expect(oldKeyRes.status).toBe(200);
+
+    // New key should also work
+    const newKeyRes = await fetch(`${baseUrl}/api/tools`, {
+      headers: { Authorization: `Bearer ${new_key}` },
+    });
+    expect(newKeyRes.status).toBe(200);
+  });
+});
+
+describe("ApiServer key rotation in insecure mode", () => {
+  it("returns 403 when auth is not enabled", async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    const journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    const registry = new ToolRegistry();
+    registry.register(testTool);
+    const apiServer = new ApiServer({
+      toolRegistry: registry,
+      journal,
+      insecure: true,
+    });
+
+    const httpServer = await new Promise<ReturnType<typeof createServer>>((resolve) => {
+      const s = createServer(apiServer.getExpressApp());
+      s.listen(0, () => resolve(s));
+    });
+    const baseUrl = `http://127.0.0.1:${(httpServer.address() as AddressInfo).port}`;
+
+    try {
+      const res = await fetch(`${baseUrl}/api/auth/rotate-key`, { method: "POST" });
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).toContain("authentication is enabled");
+    } finally {
+      await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+      try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    }
   });
 });
 
@@ -2458,5 +2735,183 @@ describe("ApiServer H18: approval race prevention", () => {
 
     // resolve should have been called exactly once
     expect(resolveCount).toBe(1);
+  });
+});
+
+// ─── Session Export / Import Tests ──────────────────────────────────
+
+describe("ApiServer session export/import", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let apiServer: ApiServer;
+  let httpServer: ReturnType<typeof createServer>;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    registry = new ToolRegistry();
+    registry.register(testTool);
+    apiServer = new ApiServer(registry, journal);
+
+    await new Promise<void>((resolve) => {
+      httpServer = createServer(apiServer.getExpressApp());
+      httpServer.listen(0, () => {
+        const addr = httpServer.address() as AddressInfo;
+        baseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("export returns valid bundle with session and events", async () => {
+    const sessId = "30000000-0000-0000-0000-000000000001";
+    await journal.emit(sessId, "session.created", { task_text: "Export test" });
+    await journal.emit(sessId, "step.started", { step_id: "s1" });
+    await journal.emit(sessId, "step.succeeded", { step_id: "s1" });
+    await journal.emit(sessId, "session.completed", {});
+
+    const res = await fetch(`${baseUrl}/api/sessions/${sessId}/export`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.version).toBe(1);
+    expect(body.exported_at).toBeTruthy();
+    expect(body.session).toBeTruthy();
+    expect(body.session.session_id).toBe(sessId);
+    expect(body.events).toHaveLength(4);
+    expect(body.events[0].type).toBe("session.created");
+  });
+
+  it("export returns 404 for missing session", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/nonexistent-session-id/export`);
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error).toContain("not found");
+  });
+
+  it("export sanitizes session ID (path traversal attempt)", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent("../../etc/passwd")}/export`);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("Invalid session ID");
+  });
+
+  it("import creates new session with imported events", async () => {
+    // First export a session
+    const sessId = "30000000-0000-0000-0000-000000000002";
+    await journal.emit(sessId, "session.created", { task_text: "Import test" });
+    await journal.emit(sessId, "step.started", { step_id: "s1" });
+    await journal.emit(sessId, "session.completed", {});
+
+    const exportRes = await fetch(`${baseUrl}/api/sessions/${sessId}/export`);
+    const bundle = await exportRes.json();
+
+    // Now import the bundle
+    const importRes = await fetch(`${baseUrl}/api/sessions/import`, {
+      method: "POST",
+      body: bundle,
+    });
+    expect(importRes.status).toBe(200);
+    const importBody = await importRes.json();
+    expect(importBody.session_id).toMatch(/^imported-/);
+    expect(importBody.events_imported).toBe(3);
+
+    // Verify the imported events exist in the journal
+    const events = await journal.readSession(importBody.session_id);
+    expect(events).toHaveLength(3);
+    expect(events[0]!.type).toBe("session.created");
+    expect(events[0]!.session_id).toBe(importBody.session_id);
+  });
+
+  it("import rejects invalid bundle (missing fields)", async () => {
+    // Missing version
+    const res1 = await fetch(`${baseUrl}/api/sessions/import`, {
+      method: "POST",
+      body: { session: {}, events: [] },
+    });
+    expect(res1.status).toBe(400);
+    const body1 = await res1.json();
+    expect(body1.error).toContain("version");
+
+    // Missing session
+    const res2 = await fetch(`${baseUrl}/api/sessions/import`, {
+      method: "POST",
+      body: { version: 1, events: [] },
+    });
+    expect(res2.status).toBe(400);
+    const body2 = await res2.json();
+    expect(body2.error).toContain("session");
+
+    // Missing events
+    const res3 = await fetch(`${baseUrl}/api/sessions/import`, {
+      method: "POST",
+      body: { version: 1, session: {} },
+    });
+    expect(res3.status).toBe(400);
+    const body3 = await res3.json();
+    expect(body3.error).toContain("events");
+
+    // events not an array
+    const res4 = await fetch(`${baseUrl}/api/sessions/import`, {
+      method: "POST",
+      body: { version: 1, session: {}, events: "not-array" },
+    });
+    expect(res4.status).toBe(400);
+  });
+
+  it("import rejects oversized bundles", async () => {
+    // Construct a bundle that exceeds 10MB via content-length
+    const oversizedEvents = [];
+    // Each event will be ~1KB, so 11000 events should exceed 10MB
+    for (let i = 0; i < 11000; i++) {
+      oversizedEvents.push({
+        event_id: `evt-${i}`,
+        session_id: "sess-1",
+        type: "step.started",
+        timestamp: new Date().toISOString(),
+        payload: { data: "x".repeat(900) },
+      });
+    }
+    const bundle = {
+      version: 1,
+      session: { session_id: "sess-1" },
+      events: oversizedEvents,
+    };
+    const bodyStr = JSON.stringify(bundle);
+    // Verify we actually exceeded 10MB
+    expect(bodyStr.length).toBeGreaterThan(10 * 1024 * 1024);
+
+    const res = await fetch(`${baseUrl}/api/sessions/import`, {
+      method: "POST",
+      body: bundle,
+    });
+    // Express should reject with 413 (Payload Too Large) since the body exceeds the limit
+    expect(res.status).toBe(413);
+  });
+
+  it("import validates event types against the schema", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/import`, {
+      method: "POST",
+      body: {
+        version: 1,
+        session: { session_id: "sess-1" },
+        events: [{
+          event_id: "evt-1",
+          session_id: "sess-1",
+          type: "completely.invalid.event.type",
+          timestamp: new Date().toISOString(),
+          payload: {},
+        }],
+      },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("Invalid event at index 0");
   });
 });

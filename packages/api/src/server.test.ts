@@ -2398,3 +2398,65 @@ describe("ApiServer coverage endpoint", () => {
     }
   });
 });
+
+// ─── Hardening Round 18: Approval double-resolution race ──────────────
+
+describe("ApiServer H18: approval race prevention", () => {
+  let journal: Journal;
+  let registry: ToolRegistry;
+  let apiServer: ApiServer;
+  let httpServer: ReturnType<typeof createServer>;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+    journal = new Journal(TEST_FILE, { fsync: false, lock: false });
+    await journal.init();
+    registry = new ToolRegistry();
+    registry.register(testTool);
+    apiServer = new ApiServer({
+      toolRegistry: registry,
+      journal,
+      insecure: true,
+      approvalTimeoutMs: 60000,
+    });
+
+    await new Promise<void>((resolve) => {
+      httpServer = createServer(apiServer.getExpressApp());
+      httpServer.listen(0, () => {
+        const addr = httpServer.address() as AddressInfo;
+        baseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+    try { await rm(TEST_DIR, { recursive: true }); } catch { /* ok */ }
+  });
+
+  it("second REST approval returns 404 after first resolves (no double-resolution)", async () => {
+    let resolveCount = 0;
+    apiServer.registerApproval("race-req-1", { tool: "test" }, () => {
+      resolveCount++;
+    });
+
+    // First resolution should succeed
+    const res1 = await fetch(`${baseUrl}/api/approvals/race-req-1`, {
+      method: "POST",
+      body: { decision: "allow_once" },
+    });
+    expect(res1.status).toBe(200);
+
+    // Second resolution should get 404 because the approval was already removed
+    const res2 = await fetch(`${baseUrl}/api/approvals/race-req-1`, {
+      method: "POST",
+      body: { decision: "deny" },
+    });
+    expect(res2.status).toBe(404);
+
+    // resolve should have been called exactly once
+    expect(resolveCount).toBe(1);
+  });
+});

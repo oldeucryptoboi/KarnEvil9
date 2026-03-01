@@ -49,6 +49,9 @@ function validateUpdateInput(body: unknown): string | null {
   if (b.name !== undefined && (typeof b.name !== "string" || b.name.trim().length === 0)) {
     return "name must be a non-empty string";
   }
+  if (typeof b.name === "string" && b.name.length > MAX_NAME_LENGTH) {
+    return `name must be at most ${MAX_NAME_LENGTH} characters`;
+  }
   if (b.trigger !== undefined) {
     if (typeof b.trigger !== "object" || Array.isArray(b.trigger)) return "trigger must be an object";
     const trigger = b.trigger as Record<string, unknown>;
@@ -65,6 +68,12 @@ function validateUpdateInput(body: unknown): string | null {
   }
   if (b.options !== undefined && (typeof b.options !== "object" || Array.isArray(b.options))) {
     return "options must be an object";
+  }
+  if (b.options && typeof b.options === "object") {
+    const opts = b.options as Record<string, unknown>;
+    if (opts.description !== undefined && typeof opts.description === "string" && opts.description.length > MAX_DESCRIPTION_LENGTH) {
+      return `options.description must be at most ${MAX_DESCRIPTION_LENGTH} characters`;
+    }
   }
 
   return null;
@@ -152,7 +161,11 @@ export function createSchedulerRoutes(scheduler: Scheduler): SchedulerRoute[] {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Internal server error";
       if (msg.includes("not found")) { res.status(404).json({ error: msg }); return; }
-      res.status(500).json({ error: msg });
+      if (msg.includes("Invalid") || msg.includes("format") || msg.includes("required")) {
+        res.status(400).json({ error: msg });
+      } else {
+        res.status(500).json({ error: "Internal server error" });
+      }
     }
   };
 
@@ -165,7 +178,7 @@ export function createSchedulerRoutes(scheduler: Scheduler): SchedulerRoute[] {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Internal server error";
       if (msg.includes("not found")) { res.status(404).json({ error: msg }); return; }
-      res.status(500).json({ error: msg });
+      res.status(500).json({ error: "Internal server error" });
     }
   };
 
@@ -178,7 +191,7 @@ export function createSchedulerRoutes(scheduler: Scheduler): SchedulerRoute[] {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Internal server error";
       if (msg.includes("not found")) { res.status(404).json({ error: msg }); return; }
-      res.status(500).json({ error: msg });
+      res.status(500).json({ error: "Internal server error" });
     }
   };
 
@@ -191,7 +204,7 @@ export function createSchedulerRoutes(scheduler: Scheduler): SchedulerRoute[] {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Internal server error";
       if (msg.includes("not found")) { res.status(404).json({ error: msg }); return; }
-      res.status(500).json({ error: msg });
+      res.status(500).json({ error: "Internal server error" });
     }
   };
 
@@ -204,7 +217,7 @@ export function createSchedulerRoutes(scheduler: Scheduler): SchedulerRoute[] {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Internal server error";
       if (msg.includes("not found")) { res.status(404).json({ error: msg }); return; }
-      res.status(500).json({ error: msg });
+      res.status(500).json({ error: "Internal server error" });
     }
   };
 

@@ -1,0 +1,16 @@
+id: webhooks
+name: Webhook Notifications
+version: "1.0.0"
+description: Send HTTP webhook callbacks on session lifecycle events
+entry: index.js
+permissions: []
+provides:
+  hooks:
+    - after_step
+    - after_session_end
+    - on_error
+  routes:
+    - webhooks
+    - webhooks/:id
+  services:
+    - webhook-manager

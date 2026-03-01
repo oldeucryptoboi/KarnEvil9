@@ -17,6 +17,10 @@ const NAV_ITEMS = [
   { href: "/metrics", label: "Metrics", icon: "M" },
 ];
 
+const BOTTOM_NAV_ITEMS = [
+  { href: "/settings", label: "Settings", icon: "G" },
+];
+
 export function Sidebar() {
   const pathname = usePathname();
   const { connected } = useWSContext();
@@ -34,34 +38,57 @@ export function Sidebar() {
         </div>
         <p className="text-xs text-[var(--muted)]">Dashboard</p>
       </div>
-      <nav className="flex-1 p-2">
-        {NAV_ITEMS.map((item) => {
-          const active = item.href === "/"
-            ? pathname === "/"
-            : pathname.startsWith(item.href);
-          const showBadge = item.href === "/approvals" && pendingCount > 0;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                active
-                  ? "bg-[var(--accent)]/10 text-[var(--accent)]"
-                  : "text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-white/5"
-              }`}
-            >
-              <span className="flex h-6 w-6 items-center justify-center rounded bg-white/5 text-xs font-mono">
-                {item.icon}
-              </span>
-              <span className="flex-1">{item.label}</span>
-              {showBadge && (
-                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-400 tabular-nums">
-                  {pendingCount > 99 ? "99+" : pendingCount}
+      <nav className="flex-1 p-2 flex flex-col">
+        <div className="flex-1">
+          {NAV_ITEMS.map((item) => {
+            const active = item.href === "/"
+              ? pathname === "/"
+              : pathname.startsWith(item.href);
+            const showBadge = item.href === "/approvals" && pendingCount > 0;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                  active
+                    ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+                    : "text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-white/5"
+                }`}
+              >
+                <span className="flex h-6 w-6 items-center justify-center rounded bg-white/5 text-xs font-mono">
+                  {item.icon}
                 </span>
-              )}
-            </Link>
-          );
-        })}
+                <span className="flex-1">{item.label}</span>
+                {showBadge && (
+                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-400 tabular-nums">
+                    {pendingCount > 99 ? "99+" : pendingCount}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </div>
+        <div className="border-t border-[var(--border)] pt-2">
+          {BOTTOM_NAV_ITEMS.map((item) => {
+            const active = pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                  active
+                    ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+                    : "text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-white/5"
+                }`}
+              >
+                <span className="flex h-6 w-6 items-center justify-center rounded bg-white/5 text-xs font-mono">
+                  {item.icon}
+                </span>
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
       </nav>
     </aside>
   );

@@ -63,11 +63,13 @@ export function createSwarmRoutes(
     res.json(meshManager.getIdentity());
   };
 
+  const VALID_PEER_STATUSES = new Set<string>(["active", "suspected", "unreachable", "left"]);
+
   const peers: RouteHandler = async (req, res) => {
     if (requireToken(req, res)) return;
     let peerList = meshManager.getPeers();
     const statusFilter = req.query.status;
-    if (statusFilter) {
+    if (statusFilter && VALID_PEER_STATUSES.has(statusFilter)) {
       peerList = peerList.filter((p) => p.status === statusFilter);
     }
     res.json({
@@ -240,13 +242,18 @@ export function createSwarmRoutes(
 
   // ─── Contract Routes ──────────────────────────────────────────────
 
+  const VALID_CONTRACT_STATUSES = new Set<string>(["active", "completed", "violated", "cancelled"]);
+
   const contractList: RouteHandler = async (req, res) => {
     if (requireToken(req, res)) return;
     if (!contractStore) {
       res.json({ contracts: [], total: 0 });
       return;
     }
-    const statusFilter = req.query.status as ContractStatus | undefined;
+    const rawStatus = req.query.status;
+    const statusFilter = (rawStatus && VALID_CONTRACT_STATUSES.has(rawStatus))
+      ? rawStatus as ContractStatus
+      : undefined;
     const contracts = statusFilter
       ? contractStore.getByStatus(statusFilter)
       : contractStore.getAll();
@@ -532,7 +539,13 @@ export function createSwarmRoutes(
       const account = escrowManager.deposit(body.node_id, body.amount);
       res.json({ ok: true, balance: account.balance, held: account.held });
     } catch (err: unknown) {
-      res.status(400).json({ error: (err as Error).message });
+      const msg = err instanceof Error ? err.message : "Deposit failed";
+      // Only expose validation-style errors; mask internal details
+      if (msg.includes("must be") || msg.includes("positive") || msg.includes("finite")) {
+        res.status(400).json({ error: msg });
+      } else {
+        res.status(500).json({ error: "Internal server error" });
+      }
     }
   };
 

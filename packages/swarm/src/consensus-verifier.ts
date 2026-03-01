@@ -14,6 +14,8 @@ export const DEFAULT_CONSENSUS_CONFIG: ConsensusVerifierConfig = {
   round_expiry_ms: 300000, // 5 minutes
 };
 
+const MAX_ROUNDS = 10_000;
+
 export class ConsensusVerifier {
   private config: ConsensusVerifierConfig;
   private rounds = new Map<string, ConsensusRound>();
@@ -25,6 +27,19 @@ export class ConsensusVerifier {
   }
 
   createRound(taskId: string, requiredVoters?: number, requiredAgreement?: number): ConsensusRound {
+    // Sweep expired rounds before creating new ones to reclaim capacity
+    if (this.rounds.size >= MAX_ROUNDS) {
+      this.sweepExpiredRounds();
+    }
+    // Hard cap: evict oldest terminal rounds if still over limit
+    if (this.rounds.size >= MAX_ROUNDS) {
+      for (const [id, r] of this.rounds) {
+        if (r.status !== "open" && r.status !== "evaluating") {
+          this.rounds.delete(id);
+          if (this.rounds.size < MAX_ROUNDS) break;
+        }
+      }
+    }
     const roundId = randomUUID();
     const now = new Date();
     // Clamp user-supplied parameters to sane bounds

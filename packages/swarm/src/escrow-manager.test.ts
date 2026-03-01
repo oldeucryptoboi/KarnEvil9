@@ -375,6 +375,25 @@ describe("EscrowManager", () => {
     expect(result.reason).toContain("Max concurrent bonds");
   });
 
+  it("should NOT mutate account.held when holdBond is rejected by cap (H18)", () => {
+    // Verifies the fix: cap check runs BEFORE account.held mutation
+    manager.deposit("node-big", 1_000_000);
+
+    // Fill to cap
+    for (let i = 0; i < 50_000; i++) {
+      manager.holdBond(`task-cap2-${i}`, "node-big", 0.01);
+    }
+
+    const heldBefore = manager.getAccount("node-big")!.held;
+
+    // This should be rejected without modifying account.held
+    const result = manager.holdBond("task-overflow-2", "node-big", 0.01);
+    expect(result.held).toBe(false);
+
+    const heldAfter = manager.getAccount("node-big")!.held;
+    expect(heldAfter).toBe(heldBefore);
+  });
+
   // ─── getBondRequirement ─────────────────────────────────────────
 
   it("should return a copy of bond requirement", () => {

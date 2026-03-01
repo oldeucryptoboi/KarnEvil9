@@ -773,17 +773,17 @@ export class ApiServer {
     // Validate decision payload — same validation as the REST endpoint
     const validationError = validateApprovalInput({ decision: msg.decision });
     if (validationError) return;
+    // Atomically remove from map first to prevent double-resolution race
+    // (concurrent WS + REST approve on the same request_id)
+    this.pendingApprovals.delete(requestId);
+    clearTimeout(approval.timer);
     // Reject expired approvals
     const age = Date.now() - approval.created_at;
     if (age > this.approvalTimeoutMs * 2) {
-      clearTimeout(approval.timer);
-      this.pendingApprovals.delete(requestId);
       return;
     }
     const decision = msg.decision as ApprovalDecision;
-    clearTimeout(approval.timer);
     approval.resolve(decision);
-    this.pendingApprovals.delete(requestId);
 
     // Broadcast approve.resolved to all WS clients so dashboard updates in real time
     const req = approval.request as Record<string, unknown> | undefined;
@@ -1248,18 +1248,18 @@ export class ApiServer {
       if (approvalError) { res.status(400).json({ error: approvalError }); return; }
       const approval = this.pendingApprovals.get(req.params.id!);
       if (!approval) { res.status(404).json({ error: "Approval not found" }); return; }
+      // Atomically remove from map first to prevent double-resolution race
+      // (concurrent WS + REST approve on the same request_id)
+      this.pendingApprovals.delete(req.params.id!);
+      clearTimeout(approval.timer);
       // Reject approvals that have been pending longer than twice the timeout
       const age = Date.now() - approval.created_at;
       if (age > this.approvalTimeoutMs * 2) {
-        clearTimeout(approval.timer);
-        this.pendingApprovals.delete(req.params.id!);
         res.status(410).json({ error: "Approval request has expired" });
         return;
       }
       const { decision } = req.body as { decision: ApprovalDecision };
-      clearTimeout(approval.timer);
       approval.resolve(decision);
-      this.pendingApprovals.delete(req.params.id!);
       // Broadcast approve.resolved to all WS clients
       const approvalReq = approval.request as Record<string, unknown> | undefined;
       const approvalSessionId = typeof approvalReq?.session_id === "string" ? approvalReq.session_id : undefined;
@@ -1506,12 +1506,20 @@ export class ApiServer {
 
         const pkgDirs = readdirSync(packagesDir);
         for (const pkgName of pkgDirs) {
+          // Reject path traversal segments and hidden directories
+          if (pkgName.includes("..") || pkgName.includes("/") || pkgName.includes("\\") || pkgName.startsWith(".")) continue;
           const summaryPath = pathJoin(packagesDir, pkgName, "coverage", "coverage-summary.json");
+          // Ensure resolved path stays within the packages directory (symlink guard)
+          if (!pathResolve(summaryPath).startsWith(packagesDir + "/")) continue;
           if (!existsSync(summaryPath)) continue;
 
           try {
             const raw = readFileSync(summaryPath, "utf-8");
-            const summary = JSON.parse(raw) as Record<string, Record<string, { total: number; covered: number; pct: number }>>;
+            // Safe parse: strip prototype pollution keys
+            const summary = JSON.parse(raw, (key, value) => {
+              if (key === "__proto__" || key === "constructor" || key === "prototype") return undefined;
+              return value;
+            }) as Record<string, Record<string, { total: number; covered: number; pct: number }>>;
             const pkgTotal = summary.total;
             if (!pkgTotal) continue;
 

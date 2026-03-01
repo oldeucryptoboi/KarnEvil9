@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getSessions, compactJournal, type SessionSummary } from "@/lib/api";
+import { type SessionTemplate } from "@/lib/templates";
 import { StatusBadge } from "@/components/status-badge";
 import { CreateSessionDialog } from "@/components/create-session-dialog";
+import { TemplatesPanel } from "@/components/templates-panel";
 import { useWSContext } from "@/lib/ws-context";
 
 export default function SessionsPage() {
@@ -13,6 +15,7 @@ export default function SessionsPage() {
   const [compactResult, setCompactResult] = useState<string | null>(null);
   const [compacting, setCompacting] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [activeTemplate, setActiveTemplate] = useState<SessionTemplate | null>(null);
   const { connected } = useWSContext();
 
   useEffect(() => {
@@ -23,13 +26,23 @@ export default function SessionsPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const handleUseTemplate = (template: SessionTemplate) => {
+    setActiveTemplate(template);
+    setShowCreateDialog(true);
+  };
+
+  const handleOpenNew = () => {
+    setActiveTemplate(null);
+    setShowCreateDialog(true);
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <h2 className="text-xl font-semibold">Sessions</h2>
           <button
-            onClick={() => setShowCreateDialog(true)}
+            onClick={handleOpenNew}
             className="bg-[var(--accent)] text-white rounded px-3 py-1.5 text-sm hover:opacity-90"
           >
             New Session
@@ -43,10 +56,14 @@ export default function SessionsPage() {
 
       <CreateSessionDialog
         open={showCreateDialog}
-        onClose={() => setShowCreateDialog(false)}
+        onClose={() => {
+          setShowCreateDialog(false);
+          setActiveTemplate(null);
+        }}
         onCreated={() => {
           getSessions().then(setSessions).catch(() => {});
         }}
+        initialTemplate={activeTemplate}
       />
 
       {error && (
@@ -92,6 +109,11 @@ export default function SessionsPage() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Templates Panel */}
+      <div className="mt-6">
+        <TemplatesPanel onUseTemplate={handleUseTemplate} />
       </div>
 
       {/* Journal Compaction */}

@@ -236,4 +236,117 @@ describe("scheduler routes", () => {
     );
     expect((res.capture.data as { total: number }).total).toBe(1);
   });
+
+  // ─── Hardening Round 18 Tests ──────────────────────────────────────
+
+  it("PUT /schedules/:id rejects oversized name", async () => {
+    const sched = await scheduler.createSchedule({
+      name: "update-name-test",
+      trigger: { type: "every", interval: "5m" },
+      action: { type: "createSession", task_text: "t" },
+    });
+    const route = findRoute("PUT", "/schedules/:id");
+    const res = makeRes();
+    await route.handler(
+      {
+        method: "PUT",
+        path: `/schedules/${sched.schedule_id}`,
+        params: { id: sched.schedule_id },
+        query: {},
+        body: { name: "x".repeat(201) },
+      },
+      res,
+    );
+    expect(res.capture.status).toBe(400);
+    expect((res.capture.data as { error: string }).error).toContain("name");
+    expect((res.capture.data as { error: string }).error).toContain("200");
+  });
+
+  it("PUT /schedules/:id rejects oversized description in options", async () => {
+    const sched = await scheduler.createSchedule({
+      name: "update-desc-test",
+      trigger: { type: "every", interval: "5m" },
+      action: { type: "createSession", task_text: "t" },
+    });
+    const route = findRoute("PUT", "/schedules/:id");
+    const res = makeRes();
+    await route.handler(
+      {
+        method: "PUT",
+        path: `/schedules/${sched.schedule_id}`,
+        params: { id: sched.schedule_id },
+        query: {},
+        body: { options: { description: "x".repeat(2001) } },
+      },
+      res,
+    );
+    expect(res.capture.status).toBe(400);
+    expect((res.capture.data as { error: string }).error).toContain("description");
+    expect((res.capture.data as { error: string }).error).toContain("2000");
+  });
+
+  it("PUT /schedules/:id masks internal error details", async () => {
+    const sched = await scheduler.createSchedule({
+      name: "mask-test",
+      trigger: { type: "every", interval: "5m" },
+      action: { type: "createSession", task_text: "t" },
+    });
+    const route = findRoute("PUT", "/schedules/:id");
+    const res = makeRes();
+    const originalUpdate = scheduler.updateSchedule.bind(scheduler);
+    scheduler.updateSchedule = async () => { throw new Error("ENOENT: disk path /var/secret/data.db"); };
+    try {
+      await route.handler(
+        {
+          method: "PUT",
+          path: `/schedules/${sched.schedule_id}`,
+          params: { id: sched.schedule_id },
+          query: {},
+          body: { name: "new-name" },
+        },
+        res,
+      );
+      expect(res.capture.status).toBe(500);
+      expect((res.capture.data as { error: string }).error).toBe("Internal server error");
+      expect((res.capture.data as { error: string }).error).not.toContain("ENOENT");
+    } finally {
+      scheduler.updateSchedule = originalUpdate;
+    }
+  });
+
+  it("DELETE /schedules/:id masks internal error details", async () => {
+    const route = findRoute("DELETE", "/schedules/:id");
+    const res = makeRes();
+    const originalDelete = scheduler.deleteSchedule.bind(scheduler);
+    scheduler.deleteSchedule = async () => { throw new Error("SQLITE_CORRUPT: database corruption at page 42"); };
+    try {
+      await route.handler(
+        { method: "DELETE", path: "/schedules/some-id", params: { id: "some-id" }, query: {}, body: null },
+        res,
+      );
+      expect(res.capture.status).toBe(500);
+      expect((res.capture.data as { error: string }).error).toBe("Internal server error");
+      expect((res.capture.data as { error: string }).error).not.toContain("SQLITE");
+    } finally {
+      scheduler.deleteSchedule = originalDelete;
+    }
+  });
+
+  it("POST /schedules/:id/pause masks internal error details", async () => {
+    const route = findRoute("POST", "/schedules/:id/pause");
+    const res = makeRes();
+    const originalPause = scheduler.pauseSchedule.bind(scheduler);
+    scheduler.pauseSchedule = async () => { throw new Error("Connection refused at 10.0.0.1:5432"); };
+    try {
+      await route.handler(
+        { method: "POST", path: "/schedules/some-id/pause", params: { id: "some-id" }, query: {}, body: null },
+        res,
+      );
+      expect(res.capture.status).toBe(500);
+      expect((res.capture.data as { error: string }).error).toBe("Internal server error");
+      expect((res.capture.data as { error: string }).error).not.toContain("10.0.0.1");
+    } finally {
+      scheduler.pauseSchedule = originalPause;
+    }
+  });
 });

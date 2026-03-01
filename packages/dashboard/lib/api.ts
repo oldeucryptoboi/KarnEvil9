@@ -115,10 +115,33 @@ export interface UpdateScheduleInput {
   options?: ScheduleOptions;
 }
 
+export interface HealthCheck {
+  status: string;
+  detail?: string;
+  loaded?: number;
+  failed?: number;
+  disk_usage?: { usage_pct: number };
+  active?: number;
+  schedules?: number;
+  peers?: number;
+  active_peers?: number;
+}
+
 export interface HealthStatus {
   status: string;
-  uptime_ms: number;
-  sessions_active: number;
+  version: string;
+  timestamp: string;
+  checks: {
+    journal: HealthCheck;
+    tools: HealthCheck;
+    sessions: HealthCheck;
+    planner: HealthCheck;
+    permissions: HealthCheck;
+    runtime: HealthCheck;
+    plugins: HealthCheck;
+    scheduler: HealthCheck;
+    swarm: HealthCheck;
+  };
 }
 
 // Sessions

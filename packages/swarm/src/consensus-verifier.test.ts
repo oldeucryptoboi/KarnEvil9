@@ -393,6 +393,61 @@ describe("ConsensusVerifier", () => {
     });
   });
 
+  // ─── Hardening Round 18: MAX_ROUNDS cap ──────────────────────────
+
+  describe("MAX_ROUNDS cap (H18)", () => {
+    it("should evict terminal rounds when at capacity", () => {
+      // Access internal rounds map to pre-fill without creating 10k rounds
+      const roundsMap = (verifier as any).rounds as Map<string, any>;
+
+      // Fill with 10,000 terminal ("agreed") rounds
+      for (let i = 0; i < 10_000; i++) {
+        roundsMap.set(`pre-${i}`, {
+          round_id: `pre-${i}`,
+          task_id: `task-pre-${i}`,
+          required_voters: 3,
+          required_agreement: 0.667,
+          votes: new Map(),
+          status: "agreed", // terminal status
+          created_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() - 600_000).toISOString(), // expired
+        });
+      }
+      expect(verifier.roundCount).toBe(10_000);
+
+      // Creating a new round should trigger sweep + eviction of terminal rounds
+      const newRound = verifier.createRound("task-new-after-cap");
+      expect(newRound).toBeDefined();
+      expect(newRound.task_id).toBe("task-new-after-cap");
+      // Should be under or at the cap now (old terminal rounds evicted to make room)
+      expect(verifier.roundCount).toBeLessThanOrEqual(10_000);
+    });
+
+    it("should sweep expired open rounds before evicting terminal ones", () => {
+      const roundsMap = (verifier as any).rounds as Map<string, any>;
+
+      // Fill with 10,000 expired "open" rounds
+      for (let i = 0; i < 10_000; i++) {
+        roundsMap.set(`exp-${i}`, {
+          round_id: `exp-${i}`,
+          task_id: `task-exp-${i}`,
+          required_voters: 3,
+          required_agreement: 0.667,
+          votes: new Map(),
+          status: "open",
+          created_at: new Date(Date.now() - 600_000).toISOString(),
+          expires_at: new Date(Date.now() - 300_000).toISOString(), // past expiry
+        });
+      }
+
+      // Creating a new round should first sweep expired open rounds (marking them "expired")
+      // then evict the now-terminal rounds
+      const newRound = verifier.createRound("task-after-sweep");
+      expect(newRound).toBeDefined();
+      expect(verifier.roundCount).toBeLessThanOrEqual(10_000);
+    });
+  });
+
   // ─── Partial votes ────────────────────────────────────────────────
 
   describe("partial votes", () => {

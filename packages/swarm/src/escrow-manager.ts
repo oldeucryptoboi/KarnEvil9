@@ -102,11 +102,13 @@ export class EscrowManager {
       return { held: false, reason: `Insufficient free balance: ${freeBalance} < ${amount}` };
     }
 
-    account.held += amount;
     // Cap task bonds to prevent unbounded memory growth
+    // Check BEFORE mutating account.held to avoid inconsistent state on rejection
     if (this.taskBonds.size >= MAX_TASK_BONDS && !this.taskBonds.has(taskId)) {
       return { held: false, reason: `Max concurrent bonds (${MAX_TASK_BONDS}) exceeded` };
     }
+
+    account.held += amount;
     this.taskBonds.set(taskId, { node_id: nodeId, amount });
 
     const tx: EscrowTransaction = {

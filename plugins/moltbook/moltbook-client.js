@@ -278,11 +278,29 @@ export class MoltbookClient {
   // ── Notifications ──
 
   /**
-   * Get notifications.
+   * Get notifications (slimmed — strips embedded post/comment bodies to stay
+   * within LLM context limits; the raw API response can exceed 150 KB).
    * @returns {Promise<object>}
    */
   async getNotifications() {
-    return this._apiRequest("GET", "/notifications");
+    const res = await this._apiRequest("GET", "/notifications");
+    const notifications = res.notifications ?? res.data ?? (Array.isArray(res) ? res : []);
+    return {
+      ...res,
+      notifications: notifications.map(n => ({
+        id: n.id,
+        type: n.type,
+        content: n.content,
+        isRead: n.isRead,
+        createdAt: n.createdAt,
+        relatedPostId: n.relatedPostId ?? undefined,
+        relatedCommentId: n.relatedCommentId ?? undefined,
+        // Keep post title but drop full content/tsv
+        ...(n.post ? { post_title: n.post.title, post_id: n.post.id, submolt: n.post.submolt?.name ?? n.post.submoltId } : {}),
+        // Keep comment preview but drop full tree
+        ...(n.comment ? { comment_preview: (n.comment.content ?? "").slice(0, 200), commenter: n.comment.author?.name ?? n.comment.authorId } : {}),
+      })),
+    };
   }
 
   /**

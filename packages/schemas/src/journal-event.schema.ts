@@ -20,6 +20,8 @@ export const JournalEventSchema = {
         "plugin.unloaded", "plugin.reloaded",
         "plugin.hook_fired", "plugin.hook_failed", "plugin.hook_circuit_open",
         "plugin.service_started", "plugin.service_stopped", "plugin.service_failed",
+        "plugin.watcher_started", "plugin.watcher_stopped",
+        "plugin.hot_loaded", "plugin.hot_reloading", "plugin.hot_reloaded", "plugin.hot_reload_failed",
         "memory.lesson_extracted",
         "futility.detected",
         "usage.recorded",

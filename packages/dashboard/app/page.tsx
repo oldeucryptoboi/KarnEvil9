@@ -16,7 +16,30 @@ export default function SessionsPage() {
   const [compacting, setCompacting] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [activeTemplate, setActiveTemplate] = useState<SessionTemplate | null>(null);
+  const [compareSelection, setCompareSelection] = useState<Set<string>>(new Set());
   const { connected } = useWSContext();
+
+  const toggleCompare = (sessionId: string) => {
+    setCompareSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) {
+        next.delete(sessionId);
+      } else if (next.size < 2) {
+        next.add(sessionId);
+      } else {
+        // Already have 2 selected — replace the oldest selection
+        const first = next.values().next().value!;
+        next.delete(first);
+        next.add(sessionId);
+      }
+      return next;
+    });
+  };
+
+  const compareIds = Array.from(compareSelection);
+  const compareUrl = compareIds.length === 2
+    ? `/compare?a=${encodeURIComponent(compareIds[0]!)}&b=${encodeURIComponent(compareIds[1]!)}`
+    : null;
 
   useEffect(() => {
     getSessions().then(setSessions).catch((e) => setError(e.message));
@@ -47,6 +70,32 @@ export default function SessionsPage() {
           >
             New Session
           </button>
+          {compareSelection.size > 0 && (
+            <div className="flex items-center gap-2 ml-2">
+              <span className="text-xs text-[var(--muted)]">
+                {compareSelection.size}/2 selected
+              </span>
+              {compareUrl ? (
+                <Link
+                  href={compareUrl}
+                  className="rounded bg-purple-500/10 px-3 py-1.5 text-xs text-purple-400 hover:bg-purple-500/20 transition-colors font-medium"
+                >
+                  Compare
+                </Link>
+              ) : (
+                <span className="rounded bg-purple-500/5 px-3 py-1.5 text-xs text-purple-400/50 cursor-default">
+                  Compare
+                </span>
+              )}
+              <button
+                onClick={() => setCompareSelection(new Set())}
+                className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                title="Clear selection"
+              >
+                Clear
+              </button>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
           <span className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} />
@@ -76,6 +125,9 @@ export default function SessionsPage() {
         <table className="w-full text-sm">
           <thead className="bg-[var(--card)]">
             <tr>
+              <th className="w-10 p-3">
+                <span className="sr-only">Compare</span>
+              </th>
               <th className="text-left p-3 font-medium text-[var(--muted)]">Session</th>
               <th className="text-left p-3 font-medium text-[var(--muted)]">Status</th>
               <th className="text-left p-3 font-medium text-[var(--muted)]">Progress</th>
@@ -83,26 +135,46 @@ export default function SessionsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border)]">
-            {sessions.map((s) => (
-              <tr key={s.session_id} className="hover:bg-white/[0.02] transition-colors">
-                <td className="p-3">
-                  <Link href={`/sessions/${s.session_id}`} className="text-[var(--accent)] hover:underline font-mono text-xs">
-                    {s.session_id.slice(0, 8)}...
-                  </Link>
-                  {s.task_text && (
-                    <p className="text-xs text-[var(--muted)] mt-0.5 truncate max-w-xs">{s.task_text}</p>
-                  )}
-                </td>
-                <td className="p-3"><StatusBadge status={s.status} /></td>
-                <td className="p-3 text-[var(--muted)]">
-                  {s.total_steps != null ? `${s.completed_steps ?? 0}/${s.total_steps}` : "-"}
-                </td>
-                <td className="p-3 text-xs text-[var(--muted)]">{new Date(s.created_at).toLocaleString()}</td>
-              </tr>
-            ))}
+            {sessions.map((s) => {
+              const isSelected = compareSelection.has(s.session_id);
+              return (
+                <tr key={s.session_id} className={`hover:bg-white/[0.02] transition-colors ${isSelected ? "bg-purple-500/[0.04]" : ""}`}>
+                  <td className="p-3 text-center">
+                    <button
+                      onClick={() => toggleCompare(s.session_id)}
+                      className={`h-4 w-4 rounded border transition-colors ${
+                        isSelected
+                          ? "bg-purple-500 border-purple-500"
+                          : "border-[var(--border)] hover:border-purple-400"
+                      }`}
+                      title={isSelected ? "Deselect for comparison" : "Select for comparison"}
+                    >
+                      {isSelected && (
+                        <svg className="h-4 w-4 text-white" viewBox="0 0 16 16" fill="none">
+                          <path d="M4 8l3 3 5-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </button>
+                  </td>
+                  <td className="p-3">
+                    <Link href={`/sessions/${s.session_id}`} className="text-[var(--accent)] hover:underline font-mono text-xs">
+                      {s.session_id.slice(0, 8)}...
+                    </Link>
+                    {s.task_text && (
+                      <p className="text-xs text-[var(--muted)] mt-0.5 truncate max-w-xs">{s.task_text}</p>
+                    )}
+                  </td>
+                  <td className="p-3"><StatusBadge status={s.status} /></td>
+                  <td className="p-3 text-[var(--muted)]">
+                    {s.total_steps != null ? `${s.completed_steps ?? 0}/${s.total_steps}` : "-"}
+                  </td>
+                  <td className="p-3 text-xs text-[var(--muted)]">{new Date(s.created_at).toLocaleString()}</td>
+                </tr>
+              );
+            })}
             {sessions.length === 0 && !error && (
               <tr>
-                <td colSpan={4} className="p-6 text-center text-[var(--muted)]">
+                <td colSpan={5} className="p-6 text-center text-[var(--muted)]">
                   No sessions found. Start one via the CLI or API.
                 </td>
               </tr>

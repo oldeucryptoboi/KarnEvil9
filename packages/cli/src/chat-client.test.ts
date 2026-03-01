@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ChatClient, type ChatWebSocket, type TerminalIO, type ProcessControl } from "./chat-client.js";
+import { ChatClient, completer, COMMANDS, type ChatWebSocket, type TerminalIO, type ProcessControl } from "./chat-client.js";
 import type { StatusBarLike, StatusBarData } from "./status-bar.js";
 
 // ─── Mock helpers ─────────────────────────────────────────────────
@@ -439,6 +439,19 @@ describe("ChatClient", () => {
       expect(JSON.parse(r3Msg!).decision).toBe("deny");
     });
 
+    it("handles approve.needed with non-array permissions", () => {
+      const { client, ws, terminal } = createClient();
+      client.connect();
+      ws.simulateOpen();
+      ws.simulateMessage(JSON.stringify({
+        type: "approve.needed",
+        request_id: "req-nonarray",
+        request: { tool_name: "shell-exec", permissions: "single-scope" },
+      }));
+      expect(terminal.lines.some((l) => l.includes("Approval needed"))).toBe(true);
+      terminal.simulateAnswer("d");
+    });
+
     it("shows pending count for queued approvals", () => {
       const { client, ws, terminal } = createClient();
       client.connect();
@@ -811,5 +824,194 @@ describe("ChatClient", () => {
       // Should not crash — usage.recorded is suppressed by formatEvent
       expect(terminal.lines.every((l) => !l.includes("usage.recorded"))).toBe(true);
     });
+  });
+
+  describe("output buffering during approval", () => {
+    it("buffers events while approval is active", () => {
+      const { client, ws, terminal } = createClient();
+      client.connect();
+      ws.simulateOpen();
+
+      // Start approval flow
+      ws.simulateMessage(JSON.stringify({
+        type: "approve.needed",
+        request_id: "r1",
+        request: { tool_name: "read-file", permissions: [{ scope: "fs:read" }] },
+      }));
+
+      const linesBefore = terminal.lines.length;
+
+      // Send events while approval is pending — they should be buffered
+      ws.simulateMessage(JSON.stringify({
+        type: "event",
+        session_id: "s1",
+        event: { type: "step.started", timestamp: "2025-01-01T00:00:00Z", payload: { tool: "read-file", title: "Read" } },
+      }));
+
+      // Lines should not increase (buffered, not printed)
+      // (approval prompt line was already added)
+      const linesAfterBuffer = terminal.lines.length;
+
+      // Complete the approval
+      terminal.simulateAnswer("a");
+
+      // After approval, buffered events should flush
+      const linesAfterFlush = terminal.lines.length;
+      expect(linesAfterFlush).toBeGreaterThan(linesAfterBuffer);
+    });
+
+    it("shows buffering hint when 5 events arrive during approval", () => {
+      const { client, ws, terminal } = createClient();
+      client.connect();
+      ws.simulateOpen();
+
+      // Start session
+      ws.simulateMessage(JSON.stringify({ type: "session.created", session_id: "s1" }));
+
+      // Start approval flow
+      ws.simulateMessage(JSON.stringify({
+        type: "approve.needed",
+        request_id: "r1",
+        request: { tool_name: "read-file", permissions: [{ scope: "fs:read" }] },
+      }));
+
+      // Send exactly 5 events while approval is pending — should trigger hint
+      for (let i = 0; i < 5; i++) {
+        ws.simulateMessage(JSON.stringify({
+          type: "event",
+          session_id: "s1",
+          event: { type: "step.started", timestamp: "2025-01-01T00:00:00Z", payload: { tool: `tool-${i}`, title: `Step ${i}` } },
+        }));
+      }
+
+      // Should have printed the buffering hint
+      expect(terminal.lines.some((l) => l.includes("buffering events"))).toBe(true);
+    });
+
+    it("flushes buffered events on approval completion with remaining queue", () => {
+      const { client, ws, terminal } = createClient();
+      client.connect();
+      ws.simulateOpen();
+
+      // Start session
+      ws.simulateMessage(JSON.stringify({ type: "session.created", session_id: "s1" }));
+
+      // Queue two approvals
+      ws.simulateMessage(JSON.stringify({
+        type: "approve.needed",
+        request_id: "r1",
+        request: { tool_name: "read-file", permissions: [{ scope: "fs:read" }] },
+      }));
+      ws.simulateMessage(JSON.stringify({
+        type: "approve.needed",
+        request_id: "r2",
+        request: { tool_name: "write-file", permissions: [{ scope: "fs:write" }] },
+      }));
+
+      // Send event during approval
+      ws.simulateMessage(JSON.stringify({
+        type: "event",
+        session_id: "s1",
+        event: { type: "step.started", timestamp: "2025-01-01T00:00:00Z", payload: { tool: "shell-exec", title: "Run" } },
+      }));
+
+      // Answer first approval — should flush buffer and show next approval
+      terminal.simulateAnswer("s");
+
+      // The buffered event should have been written
+      expect(terminal.lines.some((l) => l.includes("shell-exec"))).toBe(true);
+    });
+  });
+});
+
+// ─── RealTerminalIO Tests ──────────────────────────────────────────
+
+describe("RealTerminalIO", () => {
+  // Import RealTerminalIO
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+
+  it("handles methods when _rl is null (no readline created)", async () => {
+    // Dynamic import to avoid issues with module mocking
+    const { RealTerminalIO } = await import("./chat-client.js");
+    const terminal = new RealTerminalIO();
+
+    // All methods should be safe when _rl is null
+    terminal.setPrompt("test> ");
+    terminal.prompt();
+    terminal.onLine(() => {});
+    terminal.onClose(() => {});
+    terminal.question("test?", () => {});
+    terminal.closeReadline();
+    // Should not throw
+  });
+
+  it("clearLine writes escape sequence to stdout", async () => {
+    const { RealTerminalIO } = await import("./chat-client.js");
+    const terminal = new RealTerminalIO();
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    terminal.clearLine();
+    expect(writeSpy).toHaveBeenCalledWith("\r\x1b[K");
+    writeSpy.mockRestore();
+  });
+
+  it("writeLine logs to console", async () => {
+    const { RealTerminalIO } = await import("./chat-client.js");
+    const terminal = new RealTerminalIO();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    terminal.writeLine("hello");
+    expect(logSpy).toHaveBeenCalledWith("hello");
+    logSpy.mockRestore();
+  });
+});
+
+// ─── Tab Completion Tests ──────────────────────────────────────────
+
+describe("completer", () => {
+  it("/h completes to /help", () => {
+    const [hits, line] = completer("/h");
+    expect(line).toBe("/h");
+    expect(hits).toEqual(["/help"]);
+  });
+
+  it("/q completes to /quit", () => {
+    const [hits, line] = completer("/q");
+    expect(line).toBe("/q");
+    expect(hits).toEqual(["/quit"]);
+  });
+
+  it("/a completes to /abort", () => {
+    const [hits, line] = completer("/a");
+    expect(line).toBe("/a");
+    expect(hits).toEqual(["/abort"]);
+  });
+
+  it("/e completes to /exit", () => {
+    const [hits, line] = completer("/e");
+    expect(line).toBe("/e");
+    expect(hits).toEqual(["/exit"]);
+  });
+
+  it("bare / shows all commands", () => {
+    const [hits, line] = completer("/");
+    expect(line).toBe("/");
+    expect(hits).toEqual([...COMMANDS]);
+  });
+
+  it("non-/ input returns no completions", () => {
+    const [hits, line] = completer("hello");
+    expect(line).toBe("hello");
+    expect(hits).toEqual([]);
+  });
+
+  it("empty input returns no completions", () => {
+    const [hits, line] = completer("");
+    expect(line).toBe("");
+    expect(hits).toEqual([]);
+  });
+
+  it("unmatched slash command returns no completions", () => {
+    const [hits, line] = completer("/z");
+    expect(line).toBe("/z");
+    expect(hits).toEqual([]);
   });
 });

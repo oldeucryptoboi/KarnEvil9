@@ -5,3 +5,4 @@ export { PluginApiImpl } from "./plugin-api-impl.js";
 export { HookRunner } from "./hook-runner.js";
 export { PluginRegistry, type PluginRegistryConfig } from "./plugin-registry.js";
 export { PluginTestHarness } from "./plugin-test-harness.js";
+export { PluginWatcher, type PluginWatcherConfig, type PluginReloadEvent, type PluginReloadError } from "./plugin-watcher.js";

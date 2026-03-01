@@ -341,6 +341,20 @@ describe("formatEvent", () => {
       expect(result).toContain("shell:exec:*");
     });
 
+    it("formats permission.requested with non-array permissions", () => {
+      const event = {
+        type: "permission.requested",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {
+          tool_name: "write-file",
+          permissions: "fs:write:*",
+        },
+      };
+      const result = formatEvent(sid, event);
+      expect(result).toContain("write-file");
+      expect(result).toContain("Scopes:");
+    });
+
     it("suppresses permission.granted", () => {
       const event = {
         type: "permission.granted",
@@ -377,6 +391,243 @@ describe("formatEvent", () => {
         payload: { tool_name: "shell-exec" },
       };
       expect(formatEvent(sid, event)).toBeNull();
+    });
+  });
+
+  describe("browser output formatting", () => {
+    it("formats browser success with url and title", () => {
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {
+          output: {
+            success: true,
+            url: "https://example.com",
+            title: "Example Page",
+          },
+        },
+      };
+      const result = formatEvent(sid, event)!;
+      expect(result).toContain("https://example.com");
+      expect(result).toContain("Example Page");
+    });
+
+    it("formats browser failure with error", () => {
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {
+          output: {
+            success: false,
+            error: "Navigation timeout",
+          },
+        },
+      };
+      const result = formatEvent(sid, event)!;
+      expect(result).toContain("Navigation timeout");
+    });
+
+    it("formats browser success with text content", () => {
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {
+          output: {
+            success: true,
+            text: "Page content here",
+          },
+        },
+      };
+      const result = formatEvent(sid, event)!;
+      expect(result).toContain("Page content here");
+    });
+
+    it("formats browser success with short snapshot", () => {
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {
+          output: {
+            success: true,
+            snapshot: "Short snapshot text",
+          },
+        },
+      };
+      const result = formatEvent(sid, event)!;
+      expect(result).toContain("Snapshot:");
+      expect(result).toContain("Short snapshot text");
+    });
+
+    it("formats browser success with long snapshot (truncated)", () => {
+      const longSnapshot = "x".repeat(1000);
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {
+          output: {
+            success: true,
+            snapshot: longSnapshot,
+          },
+        },
+      };
+      const result = formatEvent(sid, event)!;
+      expect(result).toContain("Snapshot:");
+      expect(result).toContain("1000 chars");
+    });
+
+    it("formats browser success with array result (with titles)", () => {
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {
+          output: {
+            success: true,
+            result: [
+              { title: "Item 1", rank: 1, points: 100 },
+              { title: "Item 2", rank: 2 },
+            ],
+          },
+        },
+      };
+      const result = formatEvent(sid, event)!;
+      expect(result).toContain("Item 1");
+      expect(result).toContain("Item 2");
+      expect(result).toContain("100");
+    });
+
+    it("formats browser success with array result (without titles)", () => {
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {
+          output: {
+            success: true,
+            result: [
+              { data: "raw data" },
+            ],
+          },
+        },
+      };
+      const result = formatEvent(sid, event)!;
+      expect(result).toContain("raw data");
+    });
+
+    it("formats browser success with non-array result", () => {
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {
+          output: {
+            success: true,
+            result: "plain text result",
+          },
+        },
+      };
+      const result = formatEvent(sid, event)!;
+      expect(result).toContain("plain text result");
+    });
+
+    it("formats browser success with no parts (falls through to JSON)", () => {
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {
+          output: {
+            success: true,
+          },
+        },
+      };
+      const result = formatEvent(sid, event)!;
+      // No url, title, text, snapshot, or result — falls through to JSON
+      expect(result).toContain("step.succeeded");
+    });
+
+    it("formats step.succeeded with empty stdout (shows no output)", () => {
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: { output: { exit_code: 0, stdout: "", stderr: "" } },
+      };
+      const result = formatEvent(sid, event)!;
+      expect(result).toContain("(no output)");
+    });
+
+    it("formats step.succeeded with non-object non-string output", () => {
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: { output: 42 },
+      };
+      const result = formatEvent(sid, event)!;
+      expect(result).toContain("42");
+    });
+
+    it("formats step.succeeded with null output", () => {
+      const event = {
+        type: "step.succeeded",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: { output: null },
+      };
+      // output is null so step.succeeded with null output should still show something
+      const result = formatEvent(sid, event);
+      // payload.output is null, so the condition payload?.output != null is false
+      // This means it falls through to the generic branch
+      expect(result).not.toBeNull();
+    });
+  });
+
+  describe("plan.accepted edge cases", () => {
+    it("formats plan.accepted with tool_ref style steps", () => {
+      const event = {
+        type: "plan.accepted",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {
+          plan: {
+            steps: [
+              { tool_ref: { name: "read-file" }, title: "Read a file" },
+              { tool_ref: { name: "write-file" }, title: "Write output" },
+            ],
+          },
+        },
+      };
+      const result = formatEvent(sid, event);
+      expect(result).toContain("read-file");
+      expect(result).toContain("write-file");
+      expect(result).toContain("Read a file");
+    });
+
+    it("formats plan.accepted without plan object", () => {
+      const event = {
+        type: "plan.accepted",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {},
+      };
+      const result = formatEvent(sid, event);
+      expect(result).toContain("plan.accepted");
+    });
+  });
+
+  describe("session.failed edge cases", () => {
+    it("formats session.failed without error object", () => {
+      const event = {
+        type: "session.failed",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        payload: {},
+      };
+      const result = formatEvent(sid, event);
+      expect(result).toContain("Session failed");
+      expect(result).toContain("unknown error");
+    });
+  });
+
+  describe("missing timestamp", () => {
+    it("handles missing timestamp gracefully", () => {
+      const event = {
+        type: "session.completed",
+        payload: {},
+      };
+      const result = formatEvent(sid, event);
+      expect(result).toContain("Session completed");
     });
   });
 

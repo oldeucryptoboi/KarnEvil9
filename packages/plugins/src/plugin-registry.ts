@@ -141,7 +141,7 @@ export class PluginRegistry {
     try {
       // Temporarily remove old registrations to avoid conflicts
       await this.unloadPlugin(pluginId);
-      const state = await this.loadDiscovered(freshDiscovered);
+      const state = await this.loadDiscovered(freshDiscovered, { cacheBust: true });
 
       if (state.status === "failed") {
         // Reload failed — restore old registrations
@@ -242,7 +242,7 @@ export class PluginRegistry {
     return [...scopes];
   }
 
-  private async loadDiscovered(discovered: DiscoveredPlugin): Promise<PluginState> {
+  private async loadDiscovered(discovered: DiscoveredPlugin, options?: { cacheBust?: boolean }): Promise<PluginState> {
     const { manifest } = discovered;
     const pluginConfig = this.config.pluginConfigs?.[manifest.id] ?? {};
 
@@ -274,7 +274,7 @@ export class PluginRegistry {
     };
     this.plugins.set(manifest.id, state);
 
-    const result = await this.loader.load(discovered, api);
+    const result = await this.loader.load(discovered, api, { cacheBust: options?.cacheBust });
 
     if (!result.success) {
       state.status = "failed";

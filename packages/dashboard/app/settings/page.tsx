@@ -4,6 +4,12 @@ import { useEffect, useState, useCallback } from "react";
 import { getHealth, getTools, getPlugins } from "@/lib/api";
 import type { HealthStatus, ToolInfo, PluginInfo } from "@/lib/api";
 import { useWSContext } from "@/lib/ws-context";
+import {
+  getNotificationPrefs,
+  saveNotificationPrefs,
+  resetToDefaults,
+} from "@/lib/notification-prefs";
+import type { NotificationPrefs } from "@/lib/notification-prefs";
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
@@ -79,6 +85,267 @@ function Card({
         {title}
       </h3>
       {children}
+    </div>
+  );
+}
+
+/* ── Toggle Switch ─────────────────────────────────────────────────── */
+
+function Toggle({
+  checked,
+  onChange,
+  label,
+  description,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  label: string;
+  description?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-[var(--border)] last:border-b-0">
+      <div className="flex flex-col mr-4">
+        <span className="text-sm">{label}</span>
+        {description && (
+          <span className="text-xs text-[var(--muted)]">{description}</span>
+        )}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border border-[var(--border)] transition-colors ${
+          checked ? "bg-[var(--accent)]" : "bg-[var(--background)]"
+        }`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+            checked ? "translate-x-4" : "translate-x-0"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
+/* ── Notification Settings ─────────────────────────────────────────── */
+
+/** Human-readable labels and groupings for event types. */
+const EVENT_GROUPS: Array<{
+  title: string;
+  events: Array<{ key: string; label: string; description: string }>;
+}> = [
+  {
+    title: "Session Events",
+    events: [
+      {
+        key: "session.completed",
+        label: "Session Completed",
+        description: "When a session finishes successfully",
+      },
+      {
+        key: "session.failed",
+        label: "Session Failed",
+        description: "When a session ends with an error",
+      },
+      {
+        key: "session.aborted",
+        label: "Session Aborted",
+        description: "When a session is manually aborted",
+      },
+    ],
+  },
+  {
+    title: "Step Events",
+    events: [
+      {
+        key: "step.failed",
+        label: "Step Failed",
+        description: "When an individual step fails during execution",
+      },
+      {
+        key: "approval.needed",
+        label: "Approval Needed",
+        description: "When a step requires user approval to proceed",
+      },
+    ],
+  },
+  {
+    title: "Connection Events",
+    events: [
+      {
+        key: "connection.lost",
+        label: "Connection Lost",
+        description: "When the WebSocket connection drops",
+      },
+      {
+        key: "connection.restored",
+        label: "Connection Restored",
+        description: "When the WebSocket connection is re-established",
+      },
+    ],
+  },
+];
+
+function NotificationSettings() {
+  const [prefs, setPrefs] = useState<NotificationPrefs | null>(null);
+  const [browserPermission, setBrowserPermission] = useState<
+    NotificationPermission | "unsupported"
+  >("default");
+
+  // Load prefs on mount (client only)
+  useEffect(() => {
+    setPrefs(getNotificationPrefs());
+
+    if (typeof Notification !== "undefined") {
+      setBrowserPermission(Notification.permission);
+    } else {
+      setBrowserPermission("unsupported");
+    }
+  }, []);
+
+  if (!prefs) return null;
+
+  const updatePrefs = (next: NotificationPrefs) => {
+    setPrefs(next);
+    saveNotificationPrefs(next);
+  };
+
+  const toggleEvent = (key: string, value: boolean) => {
+    const next = {
+      ...prefs,
+      toastEvents: { ...prefs.toastEvents, [key]: value },
+    };
+    updatePrefs(next);
+  };
+
+  const handleBrowserToggle = async (value: boolean) => {
+    if (value) {
+      // Request permission if not yet granted
+      if (
+        typeof Notification !== "undefined" &&
+        Notification.permission === "default"
+      ) {
+        const result = await Notification.requestPermission();
+        setBrowserPermission(result);
+        if (result !== "granted") {
+          // Permission denied -- don't enable
+          return;
+        }
+      } else if (
+        typeof Notification !== "undefined" &&
+        Notification.permission === "denied"
+      ) {
+        // Can't request again -- inform user
+        return;
+      }
+    }
+    updatePrefs({ ...prefs, browserNotifications: value });
+  };
+
+  const handleSoundToggle = (value: boolean) => {
+    updatePrefs({ ...prefs, soundEnabled: value });
+  };
+
+  const handleReset = () => {
+    const defaults = resetToDefaults();
+    setPrefs(defaults);
+  };
+
+  return (
+    <div className="space-y-5">
+      <p className="text-xs text-[var(--muted)]">
+        Control which events trigger toast notifications, browser alerts,
+        and sounds. Changes are saved automatically.
+      </p>
+
+      {/* Event toggle groups */}
+      {EVENT_GROUPS.map((group) => (
+        <div key={group.title}>
+          <span className="text-xs font-semibold text-[var(--muted)] block mb-2">
+            {group.title}
+          </span>
+          <div>
+            {group.events.map((evt) => (
+              <Toggle
+                key={evt.key}
+                checked={prefs.toastEvents[evt.key] ?? false}
+                onChange={(v) => toggleEvent(evt.key, v)}
+                label={evt.label}
+                description={evt.description}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {/* Browser Notifications + Sound */}
+      <div>
+        <span className="text-xs font-semibold text-[var(--muted)] block mb-2">
+          Delivery
+        </span>
+        <div>
+          <div className="flex items-center justify-between py-2 border-b border-[var(--border)]">
+            <div className="flex flex-col mr-4">
+              <span className="text-sm">Browser Notifications</span>
+              <span className="text-xs text-[var(--muted)]">
+                {browserPermission === "granted"
+                  ? "Permission granted -- notifications will appear even when this tab is in the background"
+                  : browserPermission === "denied"
+                    ? "Permission denied -- enable notifications in your browser settings"
+                    : browserPermission === "unsupported"
+                      ? "Not supported in this browser"
+                      : "Will request permission when enabled"}
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={prefs.browserNotifications}
+              disabled={
+                browserPermission === "denied" ||
+                browserPermission === "unsupported"
+              }
+              onClick={() => handleBrowserToggle(!prefs.browserNotifications)}
+              className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border border-[var(--border)] transition-colors ${
+                browserPermission === "denied" ||
+                browserPermission === "unsupported"
+                  ? "cursor-not-allowed opacity-40"
+                  : "cursor-pointer"
+              } ${
+                prefs.browserNotifications
+                  ? "bg-[var(--accent)]"
+                  : "bg-[var(--background)]"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                  prefs.browserNotifications
+                    ? "translate-x-4"
+                    : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+          <Toggle
+            checked={prefs.soundEnabled}
+            onChange={handleSoundToggle}
+            label="Notification Sound"
+            description="Play a subtle audio beep when a notification fires"
+          />
+        </div>
+      </div>
+
+      {/* Reset button */}
+      <div className="pt-2">
+        <button
+          onClick={handleReset}
+          className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors underline underline-offset-2"
+        >
+          Reset to Defaults
+        </button>
+      </div>
     </div>
   );
 }
@@ -443,6 +710,11 @@ export default function SettingsPage() {
               )
             }
           />
+        </Card>
+
+        {/* ── Notifications ──────────────────────────────────────── */}
+        <Card title="Notifications">
+          <NotificationSettings />
         </Card>
 
         {/* ── Active Tools ─────────────────────────────────────────── */}

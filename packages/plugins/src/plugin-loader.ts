@@ -15,7 +15,8 @@ export class PluginLoader {
 
   async load(
     discovered: DiscoveredPlugin,
-    api: PluginApi
+    api: PluginApi,
+    options?: { cacheBust?: boolean }
   ): Promise<{ success: boolean; error?: string }> {
     const { manifest, directory } = discovered;
 
@@ -45,7 +46,11 @@ export class PluginLoader {
       if (!resolvedEntry.startsWith(resolvedDir + "/") && resolvedEntry !== resolvedDir) {
         throw new Error(`Entry path "${manifest.entry}" resolves outside plugin directory`);
       }
-      const entryUrl = pathToFileURL(entryPath).href;
+      let entryUrl = pathToFileURL(entryPath).href;
+      // Append a cache-busting query param for ESM hot-reload
+      if (options?.cacheBust) {
+        entryUrl += `?t=${Date.now()}`;
+      }
       mod = (await import(entryUrl)) as Record<string, unknown>;
     } catch (err) {
       const message = `Failed to import plugin "${manifest.id}": ${err instanceof Error ? err.message : String(err)}`;

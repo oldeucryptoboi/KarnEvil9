@@ -389,6 +389,21 @@ export class ChatClient {
   }
 }
 
+// ─── Tab Completion ───────────────────────────────────────────────
+
+/** Available slash commands for tab completion. */
+export const COMMANDS = ["/help", "/quit", "/exit", "/abort"] as const;
+
+/**
+ * readline-compatible completer function.
+ * Returns [completions, line] for slash commands.
+ */
+export function completer(line: string): [string[], string] {
+  if (!line.startsWith("/")) return [[], line];
+  const hits = COMMANDS.filter((c) => c.startsWith(line));
+  return [hits, line];
+}
+
 // ─── RealTerminalIO ───────────────────────────────────────────────
 
 export class RealTerminalIO implements TerminalIO {
@@ -403,6 +418,7 @@ export class RealTerminalIO implements TerminalIO {
     this._rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
+      completer,
     });
   }
 

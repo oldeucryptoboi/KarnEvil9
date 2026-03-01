@@ -371,7 +371,7 @@ function createClaudeCodeCallFn(model: string): ModelCallFn {
       const args = [
         "-p",
         "--output-format", "json",
-        "--max-turns", "1",
+        "--max-turns", "3",
         "--model", model === "claude-code" ? "sonnet" : model,
         "--system-prompt", systemPrompt,
       ];
@@ -410,6 +410,10 @@ function createClaudeCodeCallFn(model: string): ModelCallFn {
 
           try {
             const envelope = JSON.parse(stdout);
+            if (envelope.result == null) {
+              reject(new Error(`Claude Code CLI returned no result (subtype: ${envelope.subtype ?? "unknown"}, is_error: ${envelope.is_error}). Output: ${stdout.slice(0, 500)}`));
+              return;
+            }
             const text = typeof envelope.result === "string" ? envelope.result : JSON.stringify(envelope.result);
             resolve({
               text,

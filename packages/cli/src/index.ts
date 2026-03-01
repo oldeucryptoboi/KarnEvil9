@@ -6,7 +6,7 @@ import { resolve, join } from "node:path";
 import { hostname, homedir } from "node:os";
 import * as readline from "node:readline";
 import { Journal } from "@karnevil9/journal";
-import { ToolRegistry, ToolRuntime, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, createBrowserHandler, executeGameCommandHandler, parseGameScreenHandler, gameCombatHandler, gameTakeAllHandler, gameNavigateHandler, } from "@karnevil9/tools";
+import { ToolRegistry, ToolRuntime, respondHandler, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, createBrowserHandler, executeGameCommandHandler, parseGameScreenHandler, gameCombatHandler, gameTakeAllHandler, gameNavigateHandler, } from "@karnevil9/tools";
 import type { BrowserDriverLike, EmulatorLike } from "@karnevil9/tools";
 import { PermissionEngine } from "@karnevil9/permissions";
 import { Kernel } from "@karnevil9/kernel";
@@ -102,6 +102,7 @@ async function createRuntime(
   const permissions = new PermissionEngine(journal, approvalPrompt ?? cliApprovalPrompt);
   const defaultPolicy = policy ?? { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
   const runtime = new ToolRuntime(registry, permissions, journal, defaultPolicy);
+  runtime.registerHandler("respond", respondHandler);
   runtime.registerHandler("read-file", readFileHandler);
   runtime.registerHandler("write-file", writeFileHandler);
   runtime.registerHandler("shell-exec", shellExecHandler);

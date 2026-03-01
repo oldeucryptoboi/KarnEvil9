@@ -460,6 +460,9 @@ export class LLMPlanner implements Planner {
    * and safe-default filling so that downstream schema validation is more likely to pass.
    */
   private parseAndNormalize(raw: string): Plan {
+    if (!raw) {
+      throw new Error("Planner returned empty or undefined response");
+    }
     const MAX_RESPONSE_SIZE = 500_000;
     if (raw.length > MAX_RESPONSE_SIZE) {
       throw new Error(`Planner response too large: ${raw.length} characters (max ${MAX_RESPONSE_SIZE})`);

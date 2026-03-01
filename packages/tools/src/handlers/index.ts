@@ -1,3 +1,4 @@
+export { respondHandler } from "./respond.js";
 export { readFileHandler } from "./read-file.js";
 export { writeFileHandler } from "./write-file.js";
 export { shellExecHandler, redactSecrets } from "./shell-exec.js";

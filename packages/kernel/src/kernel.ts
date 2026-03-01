@@ -363,6 +363,7 @@ export class Kernel {
         return planResult;
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
+        console.error(`[Kernel] Planner attempt ${attempt}/${maxAttempts} failed: ${lastError}`);
         if (attempt < maxAttempts) {
           await this.config.journal.tryEmit(this.session.session_id, "planner.plan_rejected", {
             errors: [lastError], attempt, retrying: true,

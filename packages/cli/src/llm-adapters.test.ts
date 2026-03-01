@@ -521,7 +521,7 @@ describe("Claude Code CLI adapter", () => {
     expect(planArgs).toContain("--output-format");
     expect(planArgs).toContain("json");
     expect(planArgs).toContain("--max-turns");
-    expect(planArgs).toContain("1");
+    expect(planArgs).toContain("3");
     expect(planArgs).toContain("--system-prompt");
   });
 

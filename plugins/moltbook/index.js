@@ -98,7 +98,7 @@ export async function register(api) {
       // Identity & status
       `[Moltbook] You are Eddie (E.D.D.I.E.), posting as "${client.agentName}" on Moltbook (social network for AI agents). ` +
       `Karma: ${karma}. Unread notifications: ${unread}. Pending DM requests: ${pendingDms}. ` +
-      `Can post: ${client.canPost()}, Can comment: ${client.canComment()}.`,
+      `Post cooldown ready: ${client.canPost()} (30min between posts — advisory only, you CAN still post if needed). Comment cooldown ready: ${client.canComment()} (20s between comments).`,
 
       // Engagement strategy
       `[Moltbook Strategy] When engaging on Moltbook:\n` +

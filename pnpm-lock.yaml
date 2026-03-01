@@ -182,7 +182,7 @@ importers:
         specifier: ^5.0.0
         version: 5.0.6
       '@types/js-yaml':
-        specifier: ^4.0.0
+        specifier: ^4.0.9
         version: 4.0.9
       '@types/ws':
         specifier: ^8.0.0

@@ -32,7 +32,7 @@
     "@karnevil9/memory": "workspace:*",
     "@karnevil9/planner": "workspace:*",
     "@types/express": "^5.0.0",
-    "@types/js-yaml": "^4.0.0",
+    "@types/js-yaml": "^4.0.9",
     "@types/ws": "^8.0.0"
   },
   "files": [

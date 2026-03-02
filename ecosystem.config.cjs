@@ -6,7 +6,7 @@ module.exports = {
       args: "server --insecure --planner claude-code --agentic",
       interpreter: "/opt/homebrew/bin/node",
       node_args: "--unhandled-rejections=throw",
-      max_memory_restart: "1G",
+      max_memory_restart: "2G",
       autorestart: true,
       watch: false,
       log_date_format: "YYYY-MM-DD HH:mm:ss Z",

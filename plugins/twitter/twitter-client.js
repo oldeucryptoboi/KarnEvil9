@@ -254,7 +254,7 @@ export class TwitterClient {
       try {
         await this._pollDMs();
       } catch (err) {
-        if (err.message && /\b(401|403|429)\b/.test(err.message)) {
+        if (err.message && /\b(401|402|403|429)\b/.test(err.message)) {
           this.logger?.warn("Twitter DM polling disabled — DM endpoint returned error. Tweet tools still available.", { error: err.message });
           this._dmDisabled = true;
           return;

@@ -790,6 +790,21 @@ export class Kernel {
       // If execution caused failure/abort, stop
       if (this.session.status !== "running") return;
 
+      // Auto-terminate if the plan consisted only of respond steps — the response
+      // has been delivered, there is nothing left to do. Without this, the planner
+      // keeps generating more respond steps in an infinite loop.
+      const allRespond = plan.steps.length > 0 && plan.steps.every(s => s.tool_ref.name === "respond");
+      if (allRespond) {
+        const allSucceeded = plan.steps.every(s => {
+          const r = this.taskState!.getStepResult(s.step_id);
+          return r && r.status === "succeeded";
+        });
+        if (allSucceeded) {
+          done = true;
+          break;
+        }
+      }
+
       // Futility detection
       if (this.futilityMonitor) {
         const verdict = this.futilityMonitor.recordIteration({

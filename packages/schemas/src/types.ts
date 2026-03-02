@@ -48,6 +48,14 @@ export interface Session {
   updated_at: string;
 }
 
+// ─── Conversation ───────────────────────────────────────────────────
+
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  text: string;
+  timestamp: string;
+}
+
 // ─── Task ───────────────────────────────────────────────────────────
 
 export interface TaskConstraints {

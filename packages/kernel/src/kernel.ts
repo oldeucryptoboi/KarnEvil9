@@ -16,6 +16,7 @@ import type {
   ModelPricing,
   HookName,
   HookResult,
+  ConversationTurn,
 } from "@karnevil9/schemas";
 import { validatePlanData, withTimeout } from "@karnevil9/schemas";
 import type { Journal } from "@karnevil9/journal";
@@ -57,6 +58,7 @@ export interface KernelConfig {
   contextBudgetConfig?: ContextBudgetConfig;
   checkpointDir?: string;
   preGrantedScopes?: string[];
+  conversationHistory?: ConversationTurn[];
 }
 
 function sleep(ms: number): Promise<void> {
@@ -263,11 +265,14 @@ export class Kernel {
       enrichedSnapshot.subagent_findings = this.subagentFindings;
       this.subagentFindings = null; // Consume once
     }
+    if (this.config.conversationHistory && this.config.conversationHistory.length > 0) {
+      enrichedSnapshot.conversation_history = this.config.conversationHistory;
+    }
 
     // Merge before_plan hook data into planner snapshot (only safe keys)
     const hookData = (beforePlanResult as { data?: Record<string, unknown> }).data;
     if (hookData && typeof hookData === "object") {
-      const allowed = new Set(["hints", "constraints", "context", "relevant_memories", "subagent_findings"]);
+      const allowed = new Set(["hints", "constraints", "context", "relevant_memories", "subagent_findings", "conversation_history"]);
       for (const key of Object.keys(hookData)) {
         if (allowed.has(key) && key !== "__proto__" && key !== "constructor" && key !== "prototype") {
           (enrichedSnapshot as Record<string, unknown>)[key] = hookData[key];

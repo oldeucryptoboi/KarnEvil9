@@ -5,7 +5,7 @@ import { Kernel as KernelClass } from "@karnevil9/kernel";
 import type { ToolRegistry, ToolRuntime } from "@karnevil9/tools";
 import type { Journal } from "@karnevil9/journal";
 import type { PermissionEngine } from "@karnevil9/permissions";
-import type { Planner, Task, ApprovalDecision, ExecutionMode, SessionLimits, PolicyProfile, JournalEvent } from "@karnevil9/schemas";
+import type { Planner, Task, ApprovalDecision, ExecutionMode, SessionLimits, PolicyProfile, JournalEvent, ConversationTurn } from "@karnevil9/schemas";
 import { validateJournalEventData } from "@karnevil9/schemas";
 import type { PluginRegistry } from "@karnevil9/plugins";
 import type { ActiveMemory } from "@karnevil9/memory";
@@ -290,6 +290,8 @@ interface SSEClient {
 interface WSClient {
   ws: WebSocket;
   activeSessionIds: Set<string>;
+  conversationHistory: ConversationTurn[];
+  pendingSessionTexts: Map<string, string>;
 }
 
 export interface ApiServerConfig {
@@ -507,6 +509,12 @@ export class ApiServer {
     this.journalUnsubscribe = this.journal.on((event) => {
       this.broadcastEvent(event.session_id, event);
       this.broadcastWsEvent(event.session_id, event);
+      if (event.type === "session.completed") {
+        this.captureConversationTurn(event.session_id, event);
+      }
+      if (event.type === "session.failed" || event.type === "session.aborted") {
+        this.cleanupPendingText(event.session_id);
+      }
     });
   }
 
@@ -709,7 +717,7 @@ export class ApiServer {
     });
 
     this.wss.on("connection", (ws: WebSocket) => {
-      const client: WSClient = { ws, activeSessionIds: new Set() };
+      const client: WSClient = { ws, activeSessionIds: new Set(), conversationHistory: [], pendingSessionTexts: new Map() };
       this.wsClients.add(client);
 
       ws.on("message", async (raw: Buffer | string) => {
@@ -772,10 +780,15 @@ export class ApiServer {
   }
 
   private broadcastWsEvent(sessionId: string, event: JournalEvent): void {
+    let matchingClients = 0;
     for (const client of this.wsClients) {
       if (client.activeSessionIds.has(sessionId)) {
         this.wsSend(client.ws, { type: "event", session_id: sessionId, event });
+        matchingClients++;
       }
+    }
+    if (event.type === "session.completed") {
+      console.log(`[WS-DEBUG] Broadcasting session.completed for session ${sessionId} to ${matchingClients} client(s)`);
     }
   }
 
@@ -818,12 +831,14 @@ export class ApiServer {
       ...(this.checkpointDir ? { checkpointDir: this.checkpointDir } : {}),
       plannerTimeoutMs: PLANNER_TIMEOUT_MS,
       plannerRetries: 2,
+      ...(client.conversationHistory.length > 0 ? { conversationHistory: [...client.conversationHistory] } : {}),
     });
 
     const session = await kernel.createSession(task);
     this.kernels.set(session.session_id, kernel);
     this.activeSessions.add(session.session_id);
     client.activeSessionIds.add(session.session_id);
+    client.pendingSessionTexts.set(session.session_id, text.trim());
 
     this.wsSend(client.ws, { type: "session.created", session_id: session.session_id, task });
 
@@ -881,6 +896,83 @@ export class ApiServer {
     };
     for (const client of this.wsClients) {
       this.wsSend(client.ws, resolvedMsg);
+    }
+  }
+
+  private static readonly MAX_CONVERSATION_TURNS = 20;
+
+  private captureConversationTurn(sessionId: string, event: JournalEvent): void {
+    // Find the WSClient that submitted this session
+    let client: WSClient | undefined;
+    for (const c of this.wsClients) {
+      if (c.pendingSessionTexts.has(sessionId)) {
+        client = c;
+        break;
+      }
+    }
+    if (!client) return;
+
+    const userText = client.pendingSessionTexts.get(sessionId);
+    client.pendingSessionTexts.delete(sessionId);
+    if (!userText) return;
+
+    // Extract EDDIE's response from step_results
+    const payload = event.payload as Record<string, unknown>;
+    const stepResults = payload.step_results as Record<string, { status: string; output?: unknown }> | undefined;
+    let assistantText: string | undefined;
+
+    if (stepResults) {
+      // Prefer 'respond' tool output with 'delivered' field
+      for (const result of Object.values(stepResults)) {
+        if (result.status === "succeeded" && result.output != null) {
+          const output = result.output as Record<string, unknown>;
+          if (typeof output.delivered === "string") {
+            assistantText = output.delivered;
+            break;
+          }
+        }
+      }
+      // Fall back to any step with text output
+      if (!assistantText) {
+        for (const result of Object.values(stepResults)) {
+          if (result.status === "succeeded" && result.output != null) {
+            const output = result.output;
+            if (typeof output === "string") {
+              assistantText = output;
+              break;
+            }
+            if (typeof output === "object" && output !== null) {
+              const obj = output as Record<string, unknown>;
+              if (typeof obj.text === "string") {
+                assistantText = obj.text;
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (!assistantText) return;
+
+    const now = new Date().toISOString();
+    client.conversationHistory.push(
+      { role: "user", text: userText, timestamp: now },
+      { role: "assistant", text: assistantText, timestamp: now },
+    );
+
+    // Cap at MAX_CONVERSATION_TURNS to prevent unbounded growth
+    if (client.conversationHistory.length > ApiServer.MAX_CONVERSATION_TURNS) {
+      client.conversationHistory = client.conversationHistory.slice(-ApiServer.MAX_CONVERSATION_TURNS);
+    }
+  }
+
+  private cleanupPendingText(sessionId: string): void {
+    for (const client of this.wsClients) {
+      if (client.pendingSessionTexts.has(sessionId)) {
+        client.pendingSessionTexts.delete(sessionId);
+        return;
+      }
     }
   }
 

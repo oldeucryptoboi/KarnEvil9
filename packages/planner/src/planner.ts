@@ -128,6 +128,11 @@ Think before acting. On each iteration:
 2. Choose the most direct path to the answer — avoid exploratory busywork.
 3. Produce only steps that advance the task.
 
+Respond-first principle:
+- If you can answer the user's question from general knowledge, conversation context, or previous step results — use the \`respond\` tool IMMEDIATELY as your only step. Do NOT research or fetch data you don't need.
+- Conversational follow-ups like "what else?", "tell me more", "anything else?", "go on" should be answered directly with \`respond\` using what you already know. Do NOT start new research cycles for follow-up questions.
+- Only use research/fetch tools when the task genuinely requires external data you don't have.
+
 Tool selection:
 - read-file: Use for reading files. NEVER use shell-exec with cat/head/tail/less to read files.
 - shell-exec: Reserved for builds, tests, git, process management, and commands that genuinely need a shell. Do NOT use it for ls/find/cat when read-file or claude-code would be more direct.
@@ -222,6 +227,17 @@ function buildUserPrompt(task: Task, stateSnapshot: Record<string, unknown>): st
       for (const hint of hints) {
         prompt += `- ${sanitizeForPrompt(hint, 1000)}\n`;
       }
+    }
+  }
+  if (stateSnapshot.conversation_history) {
+    const history = stateSnapshot.conversation_history as Array<{ role: string; text: string }>;
+    if (history.length > 0) {
+      prompt += `\n## Conversation History\nRecent conversation between the user and you (EDDIE). Use this to understand follow-up questions.\n`;
+      for (const turn of history) {
+        const label = turn.role === "user" ? "User" : "EDDIE";
+        prompt += `\n**${label}:** ${wrapUntrusted(turn.text, 2000)}\n`;
+      }
+      prompt += `\nThe current task is a follow-up. Answer in context.\n`;
     }
   }
   if (stateSnapshot.has_plan) prompt += `\n## Current State (replanning context)\n${wrapUntrusted(JSON.stringify(stateSnapshot, null, 2))}\n`;
@@ -322,6 +338,18 @@ function buildAgenticUserPrompt(task: Task, stateSnapshot: Record<string, unknow
       for (const hint of hints) {
         prompt += `- ${sanitizeForPrompt(hint, 1000)}\n`;
       }
+    }
+  }
+
+  if (stateSnapshot.conversation_history) {
+    const history = stateSnapshot.conversation_history as Array<{ role: string; text: string }>;
+    if (history.length > 0) {
+      prompt += `\n## Conversation History\nRecent conversation between the user and you (EDDIE). Use this to understand follow-up questions.\n`;
+      for (const turn of history) {
+        const label = turn.role === "user" ? "User" : "EDDIE";
+        prompt += `\n**${label}:** ${wrapUntrusted(turn.text, 2000)}\n`;
+      }
+      prompt += `\nThe current task is a follow-up. Answer in context.\n`;
     }
   }
 

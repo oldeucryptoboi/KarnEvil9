@@ -633,7 +633,20 @@ export class LLMPlanner implements Planner {
     const { text: raw, usage } = await this.callModel(systemPrompt, userPrompt);
     mergeUsage(usage);
 
-    let plan = this.parseAndNormalize(raw);
+    let plan: Plan;
+    try {
+      plan = this.parseAndNormalize(raw);
+    } catch (parseErr) {
+      // Model returned prose instead of JSON — retry with explicit format correction
+      const correctionPrompt = userPrompt +
+        "\n\nCRITICAL FORMAT ERROR: Your previous response was plain text, not JSON. " +
+        "You MUST respond with ONLY a valid JSON object matching the Output Schema. " +
+        "No greetings, no markdown, no explanation — ONLY the JSON plan object. Example:\n" +
+        '{"plan_id":"...","schema_version":"0.1","goal":"...","assumptions":[],"steps":[{"step_id":"step-1","title":"...","tool_ref":{"name":"respond"},"input":{"text":"your answer here"},"success_criteria":["Message delivered"],"failure_policy":"abort","timeout_ms":5000,"max_retries":0}]}';
+      const { text: retryRaw, usage: retryUsage } = await this.callModel(systemPrompt, correctionPrompt);
+      mergeUsage(retryUsage);
+      plan = this.parseAndNormalize(retryRaw);
+    }
 
     // If steps is missing after normalization, retry once with an explicit format correction
     if (!Array.isArray(plan.steps)) {

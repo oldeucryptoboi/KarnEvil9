@@ -33,22 +33,28 @@ export async function register(api) {
   const vaultRoot = resolve(
     process.env.KARNEVIL9_VAULT_ROOT ?? config.vaultRoot ?? "./vault",
   );
+  const mlxBaseUrl = process.env.KARNEVIL9_MLX_BASE_URL;
   const classifierModel =
     process.env.KARNEVIL9_VAULT_CLASSIFIER_MODEL ??
     config.classifierModel ??
-    "claude-3-haiku-20240307";
+    (mlxBaseUrl ? null : "claude-3-haiku-20240307"); // null = auto-detect from MLX
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   const openaiApiKey = process.env.OPENAI_API_KEY;
   const embeddingModel =
     process.env.KARNEVIL9_VAULT_EMBEDDING_MODEL ?? "text-embedding-3-small";
 
-  // Construct ClassifierFn if API key is available
+  // Construct ClassifierFn — prefer local MLX, fall back to Anthropic API
   let classifierFn = undefined;
-  if (anthropicApiKey) {
-    classifierFn = createClassifierFn(anthropicApiKey, classifierModel);
+  let classifierSource = "none";
+  if (mlxBaseUrl) {
+    classifierFn = createOpenAICompatibleClassifierFn(mlxBaseUrl, classifierModel);
+    classifierSource = "mlx";
+  } else if (anthropicApiKey) {
+    classifierFn = createClassifierFn(anthropicApiKey, classifierModel ?? "claude-3-haiku-20240307");
+    classifierSource = "anthropic";
   } else {
     api.logger.warn(
-      "No ANTHROPIC_API_KEY set — vault classification will be unavailable",
+      "No KARNEVIL9_MLX_BASE_URL or ANTHROPIC_API_KEY set — vault classification will be unavailable",
     );
   }
 
@@ -62,10 +68,12 @@ export async function register(api) {
     );
   }
 
-  // Construct InsightsFn if Anthropic API key is available
+  // Construct InsightsFn — prefer local MLX, fall back to Anthropic API
   let insightsFn = undefined;
-  if (anthropicApiKey) {
-    insightsFn = createInsightsFn(anthropicApiKey, classifierModel);
+  if (mlxBaseUrl) {
+    insightsFn = createOpenAICompatibleInsightsFn(mlxBaseUrl, classifierModel);
+  } else if (anthropicApiKey) {
+    insightsFn = createInsightsFn(anthropicApiKey, classifierModel ?? "claude-3-haiku-20240307");
   }
 
   // Construct emitEvent function
@@ -229,6 +237,7 @@ export async function register(api) {
   api.logger.info("Vault plugin registered", {
     vaultRoot,
     classifierModel,
+    classifierSource,
     embeddingModel,
     hasClassifier: !!classifierFn,
     hasEmbedder: !!embedderFn,
@@ -418,5 +427,154 @@ Ground every observation in quantitative data. Cite specific numbers. Do not spe
 
     const data = await response.json();
     return data.content?.[0]?.text ?? "No insights generated.";
+  };
+}
+
+/**
+ * Build a ClassifierFn using an OpenAI-compatible API (MLX, vLLM, etc.).
+ *
+ * @param {string} baseUrl - e.g. "http://macmini:8080/v1"
+ * @param {string|null} model - model name, or null to auto-detect from /models
+ * @returns {import("@karnevil9/vault").ClassifierFn}
+ */
+function createOpenAICompatibleClassifierFn(baseUrl, model) {
+  let resolvedModel = model;
+
+  return async (title, content, availableTypes) => {
+    // Auto-detect model from server if not specified
+    if (!resolvedModel) {
+      try {
+        const modelsRes = await fetch(`${baseUrl}/models`);
+        const modelsData = await modelsRes.json();
+        resolvedModel = modelsData.data?.[0]?.id ?? "default";
+      } catch {
+        resolvedModel = "default";
+      }
+    }
+
+    const truncatedContent =
+      content.length > 4000 ? content.slice(0, 4000) + "\n...(truncated)" : content;
+
+    const systemPrompt = `You are a knowledge classifier. Given a document title and content, classify it according to the ontology.
+
+Available object types: ${availableTypes.join(", ")}
+PARA categories: projects (active work), areas (ongoing responsibilities), resources (reference material), archive (inactive), inbox (unclassified)
+
+Respond with ONLY valid JSON (no markdown fences):
+{
+  "object_type": "one of the available types",
+  "para_category": "one of projects/areas/resources/archive/inbox",
+  "tags": ["tag1", "tag2"],
+  "entities": [{"name": "Entity Name", "type": "Person|Tool|Concept|Organization|Project", "link_type": "discusses|uses|mentions|authored_by|related_to"}],
+  "confidence": 0.0-1.0
+}`;
+
+    const userPrompt = `Title: <<<UNTRUSTED_INPUT>>>${title}<<<END_UNTRUSTED_INPUT>>>
+
+Content: <<<UNTRUSTED_INPUT>>>${truncatedContent}<<<END_UNTRUSTED_INPUT>>>`;
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: resolvedModel,
+        max_tokens: 1024,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Classifier API error (HTTP ${response.status})`);
+    }
+
+    const data = await response.json();
+    const text = data.choices?.[0]?.message?.content ?? "";
+
+    const jsonStr = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    let result;
+    try {
+      result = JSON.parse(jsonStr);
+    } catch {
+      return {
+        object_type: "Note",
+        para_category: "inbox",
+        tags: [],
+        entities: [],
+        confidence: 0.1,
+      };
+    }
+
+    return {
+      object_type: result.object_type ?? "Note",
+      para_category: result.para_category ?? "inbox",
+      tags: result.tags ?? [],
+      entities: result.entities ?? [],
+      confidence: result.confidence ?? 0.5,
+    };
+  };
+}
+
+/**
+ * Build an InsightsFn using an OpenAI-compatible API (MLX, vLLM, etc.).
+ *
+ * @param {string} baseUrl - e.g. "http://macmini:8080/v1"
+ * @param {string|null} model - model name, or null to auto-detect from /models
+ * @returns {import("@karnevil9/vault").InsightsFn}
+ */
+function createOpenAICompatibleInsightsFn(baseUrl, model) {
+  let resolvedModel = model;
+
+  return async (dashboardData) => {
+    if (!resolvedModel) {
+      try {
+        const modelsRes = await fetch(`${baseUrl}/models`);
+        const modelsData = await modelsRes.json();
+        resolvedModel = modelsData.data?.[0]?.id ?? "default";
+      } catch {
+        resolvedModel = "default";
+      }
+    }
+
+    const statsText = JSON.stringify(dashboardData, null, 2);
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: resolvedModel,
+        max_tokens: 2048,
+        messages: [
+          {
+            role: "system",
+            content: `You are a behavioral analyst reviewing a personal knowledge vault containing ingested conversations (ChatGPT, Claude, WhatsApp), notes, documents, and extracted entities spanning months of thinking.
+
+Analyze the vault statistics and produce an insights report in markdown covering:
+
+1. **Thinking Patterns**: Dominant topics, recurring themes, emerging vs declining interests
+2. **Working Methodology**: Preferred tools/approaches, exploration vs execution balance
+3. **Knowledge Gaps**: Missing connections, frequently mentioned but poorly linked entities, blind spots
+4. **Behavioral Contradictions**: Stated priorities vs actual time allocation, discussed-but-inactive projects
+5. **Relationship Patterns**: Key collaborators, entities bridging multiple projects
+6. **Actionable Recommendations**: Focus areas, deprioritize candidates, unexplored connections
+
+Ground every observation in quantitative data. Cite specific numbers. Do not speculate beyond what the data supports.`,
+          },
+          {
+            role: "user",
+            content: `Here are the vault statistics:\n\n${statsText}\n\nGenerate insights.`,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Insights API error (HTTP ${response.status})`);
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content ?? "No insights generated.";
   };
 }

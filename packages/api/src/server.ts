@@ -922,12 +922,12 @@ export class ApiServer {
     let assistantText: string | undefined;
 
     if (stepResults) {
-      // Prefer 'respond' tool output with 'delivered' field
+      // Prefer 'respond' tool output (has 'delivered' boolean flag, text in 'text')
       for (const result of Object.values(stepResults)) {
         if (result.status === "succeeded" && result.output != null) {
           const output = result.output as Record<string, unknown>;
-          if (typeof output.delivered === "string") {
-            assistantText = output.delivered;
+          if (output.delivered && typeof output.text === "string") {
+            assistantText = output.text;
             break;
           }
         }

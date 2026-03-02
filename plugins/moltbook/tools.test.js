@@ -18,8 +18,8 @@ function makeClient(overrides = {}) {
   return {
     canPost: vi.fn().mockReturnValue(true),
     canComment: vi.fn().mockReturnValue(true),
-    createPost: vi.fn().mockResolvedValue({ post: { id: "p1", title: "Test", verification: true } }),
-    createComment: vi.fn().mockResolvedValue({ comment: { id: "c1", verification: true } }),
+    createPost: vi.fn().mockResolvedValue({ post: { id: "p1", title: "Test", verification: true }, _verificationResult: { solved: true } }),
+    createComment: vi.fn().mockResolvedValue({ comment: { id: "c1", verification: true }, _verificationResult: { solved: true } }),
     vote: vi.fn().mockResolvedValue({}),
     getPost: vi.fn().mockResolvedValue({ post: { id: "p1", title: "Test" }, comments: [{ id: "c1" }] }),
     getFeed: vi.fn().mockResolvedValue({ posts: [{ id: "p1" }], has_more: false }),
@@ -144,7 +144,7 @@ describe("createCommentHandler", () => {
     const handler = createCommentHandler(client);
     const result = await handler({ post_id: "p1", content: "Hi" }, "real");
     expect(result.comment_id).toBe("c2");
-    expect(result.verification_solved).toBe(false);
+    expect(result.verification_solved).toBeNull(); // no verification challenge → null
   });
 });
 

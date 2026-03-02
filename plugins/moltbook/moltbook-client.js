@@ -27,6 +27,8 @@ export class MoltbookClient {
     this._lastCommentAt = 0;
     // Dedup guard: track recent comments to prevent parallel duplicates
     this._recentComments = new Map(); // key: "postId:contentPrefix" → timestamp
+    // Verification failure tracking (capped at 20, process lifetime)
+    this._failedVerifications = []; // { type, id, challenge_text, error, timestamp }
   }
 
   /**
@@ -61,9 +63,14 @@ export class MoltbookClient {
     this._lastPostAt = Date.now();
 
     // Auto-solve verification if present
+    let verificationResult = null;
     if (res.post?.verification) {
-      await this._solveVerification(res.post.verification);
+      verificationResult = await this._solveVerification(
+        res.post.verification,
+        { type: "post", id: res.post?.id ?? "unknown" }
+      );
     }
+    res._verificationResult = verificationResult;
 
     return res;
   }
@@ -96,9 +103,14 @@ export class MoltbookClient {
 
     // Auto-solve verification if present
     const comment = res.comment ?? res;
+    let verificationResult = null;
     if (comment?.verification) {
-      await this._solveVerification(comment.verification);
+      verificationResult = await this._solveVerification(
+        comment.verification,
+        { type: "comment", id: comment?.id ?? "unknown" }
+      );
     }
+    res._verificationResult = verificationResult;
 
     return res;
   }
@@ -339,26 +351,56 @@ export class MoltbookClient {
   // ── Verification Solver ──
 
   /**
+   * Track a failed verification for planner visibility.
+   * @param {object} meta - { type, id }
+   * @param {string} challengeText
+   * @param {string} error
+   */
+  _trackFailedVerification(meta, challengeText, error) {
+    this._failedVerifications.push({
+      type: meta?.type ?? "unknown",
+      id: meta?.id ?? "unknown",
+      challenge_text: challengeText.slice(0, 100),
+      error,
+      timestamp: new Date().toISOString(),
+    });
+    if (this._failedVerifications.length > 20) {
+      this._failedVerifications = this._failedVerifications.slice(-20);
+    }
+  }
+
+  /**
+   * Get recent failed verifications (for planner hints / status route).
+   * @returns {Array<{ type: string, id: string, challenge_text: string, error: string, timestamp: string }>}
+   */
+  getFailedVerifications() {
+    return this._failedVerifications;
+  }
+
+  /**
    * Solve a Moltbook verification challenge.
-   * Parses the math expression from challenge_text, computes the answer
-   * with safe arithmetic (no eval), and submits it.
+   * Returns { solved, error? } — NEVER throws, because the content has already
+   * been created by the time verification runs.
    *
    * @param {object} verification
    * @param {string} verification.verification_code
    * @param {string} verification.challenge_text
+   * @param {object} [meta] - { type, id } for failure tracking
+   * @returns {Promise<{ solved: boolean, error?: string }>}
    */
-  async _solveVerification(verification) {
+  async _solveVerification(verification, meta) {
     const { verification_code, challenge_text } = verification;
 
     if (!verification_code || !challenge_text) {
       this.logger?.warn("Verification challenge missing code or text", { verification });
-      return;
+      return { solved: false, error: "missing_code_or_text" };
     }
 
     const answer = solveMathChallenge(challenge_text);
     if (answer === null) {
       this.logger?.error("Failed to solve verification challenge", { challenge_text });
-      return;
+      this._trackFailedVerification(meta, challenge_text, "solver_failed");
+      return { solved: false, error: "solver_failed" };
     }
 
     const formatted = answer.toFixed(2);
@@ -370,10 +412,12 @@ export class MoltbookClient {
         answer: formatted,
       });
       this.logger?.info("Verification solved", { res });
-      return res;
+      return { solved: true };
     } catch (err) {
-      this.logger?.error("Verification submission failed", { error: err.message });
-      throw err;
+      const error = err.message ?? "submission_failed";
+      this.logger?.error("Verification submission failed", { error });
+      this._trackFailedVerification(meta, challenge_text, error);
+      return { solved: false, error };
     }
   }
 

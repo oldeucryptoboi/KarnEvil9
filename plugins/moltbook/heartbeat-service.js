@@ -60,6 +60,7 @@ export class HeartbeatService {
       errorCount: this._errorCount,
       lastResponse: this._lastResponse,
       pendingDmCount: this._pendingDmCount,
+      failedVerificationCount: this.client.getFailedVerifications?.()?.length ?? 0,
     };
   }
 

@@ -29,13 +29,15 @@ export const moltbookPostManifest = {
       ok: { type: "boolean" },
       post_id: { type: "string" },
       title: { type: "string" },
-      verification_solved: { type: "boolean" },
+      verification_challenged: { type: "boolean" },
+      verification_solved: { type: ["boolean", "null"] },
+      verification_error: { type: "string" },
     },
   },
   permissions: ["moltbook:send:posts"],
   timeout_ms: 30000,
   supports: { mock: true, dry_run: true },
-  mock_responses: [{ ok: true, post_id: "mock_post_id", title: "Mock Post", verification_solved: true }],
+  mock_responses: [{ ok: true, post_id: "mock_post_id", title: "Mock Post", verification_challenged: true, verification_solved: true }],
 };
 
 /** @type {import("@karnevil9/schemas").ToolManifest} */
@@ -58,13 +60,15 @@ export const moltbookCommentManifest = {
     properties: {
       ok: { type: "boolean" },
       comment_id: { type: "string" },
-      verification_solved: { type: "boolean" },
+      verification_challenged: { type: "boolean" },
+      verification_solved: { type: ["boolean", "null"] },
+      verification_error: { type: "string" },
     },
   },
   permissions: ["moltbook:send:comments"],
   timeout_ms: 30000,
   supports: { mock: true, dry_run: true },
-  mock_responses: [{ ok: true, comment_id: "mock_comment_id", verification_solved: true }],
+  mock_responses: [{ ok: true, comment_id: "mock_comment_id", verification_challenged: true, verification_solved: true }],
 };
 
 /** @type {import("@karnevil9/schemas").ToolManifest} */
@@ -292,7 +296,7 @@ export const allManifests = [
 export function createPostHandler(client) {
   return async (input, mode) => {
     if (mode === "mock") {
-      return { ok: true, post_id: "mock_post_id", title: input.title ?? "mock", verification_solved: true };
+      return { ok: true, post_id: "mock_post_id", title: input.title ?? "mock", verification_challenged: true, verification_solved: true };
     }
     if (mode === "dry_run") {
       return { ok: true, post_id: "dry_run", title: input.title, dry_run: true, can_post: client.canPost() };
@@ -305,11 +309,16 @@ export function createPostHandler(client) {
       url: input.url,
     });
 
+    const hadVerification = !!res.post?.verification;
+    const verificationSolved = res._verificationResult?.solved ?? false;
     return {
       ok: true,
       post_id: res.post?.id ?? res.id,
       title: res.post?.title ?? input.title,
-      verification_solved: !!res.post?.verification,
+      verification_challenged: hadVerification,
+      verification_solved: hadVerification ? verificationSolved : null,
+      ...(hadVerification && !verificationSolved && res._verificationResult?.error
+        ? { verification_error: res._verificationResult.error } : {}),
     };
   };
 }
@@ -321,7 +330,7 @@ export function createPostHandler(client) {
 export function createCommentHandler(client) {
   return async (input, mode) => {
     if (mode === "mock") {
-      return { ok: true, comment_id: "mock_comment_id", verification_solved: true };
+      return { ok: true, comment_id: "mock_comment_id", verification_challenged: true, verification_solved: true };
     }
     if (mode === "dry_run") {
       return { ok: true, comment_id: "dry_run", dry_run: true, can_comment: client.canComment() };
@@ -334,10 +343,16 @@ export function createCommentHandler(client) {
     });
 
     const comment = res.comment ?? res;
+    const hadVerification = !!comment.verification;
+    const verificationSolved = res._verificationResult?.solved ?? false;
     return {
       ok: true,
       comment_id: comment.id ?? "created",
-      verification_solved: !!comment.verification,
+      verification_challenged: hadVerification,
+      verification_solved: hadVerification ? verificationSolved : null,
+      ...(res.duplicate ? { duplicate: true } : {}),
+      ...(hadVerification && !verificationSolved && res._verificationResult?.error
+        ? { verification_error: res._verificationResult.error } : {}),
     };
   };
 }

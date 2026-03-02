@@ -154,6 +154,20 @@ export async function register(api) {
       );
     }
 
+    // Verification failure visibility
+    const failedVerifications = client.getFailedVerifications();
+    if (failedVerifications.length > 0) {
+      const recent = failedVerifications.slice(-5);
+      const summary = recent.map(v =>
+        `${v.type} ${v.id.slice(0, 8)} (${v.error})`
+      ).join("; ");
+      hints.push(
+        `[Moltbook Verification] ${failedVerifications.length} verification challenge(s) failed. ` +
+        `Recent: ${summary}. ` +
+        `The content was posted — only the verification badge is missing.`
+      );
+    }
+
     return { action: "modify", data: { hints } };
   });
 
@@ -173,6 +187,7 @@ export async function register(api) {
       karma: hb.lastResponse?.your_account?.karma ?? null,
       unreadNotifications: hb.lastResponse?.your_account?.unread_notification_count ?? 0,
       pendingDmRequests: hb.pendingDmCount ?? 0,
+      failedVerifications: client.getFailedVerifications().length,
     });
   });
 

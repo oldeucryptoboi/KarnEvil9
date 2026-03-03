@@ -181,7 +181,7 @@ describe("createPlanner", () => {
   });
 
   it("includes valid options in unknown planner error", () => {
-    expect(() => createPlanner({ planner: "llama" })).toThrow("mock, claude, claude-code, openai, gemini, grok");
+    expect(() => createPlanner({ planner: "llama" })).toThrow("mock, claude, claude-code, codex, openai, gemini, grok");
   });
 });
 

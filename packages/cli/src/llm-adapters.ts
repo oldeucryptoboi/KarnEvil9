@@ -40,6 +40,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 const PROVIDER_DEFAULTS: Record<string, string> = {
   claude: "claude-sonnet-4-6",
   "claude-code": "claude-code",
+  codex: "codex",
   openai: "gpt-4o",
   gemini: "gemini-2.5-flash",
   grok: "grok-4",
@@ -50,6 +51,9 @@ function resolveProvider(opts: { planner?: string }): string {
 }
 
 function resolveModel(provider: string, opts: { model?: string }): string {
+  if (provider === "codex") {
+    return opts.model ?? process.env.KARNEVIL9_CODEX_MODEL ?? PROVIDER_DEFAULTS[provider] ?? "gpt-5.3-codex";
+  }
   return opts.model ?? process.env.KARNEVIL9_MODEL ?? PROVIDER_DEFAULTS[provider] ?? "unknown";
 }
 
@@ -464,6 +468,153 @@ function createClaudeCodeCallFn(model: string): ModelCallFn {
   };
 }
 
+function createCodexCallFn(model: string): ModelCallFn {
+  let cliVerified = false;
+
+  return async (systemPrompt: string, userPrompt: string, signal?: AbortSignal): Promise<ModelCallResult> => {
+    // Lazy CLI verification on first call
+    if (!cliVerified) {
+      await new Promise<void>((resolve, reject) => {
+        const check = spawn("codex", ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+        let stderr = "";
+        check.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+        check.on("error", (err: NodeJS.ErrnoException) => {
+          if (err.code === "ENOENT") {
+            reject(new Error(
+              "Codex CLI not found. Install with: npm install -g @openai/codex\n" +
+              "Then authenticate with: codex login"
+            ));
+          } else {
+            reject(err);
+          }
+        });
+        check.on("close", (code) => {
+          if (code !== 0) {
+            reject(new Error(`Codex CLI check failed (exit ${code}): ${stderr.trim()}`));
+          } else {
+            resolve();
+          }
+        });
+      });
+      cliVerified = true;
+    }
+
+    return withRetry(async () => {
+      const effectiveModel = model === "codex" ? "gpt-5.3-codex" : model;
+      const args = [
+        "exec",
+        "--json",
+        "--full-auto",
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "-m", effectiveModel,
+        "-",
+      ];
+
+      return new Promise<ModelCallResult>((resolve, reject) => {
+        let settled = false;
+        const proc = spawn("codex", args, { stdio: ["pipe", "pipe", "pipe"] });
+        let stdout = "";
+        let stderr = "";
+
+        const onAbort = () => {
+          if (settled) return;
+          settled = true;
+          proc.kill("SIGTERM");
+          setTimeout(() => {
+            try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+          }, 5_000).unref();
+          reject(new Error("Codex CLI process killed by abort signal"));
+        };
+        if (signal?.aborted) {
+          proc.kill("SIGTERM");
+          reject(new Error("Codex CLI process killed by abort signal"));
+          return;
+        }
+        signal?.addEventListener("abort", onAbort, { once: true });
+
+        proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+        proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+
+        proc.on("error", (err: NodeJS.ErrnoException) => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", onAbort);
+          reject(new Error(`Failed to spawn codex CLI: ${err.message}`));
+        });
+
+        proc.on("close", (code) => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", onAbort);
+
+          if (code !== 0) {
+            const msg = stderr.trim() || stdout.trim();
+            if (msg.includes("rate limit") || msg.includes("429") || msg.includes("too many requests")) {
+              const err = new Error(`Codex CLI rate limited: ${msg}`);
+              (err as unknown as Record<string, unknown>).status = 429;
+              reject(err);
+              return;
+            }
+            if (msg.includes("not authenticated") || msg.includes("not logged in")) {
+              reject(new Error(
+                "Codex CLI is not authenticated.\n" +
+                "Run: codex login"
+              ));
+              return;
+            }
+            reject(new Error(`Codex CLI failed (exit ${code}): ${msg}`));
+            return;
+          }
+
+          try {
+            // Codex --json outputs JSONL (one JSON object per line)
+            const lines = stdout.trim().split("\n").filter(Boolean);
+            let planText = "";
+            let inputTokens = 0;
+            let outputTokens = 0;
+
+            for (const line of lines) {
+              const event = JSON.parse(line);
+              // Extract plan text from the final agent message
+              if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) {
+                planText = event.item.text;
+              }
+              // Extract token usage from turn completion
+              if (event.type === "turn.completed" && event.usage) {
+                inputTokens = event.usage.input_tokens ?? 0;
+                outputTokens = event.usage.output_tokens ?? 0;
+              }
+            }
+
+            if (!planText) {
+              reject(new Error(`Codex CLI returned no agent message. Output: ${stdout.slice(0, 500)}`));
+              return;
+            }
+
+            resolve({
+              text: planText,
+              usage: {
+                input_tokens: inputTokens,
+                output_tokens: outputTokens,
+                total_tokens: inputTokens + outputTokens,
+                model: effectiveModel,
+              },
+            });
+          } catch (parseErr) {
+            reject(new Error(`Failed to parse Codex CLI output: ${stdout.slice(0, 200)}`));
+          }
+        });
+
+        // Pipe combined system prompt + user prompt via stdin
+        const stdinContent = systemPrompt + "\n\n---\n\n" + userPrompt;
+        proc.stdin.write(stdinContent);
+        proc.stdin.end();
+      });
+    });
+  };
+}
+
 export function createPlanner(opts: { planner?: string; model?: string; agentic?: boolean; baseURL?: string }): Planner {
   const provider = resolveProvider(opts);
   const model = resolveModel(provider, opts);
@@ -475,6 +626,8 @@ export function createPlanner(opts: { planner?: string; model?: string; agentic?
       return new LLMPlanner(createClaudeCallFn(model), { agentic: opts.agentic });
     case "claude-code":
       return new LLMPlanner(createClaudeCodeCallFn(model), { agentic: opts.agentic });
+    case "codex":
+      return new LLMPlanner(createCodexCallFn(model), { agentic: opts.agentic });
     case "openai":
       return new LLMPlanner(createOpenAICallFn(model, opts.baseURL), { agentic: opts.agentic });
     case "gemini":
@@ -491,7 +644,7 @@ export function createPlanner(opts: { planner?: string; model?: string; agentic?
     }
     default:
       throw new Error(
-        `Unknown planner type: "${provider}". Valid options: mock, claude, claude-code, openai, gemini, grok, router, if`
+        `Unknown planner type: "${provider}". Valid options: mock, claude, claude-code, codex, openai, gemini, grok, router, if`
       );
   }
 }

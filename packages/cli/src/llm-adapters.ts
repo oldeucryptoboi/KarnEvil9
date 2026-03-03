@@ -339,7 +339,7 @@ function createGrokCallFn(model: string): ModelCallFn {
 function createClaudeCodeCallFn(model: string): ModelCallFn {
   let cliVerified = false;
 
-  return async (systemPrompt: string, userPrompt: string): Promise<ModelCallResult> => {
+  return async (systemPrompt: string, userPrompt: string, signal?: AbortSignal): Promise<ModelCallResult> => {
     // Lazy CLI verification on first call
     if (!cliVerified) {
       await new Promise<void>((resolve, reject) => {
@@ -377,18 +377,44 @@ function createClaudeCodeCallFn(model: string): ModelCallFn {
       ];
 
       return new Promise<ModelCallResult>((resolve, reject) => {
+        let settled = false;
         const proc = spawn("claude", args, { stdio: ["pipe", "pipe", "pipe"] });
         let stdout = "";
         let stderr = "";
+
+        // Kill the child process when the planner signals abort (e.g. timeout).
+        // Without this, timed-out CLI processes live forever as zombies.
+        const onAbort = () => {
+          if (settled) return;
+          settled = true;
+          proc.kill("SIGTERM");
+          setTimeout(() => {
+            try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+          }, 5_000).unref();
+          reject(new Error("Claude Code CLI process killed by abort signal"));
+        };
+        if (signal?.aborted) {
+          proc.kill("SIGTERM");
+          reject(new Error("Claude Code CLI process killed by abort signal"));
+          return;
+        }
+        signal?.addEventListener("abort", onAbort, { once: true });
 
         proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
         proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
 
         proc.on("error", (err: NodeJS.ErrnoException) => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", onAbort);
           reject(new Error(`Failed to spawn claude CLI: ${err.message}`));
         });
 
         proc.on("close", (code) => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", onAbort);
+
           if (code !== 0) {
             const msg = stderr.trim() || stdout.trim();
             if (msg.includes("rate limit") || msg.includes("429") || msg.includes("too many requests")) {

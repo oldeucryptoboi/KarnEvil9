@@ -582,6 +582,8 @@ export interface Planner {
     stateSnapshot: Record<string, unknown>,
     constraints: Record<string, unknown>
   ): Promise<PlanResult>;
+  /** Signal the planner to cancel the in-flight generatePlan call (e.g. kill a child process). */
+  abort?(): void;
 }
 
 // ─── Tool Handler ──────────────────────────────────────────────────

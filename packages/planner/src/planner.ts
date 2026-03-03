@@ -461,10 +461,11 @@ export interface ModelCallResult {
   usage?: UsageMetrics;
 }
 
-export type ModelCallFn = (systemPrompt: string, userPrompt: string) => Promise<ModelCallResult>;
+export type ModelCallFn = (systemPrompt: string, userPrompt: string, signal?: AbortSignal) => Promise<ModelCallResult>;
 
 export class LLMPlanner implements Planner {
   private callModel: ModelCallFn;
+  private _ac: AbortController | null = null;
   private agentic: boolean;
 
   constructor(callModel: ModelCallFn, opts?: { agentic?: boolean }) {
@@ -608,12 +609,19 @@ export class LLMPlanner implements Planner {
     return plan;
   }
 
+  abort(): void {
+    this._ac?.abort();
+  }
+
   async generatePlan(
     task: Task,
     toolSchemas: ToolSchemaForPlanner[],
     stateSnapshot: Record<string, unknown>,
     constraints: Record<string, unknown>
   ): Promise<PlanResult> {
+    this._ac = new AbortController();
+    const signal = this._ac.signal;
+
     const systemPrompt = this.agentic
       ? buildAgenticSystemPrompt(toolSchemas, constraints)
       : buildSystemPrompt(toolSchemas, constraints);
@@ -630,7 +638,7 @@ export class LLMPlanner implements Planner {
       totalUsage.total_tokens += u.total_tokens;
     };
 
-    const { text: raw, usage } = await this.callModel(systemPrompt, userPrompt);
+    const { text: raw, usage } = await this.callModel(systemPrompt, userPrompt, signal);
     mergeUsage(usage);
 
     let plan: Plan;
@@ -643,7 +651,7 @@ export class LLMPlanner implements Planner {
         "You MUST respond with ONLY a valid JSON object matching the Output Schema. " +
         "No greetings, no markdown, no explanation — ONLY the JSON plan object. Example:\n" +
         '{"plan_id":"...","schema_version":"0.1","goal":"...","assumptions":[],"steps":[{"step_id":"step-1","title":"...","tool_ref":{"name":"respond"},"input":{"text":"your answer here"},"success_criteria":["Message delivered"],"failure_policy":"abort","timeout_ms":5000,"max_retries":0}]}';
-      const { text: retryRaw, usage: retryUsage } = await this.callModel(systemPrompt, correctionPrompt);
+      const { text: retryRaw, usage: retryUsage } = await this.callModel(systemPrompt, correctionPrompt, signal);
       mergeUsage(retryUsage);
       plan = this.parseAndNormalize(retryRaw);
     }
@@ -655,7 +663,7 @@ export class LLMPlanner implements Planner {
         "You MUST include \"steps\": [...] in your JSON response. " +
         "Each step needs: step_id, title, tool_ref: {name}, input, success_criteria. " +
         "If the task is complete, use \"steps\": [].";
-      const { text: retryRaw, usage: retryUsage } = await this.callModel(systemPrompt, retryPrompt);
+      const { text: retryRaw, usage: retryUsage } = await this.callModel(systemPrompt, retryPrompt, signal);
       mergeUsage(retryUsage);
       plan = this.parseAndNormalize(retryRaw);
 

@@ -13,11 +13,15 @@ export function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
   label = "Operation",
+  onTimeout?: () => void,
 ): Promise<T> {
   if (ms <= 0) return promise;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new TimeoutError(`${label} timed out after ${ms}ms`)), ms);
+    timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new TimeoutError(`${label} timed out after ${ms}ms`));
+    }, ms);
     timer.unref();
   });
   return Promise.race([promise, timeout]).finally(() => {

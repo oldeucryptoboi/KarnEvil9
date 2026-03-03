@@ -291,7 +291,11 @@ export class Kernel {
           enrichedSnapshot,
           { policy: this.session.policy, limits: this.session.limits }
         );
-        const planResult = await withTimeout(planResultPromise, timeoutMs, "Planner");
+        const planner = this.config.planner!;
+        const planResult = await withTimeout(
+          planResultPromise, timeoutMs, "Planner",
+          () => planner.abort?.(),
+        );
 
         const { plan, usage } = planResult;
 

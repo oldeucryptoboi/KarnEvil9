@@ -3,7 +3,7 @@ layout: default
 title: "Tarkus: a Native macOS Client for My AI Agent"
 ---
 
-# From Self-Play to Safety: The Six-Year Arc Between Two DeepMind Papers
+# Tarkus: a Native macOS Client for My AI Agent
 
 ### How "Imitating Interactive Intelligence" (2020) planted the seed that "Intelligent AI Delegation" (2026) grew into a governance framework — and what we learned building the bridge
 

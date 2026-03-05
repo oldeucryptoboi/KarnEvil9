@@ -1,3 +1,8 @@
+---
+layout: default
+title: "The Safety System That Wouldn't Let My AI Win at Zork"
+---
+
 # The Safety System That Wouldn't Let My AI Win at Zork
 
 ### What happens when you wire Google DeepMind's delegation framework into a text adventure — and it decides "kill troll" is too dangerous

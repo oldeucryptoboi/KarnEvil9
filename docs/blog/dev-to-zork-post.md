@@ -1,3 +1,8 @@
+---
+layout: default
+title: "We Tried to Hide Zork From an LLM. It Identified the Game Anyway."
+---
+
 # We Tried to Hide Zork From an LLM. It Identified the Game Anyway.
 
 ## How we built a governed AI agent to play text adventures — and what broke first

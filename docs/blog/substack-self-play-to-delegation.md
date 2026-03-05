@@ -1,6 +1,6 @@
 ---
 layout: default
-title: "From Self-Play to Safety: The Six-Year Arc Between Two DeepMind Papers"
+title: "Tarkus: a Native macOS Client for My AI Agent"
 ---
 
 # From Self-Play to Safety: The Six-Year Arc Between Two DeepMind Papers

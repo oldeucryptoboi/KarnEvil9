@@ -327,7 +327,7 @@ Deep dives, experiment writeups, and development notes are published on the [old
 
 ## Author
 
-Built by [oldcryptoboi](https://oldeucryptoboi.com). Read more about AI agent governance, deterministic runtimes, and delegation frameworks on the [blog](https://oldeucryptoboi.com/blog).
+Built by [oldeucryptoboi](https://oldeucryptoboi.com). Read more about AI agent governance, deterministic runtimes, and delegation frameworks on the [blog](https://oldeucryptoboi.com/blog).
 
 - [Course: Building Deterministic AI Agent Systems](https://oldeucryptoboi.com/course) — Workshops and training based on KarnEvil9 and the DeepMind delegation framework
 - [Consulting: AI Agent Architecture](https://oldeucryptoboi.com/consulting) — Enterprise agent governance, safety, and deterministic runtime implementation

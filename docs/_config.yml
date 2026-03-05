@@ -9,9 +9,7 @@ plugins:
   - jekyll-sitemap
 include:
   - images
-exclude:
-  - "demos/"
-  - "blog/"
+exclude: []
 defaults:
   - scope:
       path: ""

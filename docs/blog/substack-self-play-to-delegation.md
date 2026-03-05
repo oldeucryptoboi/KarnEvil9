@@ -1,3 +1,8 @@
+---
+layout: default
+title: "From Self-Play to Safety: The Six-Year Arc Between Two DeepMind Papers"
+---
+
 # From Self-Play to Safety: The Six-Year Arc Between Two DeepMind Papers
 
 ### How "Imitating Interactive Intelligence" (2020) planted the seed that "Intelligent AI Delegation" (2026) grew into a governance framework — and what we learned building the bridge

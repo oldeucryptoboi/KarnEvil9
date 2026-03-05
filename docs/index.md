@@ -95,6 +95,7 @@ karnevil9 run "list all TypeScript files" --planner claude --mode real
 
 ## Blog
 
+- [Memory-Assisted Learning vs Recursive Language Models: An Empirical Study](demos/memory-vs-rlm.html)
 - [Tarkus: a Native macOS Client for My AI Agent](blog/substack-self-play-to-delegation)
 - [The Safety System That Wouldn't Let My AI Win at Zork](blog/substack-zork-post)
 - [We Tried to Hide Zork From an LLM. It Identified the Game Anyway.](blog/dev-to-zork-post)

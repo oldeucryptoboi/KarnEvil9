@@ -325,6 +325,13 @@ Deep dives, experiment writeups, and development notes are published on the [old
 - [From Self-Play to Safety: The Six-Year Arc Between Two DeepMind Papers](https://oldeucryptoboi.substack.com/p/from-self-play-to-safety-the-six) — How "Imitating Interactive Intelligence" (2020) connects to "Intelligent AI Delegation" (2026)
 - [Anthropic Just Validated What KarnEvil9 Has Been Building](https://oldeucryptoboi.substack.com/p/anthropic-just-validated-what-karnevil9) — Agent Skills vs KarnEvil9: capability packaging vs execution governance
 
+## Author
+
+Built by [oldcryptoboi](https://oldeucryptoboi.com). Read more about AI agent governance, deterministic runtimes, and delegation frameworks on the [blog](https://oldeucryptoboi.com/blog).
+
+- [Course: Building Deterministic AI Agent Systems](https://oldeucryptoboi.com/course) — Workshops and training based on KarnEvil9 and the DeepMind delegation framework
+- [Consulting: AI Agent Architecture](https://oldeucryptoboi.com/consulting) — Enterprise agent governance, safety, and deterministic runtime implementation
+
 ## License
 
 Private

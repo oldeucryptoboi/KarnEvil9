@@ -100,7 +100,13 @@ export class Journal {
           try {
             event = JSON.parse(line) as JournalEvent;
           } catch {
-            if (this.recovery === "strict") {
+            // Check if more non-empty lines follow — if so, it's a mid-file corruption.
+            // A trailing partial line is a crash artifact and should always be truncated.
+            let isTrailing = true;
+            for await (const remaining of rl) {
+              if (remaining.trim()) { isTrailing = false; break; }
+            }
+            if (this.recovery === "strict" && !isTrailing) {
               throw new Error(`Journal parse error at event ${eventIndex}: corrupted JSON`);
             }
             needsTruncation = true;

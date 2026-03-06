@@ -2,6 +2,9 @@ import { MockPlanner, LLMPlanner, RouterPlanner, IFPlanner, bfsPath } from "@kar
 import type { ModelCallFn, ModelCallResult, IFModelCallFn } from "@karnevil9/planner";
 import type { Planner } from "@karnevil9/schemas";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 500;
@@ -40,8 +43,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 const PROVIDER_DEFAULTS: Record<string, string> = {
   claude: "claude-sonnet-4-6",
   "claude-code": "claude-code",
-  codex: "codex",
-  openai: "gpt-4o",
+  codex: "codex-default",  openai: "gpt-4o",
   gemini: "gemini-2.5-flash",
   grok: "grok-4",
 };
@@ -336,6 +338,174 @@ function createGrokCallFn(model: string): ModelCallFn {
           model,
         },
       };
+    });
+  };
+}
+
+/**
+ * Codex planner — uses `codex exec` with the ChatGPT OAuth auth.
+ * Wraps the planner prompt so Codex outputs pure JSON without running commands.
+ * Reads ~/.codex/config.toml for the default model.
+ */
+function createCodexCallFn(model: string): ModelCallFn {
+  const configPath = join(homedir(), ".codex", "config.toml");
+  let cliVerified = false;
+
+  function readConfigModel(): string {
+    try {
+      const raw = readFileSync(configPath, "utf8");
+      const match = raw.match(/^model\s*=\s*"(.+)"/m);
+      return match?.[1] ?? "gpt-4o";
+    } catch {
+      return "gpt-4o";
+    }
+  }
+
+  return async (systemPrompt: string, userPrompt: string, signal?: AbortSignal): Promise<ModelCallResult> => {
+    if (!cliVerified) {
+      await new Promise<void>((resolve, reject) => {
+        const check = spawn("codex", ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+        let stderr = "";
+        check.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+        check.on("error", (err: NodeJS.ErrnoException) => {
+          if (err.code === "ENOENT") {
+            reject(new Error(
+              "Codex CLI not found. Install it with: npm install -g @openai/codex\n" +
+              "Then authenticate with: codex login"
+            ));
+          } else {
+            reject(err);
+          }
+        });
+        check.on("close", (code) => {
+          if (code !== 0) {
+            reject(new Error(`Codex CLI check failed (exit ${code}): ${stderr.trim()}`));
+          } else {
+            resolve();
+          }
+        });
+      });
+      cliVerified = true;
+    }
+
+    const effectiveModel = model !== "codex-default" ? model : readConfigModel();
+
+    return withRetry(async () => {
+      // Wrap the planner prompt so Codex acts as a pure JSON generator.
+      // Instruct codex to output JSON only (not execute tools itself).
+      const wrappedPrompt =
+        "You are a JSON planning engine. Your ONLY job is to read the instructions below " +
+        "and output a single valid JSON object as your response. " +
+        "Do NOT execute any shell commands yourself. Do NOT use any of YOUR OWN tools. " +
+        "Simply output the JSON plan text directly as your response.\n" +
+        "IMPORTANT: The JSON plan you output SHOULD reference tools from the SYSTEM INSTRUCTIONS " +
+        "(like shell-exec, http-request, browser, etc.) — those are the tools the plan executor " +
+        "will run. You are planning WHICH tools to use, not executing them yourself.\n\n" +
+        "=== SYSTEM INSTRUCTIONS ===\n" + systemPrompt +
+        "\n\n=== TASK ===\n" + userPrompt;
+
+      const args = [
+        "exec",
+        "--ephemeral",
+        "--json",
+        "--sandbox", "read-only",
+        "--skip-git-repo-check",
+        ...(effectiveModel ? ["-m", effectiveModel] : []),
+        "-",
+      ];
+
+      return new Promise<ModelCallResult>((resolve, reject) => {
+        let settled = false;
+        const proc = spawn("codex", args, { stdio: ["pipe", "pipe", "pipe"] });
+        let stdout = "";
+        let stderr = "";
+
+        const onAbort = () => {
+          if (settled) return;
+          settled = true;
+          proc.kill("SIGTERM");
+          setTimeout(() => {
+            try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+          }, 5_000).unref();
+          reject(new Error("Codex CLI process killed by abort signal"));
+        };
+        if (signal?.aborted) {
+          proc.kill("SIGTERM");
+          reject(new Error("Codex CLI process killed by abort signal"));
+          return;
+        }
+        signal?.addEventListener("abort", onAbort, { once: true });
+
+        proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+        proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+
+        proc.on("error", (err: NodeJS.ErrnoException) => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", onAbort);
+          reject(new Error(`Failed to spawn codex CLI: ${err.message}`));
+        });
+
+        proc.on("close", (code) => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", onAbort);
+
+          // Parse JSONL output to extract agent message and usage
+          let text = "";
+          let inputTokens = 0;
+          let outputTokens = 0;
+          for (const line of stdout.split("\n")) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line);
+              if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item?.text) {
+                text = event.item.text;
+              }
+              if (event.type === "turn.completed" && event.usage) {
+                inputTokens = event.usage.input_tokens ?? 0;
+                outputTokens = event.usage.output_tokens ?? 0;
+              }
+              if (event.type === "error") {
+                const errMsg = typeof event.message === "string" ? event.message : JSON.stringify(event);
+                if (errMsg.includes("not logged in") || errMsg.includes("Not logged in") || errMsg.includes("not authenticated")) {
+                  reject(new Error("Codex CLI is not authenticated.\nRun: codex login"));
+                  return;
+                }
+              }
+              if (event.type === "turn.failed") {
+                const errMsg = event.error?.message ?? "Unknown error";
+                reject(new Error(`Codex CLI turn failed: ${errMsg}`));
+                return;
+              }
+            } catch { /* skip non-JSON lines */ }
+          }
+
+          if (code !== 0 && !text) {
+            const msg = stderr.trim() || stdout.trim();
+            reject(new Error(`Codex CLI failed (exit ${code}): ${msg.slice(0, 500)}`));
+            return;
+          }
+
+          if (!text) {
+            reject(new Error(`Codex CLI returned no agent message. Output: ${stdout.slice(0, 500)}`));
+            return;
+          }
+
+          resolve({
+            text,
+            usage: {
+              input_tokens: inputTokens,
+              output_tokens: outputTokens,
+              total_tokens: inputTokens + outputTokens,
+              model: effectiveModel,
+            },
+          });
+        });
+
+        proc.stdin.write(wrappedPrompt);
+        proc.stdin.end();
+      });
     });
   };
 }

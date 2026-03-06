@@ -60,8 +60,11 @@ export function createScheduleToolHandler(scheduler: Scheduler): ToolHandler {
         if (!input.action || typeof input.action !== "object") {
           throw new Error("action is required for create operation");
         }
+        // Normalize common planner aliases so LLMs don't need exact field names
+        const trigger = normalizeTrigger(input.trigger as Record<string, unknown>);
+        const action = normalizeAction(input.action as Record<string, unknown>);
+
         // Enforce minimum interval to prevent DoS via rapid schedule execution
-        const trigger = input.trigger as ScheduleTrigger;
         if (trigger.type === "every") {
           const intervalMs = parseIntervalMs(trigger.interval as string);
           if (intervalMs !== null && intervalMs < 60_000) {
@@ -70,8 +73,8 @@ export function createScheduleToolHandler(scheduler: Scheduler): ToolHandler {
         }
         const schedule = await scheduler.createSchedule({
           name: input.name as string,
-          trigger: input.trigger as ScheduleTrigger,
-          action: input.action as JobAction,
+          trigger: trigger as unknown as ScheduleTrigger,
+          action: action as unknown as JobAction,
           options: (input.options as ScheduleOptions) ?? {},
           created_by: "agent",
         });
@@ -146,6 +149,32 @@ function parseIntervalMs(interval: string): number | null {
     default: return null;
   }
   return Number.isSafeInteger(result) ? result : null;
+}
+
+/** Normalize trigger field aliases so LLMs can use "cron" or "expression" interchangeably. */
+function normalizeTrigger(raw: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...raw };
+  // cron trigger: accept "cron" as alias for "expression"
+  if (out.type === "cron" && !out.expression && typeof out.cron === "string") {
+    out.expression = out.cron;
+    delete out.cron;
+  }
+  return out;
+}
+
+/** Normalize action field aliases so LLMs can use "prompt" or "text" instead of "task_text". */
+function normalizeAction(raw: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...raw };
+  if (out.type === "createSession" && !out.task_text) {
+    if (typeof out.prompt === "string") {
+      out.task_text = out.prompt;
+      delete out.prompt;
+    } else if (typeof out.text === "string") {
+      out.task_text = out.text;
+      delete out.text;
+    }
+  }
+  return out;
 }
 
 function mockResponse(op: string, input: Record<string, unknown>): unknown {

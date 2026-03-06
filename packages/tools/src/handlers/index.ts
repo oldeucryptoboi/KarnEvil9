@@ -5,6 +5,8 @@ export { shellExecHandler, redactSecrets } from "./shell-exec.js";
 export { httpRequestHandler } from "./http-request.js";
 export { browserHandler, createBrowserHandler } from "./browser.js";
 export type { BrowserDriverLike } from "./browser.js";
+export { createDelegateHandler } from "./delegate.js";
+export type { DelegateHandlerDeps } from "./delegate.js";
 export {
   executeGameCommandHandler,
   parseGameScreenHandler,

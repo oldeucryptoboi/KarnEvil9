@@ -6,10 +6,11 @@ import { resolve, join } from "node:path";
 import { hostname, homedir } from "node:os";
 import * as readline from "node:readline";
 import { Journal } from "@karnevil9/journal";
-import { ToolRegistry, ToolRuntime, respondHandler, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, createBrowserHandler, executeGameCommandHandler, parseGameScreenHandler, gameCombatHandler, gameTakeAllHandler, gameNavigateHandler, } from "@karnevil9/tools";
+import { ToolRegistry, ToolRuntime, respondHandler, readFileHandler, writeFileHandler, shellExecHandler, httpRequestHandler, createBrowserHandler, executeGameCommandHandler, parseGameScreenHandler, gameCombatHandler, gameTakeAllHandler, gameNavigateHandler, createDelegateHandler, } from "@karnevil9/tools";
 import type { BrowserDriverLike, EmulatorLike } from "@karnevil9/tools";
 import { PermissionEngine } from "@karnevil9/permissions";
-import { Kernel } from "@karnevil9/kernel";
+import { Kernel, runSubagent, extractRespondText, summarizeFindings } from "@karnevil9/kernel";
+import type { SubagentDeps } from "@karnevil9/kernel";
 import { createPlanner } from "./llm-adapters.js";
 import { GameSessionManager } from "./game-session-manager.js";
 import { ApiServer } from "@karnevil9/api";
@@ -108,7 +109,23 @@ async function createRuntime(
   runtime.registerHandler("shell-exec", shellExecHandler);
   runtime.registerHandler("http-request", httpRequestHandler);
   runtime.registerHandler("browser", createBrowserHandler(browserDriver));
-  return { journal, registry, permissions, runtime };
+  // Delegate handler deps — planner is set later by callers (run/server commands)
+  const delegateDeps: SubagentDeps = {
+    journal,
+    toolRegistry: registry,
+    toolRuntime: runtime,
+    permissions,
+    mode: "live",
+    policy: defaultPolicy,
+    planner: undefined,
+  };
+  runtime.registerHandler("delegate", createDelegateHandler({
+    subagentDeps: delegateDeps,
+    runSubagent,
+    extractRespondText,
+    summarizeFindings,
+  }));
+  return { journal, registry, permissions, runtime, delegateDeps };
 }
 
 const program = new Command();
@@ -142,7 +159,8 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
     // Validate planner early — fails fast before plugin loading and network auth
     const planner = createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic });
 
-    const { journal, registry, permissions, runtime } = await createRuntime(policy, approvalFn, browserDriver);
+    const { journal, registry, permissions, runtime, delegateDeps } = await createRuntime(policy, approvalFn, browserDriver);
+    delegateDeps.planner = planner;
     const removeShutdownHandler = journal.registerShutdownHandler();
     const task: Task = { task_id: uuid(), text: taskText, created_at: new Date().toISOString() };
 
@@ -369,7 +387,7 @@ program.command("server").description("Start the API server")
       const { ManagedDriver } = await import("@karnevil9/browser-relay");
       browserDriver = new ManagedDriver({ headless: false, channel: "chrome", userDataDir: resolve("sessions/browser-profile") });
     }
-    const { journal, registry, permissions, runtime } = await createRuntime(undefined, serverApprovalPrompt, browserDriver);
+    const { journal, registry, permissions, runtime, delegateDeps } = await createRuntime(undefined, serverApprovalPrompt, browserDriver);
     const metricsCollector = new MetricsCollector();
 
     let activeMemory: ActiveMemory | undefined;
@@ -419,6 +437,7 @@ program.command("server").description("Start the API server")
 
     // Bootstrap scheduler before plugins so the scheduler-tool plugin can access it
     const planner = createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic });
+    delegateDeps.planner = planner;
     const scheduleStore = new ScheduleStore(SCHEDULER_PATH);
     const pluginsDir = resolve(opts.pluginsDir);
     const port = parsePort(opts.port);

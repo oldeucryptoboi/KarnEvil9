@@ -8,5 +8,5 @@ export { UsageAccumulator } from "./usage-accumulator.js";
 export type { UsageSummary } from "./usage-accumulator.js";
 export { ContextBudgetMonitor, buildCheckpoint } from "./context-budget.js";
 export type { ContextBudgetConfig, ContextBudgetVerdict, ContextIteration } from "./context-budget.js";
-export { runSubagent } from "./subagent.js";
+export { runSubagent, extractRespondText, summarizeFindings } from "./subagent.js";
 export type { SubagentRequest, SubagentResult, SubagentDeps } from "./subagent.js";

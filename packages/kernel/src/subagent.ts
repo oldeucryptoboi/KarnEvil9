@@ -18,6 +18,7 @@ import { Kernel } from "./kernel.js";
 export interface SubagentRequest {
   task_text: string;
   tool_allowlist?: string[];
+  tool_blocklist?: string[];
   max_tokens: number;
   max_cost_usd: number;
   max_iterations: number;
@@ -79,9 +80,27 @@ export async function runSubagent(
     childPermissions = childEngine;
   }
 
+  // If blocklist specified, create a filtered registry proxy that hides blocked tools
+  // from the planner's schema list so it never plans steps using them.
+  let childRegistry = deps.toolRegistry;
+  if (request.tool_blocklist && request.tool_blocklist.length > 0) {
+    const blocked = new Set(request.tool_blocklist);
+    childRegistry = new Proxy(deps.toolRegistry, {
+      get(target, prop, receiver) {
+        if (prop === "list") {
+          return () => target.list().filter(t => !blocked.has(t.name));
+        }
+        if (prop === "getSchemasForPlanner") {
+          return () => target.getSchemasForPlanner().filter(s => !blocked.has(s.name));
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+  }
+
   const childKernel = new Kernel({
     journal: deps.journal,
-    toolRegistry: deps.toolRegistry,
+    toolRegistry: childRegistry,
     toolRuntime: deps.toolRuntime,
     permissions: childPermissions,
     planner: deps.planner,
@@ -90,6 +109,7 @@ export async function runSubagent(
     policy: deps.policy,
     agentic: true,
     modelPricing: deps.modelPricing,
+    plannerTimeoutMs: 90_000, // Child needs time to synthesize results
     // No contextBudgetConfig — prevent nested delegation
   });
 
@@ -118,14 +138,26 @@ export async function runSubagent(
     const stepResults = taskState.getAllStepResults();
     for (const result of stepResults) {
       const step = plan?.steps.find(s => s.step_id === result.step_id);
-      const rawSummary = result.status === "succeeded"
-        ? (typeof result.output === "string" ? result.output : JSON.stringify(result.output ?? ""))
-        : (result.error?.message ?? "unknown error");
+      const toolName = step?.tool_ref.name ?? "unknown";
+      let rawSummary: string;
+      if (result.status === "succeeded") {
+        // For respond steps, extract the text field directly to preserve full output
+        if (toolName === "respond" && typeof result.output === "object" && result.output !== null) {
+          const out = result.output as Record<string, unknown>;
+          rawSummary = typeof out.text === "string" ? out.text : JSON.stringify(result.output);
+        } else {
+          rawSummary = typeof result.output === "string" ? result.output : JSON.stringify(result.output ?? "");
+        }
+      } else {
+        rawSummary = result.error?.message ?? "unknown error";
+      }
+      // Generous limit for respond text, compact for other tools
+      const maxLen = toolName === "respond" ? 4000 : 500;
       findings.push({
         step_title: step?.title ?? result.step_id,
-        tool_name: step?.tool_ref.name ?? "unknown",
+        tool_name: toolName,
         status: result.status === "succeeded" ? "succeeded" : "failed",
-        summary: rawSummary.slice(0, 500),
+        summary: rawSummary.slice(0, maxLen),
       });
     }
   }
@@ -139,4 +171,38 @@ export async function runSubagent(
     tokens_used: usageSummary?.total_tokens ?? 0,
     cost_usd: usageSummary?.total_cost_usd ?? 0,
   };
+}
+
+// ─── Helpers for extracting child session output ─────────────────
+
+/**
+ * Scan a child session's findings for a `respond` tool step and extract
+ * the `.text` field from its output. Returns undefined if no respond step found.
+ */
+export function extractRespondText(result: SubagentResult): string | undefined {
+  for (const finding of result.findings) {
+    if (finding.tool_name === "respond" && finding.status === "succeeded" && finding.summary) {
+      // The finding summary may be the raw JSON output from respond handler: { delivered: true, text: "..." }
+      try {
+        const parsed = JSON.parse(finding.summary);
+        if (typeof parsed === "object" && parsed !== null && typeof parsed.text === "string") {
+          return parsed.text;
+        }
+      } catch {
+        // Not JSON — use the summary string directly
+      }
+      return finding.summary;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Fallback summarizer: concatenates finding summaries into a readable string.
+ */
+export function summarizeFindings(findings: CheckpointFinding[]): string {
+  if (findings.length === 0) return "No findings from child session.";
+  return findings
+    .map(f => `[${f.status}] ${f.step_title} (${f.tool_name}): ${f.summary}`)
+    .join("\n");
 }

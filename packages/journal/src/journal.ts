@@ -74,80 +74,87 @@ export class Journal {
     // Initialize disk check timer so the first check respects the interval
     this.lastDiskCheckMs = Date.now();
     if (existsSync(this.filePath)) {
-      const content = await readFile(this.filePath, "utf-8");
-      const lines = content.trim().split("\n").filter(Boolean);
+      // Stream the journal line-by-line to avoid loading the entire file into
+      // memory (V8 string limit is ~512 MB; journals can exceed this).
+      const fileStream = createReadStream(this.filePath, { encoding: "utf-8" });
+      const rl = createInterface({ input: fileStream, crlfDelay: Infinity });
 
-      // Fix C1: Truncate incomplete last line from crash
-      if (lines.length > 0) {
-        try { JSON.parse(lines[lines.length - 1]!); }
-        catch {
-          lines.pop();
-          const cleanContent = lines.length > 0 ? lines.join("\n") + "\n" : "";
-          await writeFile(this.filePath, cleanContent, "utf-8");
-          console.error(`Journal: truncated incomplete last line from crash`);
-        }
-      }
-
+      let eventIndex = 0;
+      let byteOffset = 0;
+      let lastValidByteOffset = 0;
       let maxSeq = -1;
       let prevHash: string | undefined;
       const tempIndex = new Map<string, JournalEvent[]>();
-      let validCount = lines.length;
+      let needsTruncation = false;
+
       try {
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]!;
+        for await (const line of rl) {
+          const lineBytes = Buffer.byteLength(line, "utf-8") + 1; // +1 for newline
+
+          if (!line.trim()) {
+            byteOffset += lineBytes;
+            continue;
+          }
+
           let event: JournalEvent;
           try {
             event = JSON.parse(line) as JournalEvent;
           } catch {
-            // Corrupted JSON line — treat like hash chain break
             if (this.recovery === "strict") {
-              throw new Error(`Journal parse error at line ${i}: corrupted JSON`);
+              throw new Error(`Journal parse error at event ${eventIndex}: corrupted JSON`);
             }
-            validCount = i;
-            console.error(`Journal: corrupted JSON at line ${i}, truncated ${lines.length - i} events`);
-            const validLines = lines.slice(0, i);
-            const tmpPath = `${this.filePath}.tmp`;
-            const repairContent = validLines.length > 0 ? validLines.join("\n") + "\n" : "";
-            await writeFile(tmpPath, repairContent, "utf-8");
-            await rename(tmpPath, this.filePath);
+            needsTruncation = true;
+            console.error(`Journal: corrupted JSON at event ${eventIndex}, truncating`);
             break;
           }
-          // Verify hash chain integrity during init
-          if (i > 0 && event.hash_prev !== prevHash) {
+
+          if (eventIndex > 0 && event.hash_prev !== prevHash) {
             if (this.recovery === "strict") {
-              throw new Error(`Journal integrity violation at event ${i} (seq=${event.seq}): hash chain broken`);
+              throw new Error(`Journal integrity violation at event ${eventIndex} (seq=${event.seq}): hash chain broken`);
             }
-            // Truncate mode: keep valid prefix
-            validCount = i;
-            console.error(`Journal: recovered from corruption at event ${i}, truncated ${lines.length - i} events`);
-            // Rewrite file atomically with valid prefix
-            const validLines = lines.slice(0, i);
-            const tmpPath = `${this.filePath}.tmp`;
-            const repairContent = validLines.length > 0 ? validLines.join("\n") + "\n" : "";
-            await writeFile(tmpPath, repairContent, "utf-8");
-            await rename(tmpPath, this.filePath);
+            needsTruncation = true;
+            console.error(`Journal: hash chain broken at event ${eventIndex}, truncating`);
             break;
           }
+
           prevHash = this.hash(line);
           const bucket = tempIndex.get(event.session_id);
           if (bucket) bucket.push(event);
           else tempIndex.set(event.session_id, [event]);
           if (event.seq !== undefined && event.seq > maxSeq) maxSeq = event.seq;
+
+          byteOffset += lineBytes;
+          lastValidByteOffset = byteOffset;
+          eventIndex++;
         }
       } catch (err) {
-        // Reset all in-memory state on corruption — leave instance unusable
         this.sessionIndex.clear();
         this.lastHash = undefined;
         this.nextSeq = 0;
         throw err;
+      } finally {
+        rl.close();
+        fileStream.destroy();
       }
+
+      // Truncate corrupt tail in place (no rewrite needed)
+      if (needsTruncation) {
+        const fh = await open(this.filePath, "r+");
+        try {
+          await fh.truncate(lastValidByteOffset);
+        } finally {
+          await fh.close();
+        }
+        console.error(`Journal: truncated to ${lastValidByteOffset} bytes (${eventIndex} valid events)`);
+      }
+
       // Only commit to in-memory state after successful validation
       for (const [sid, events] of tempIndex) {
         this.trackSessionAccess(sid);
         this.sessionIndex.set(sid, events);
       }
       this.nextSeq = maxSeq + 1;
-      if (validCount > 0 && tempIndex.size > 0) {
+      if (eventIndex > 0 && tempIndex.size > 0) {
         this.lastHash = prevHash;
       }
     }
@@ -269,19 +276,9 @@ export class Journal {
   }
 
   async readAll(options?: { limit?: number }): Promise<JournalEvent[]> {
-    if (!existsSync(this.filePath)) return [];
-    const content = await readFile(this.filePath, "utf-8");
     const events: JournalEvent[] = [];
-    let skipped = 0;
-    for (const line of content.trim().split("\n").filter(Boolean)) {
-      try {
-        events.push(JSON.parse(line) as JournalEvent);
-      } catch {
-        skipped++;
-      }
-    }
-    if (skipped > 0) {
-      console.warn(`[journal] readAll: skipped ${skipped} corrupted line(s)`);
+    for await (const event of this.readAllStream()) {
+      events.push(event);
     }
     if (options?.limit !== undefined && options.limit < events.length) {
       return events.slice(events.length - options.limit);

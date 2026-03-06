@@ -399,9 +399,16 @@ function createCodexCallFn(model: string): ModelCallFn {
         "IMPORTANT: The JSON plan you output SHOULD reference tools from the SYSTEM INSTRUCTIONS " +
         "(like shell-exec, http-request, browser, etc.) — those are the tools the plan executor " +
         "will run. You are planning WHICH tools to use, not executing them yourself.\n" +
-        "CRITICAL: When the user asks for real-time information (current time, date, weather, " +
+        "CRITICAL RULES — you MUST follow these:\n" +
+        "1. When the user asks for real-time information (current time, date, weather, " +
         "live data, etc.), you MUST plan tool steps to fetch that data (e.g. shell-exec with " +
-        "'date' command). NEVER guess or answer from static context alone when live data is needed.\n\n" +
+        "'date' command). NEVER guess or answer from static context alone when live data is needed.\n" +
+        "2. When the user asks you to access, read, fetch, or interact with a URL, website, " +
+        "web page, API, or online service, you MUST plan tool steps to do so (e.g. http-request " +
+        "to fetch the URL, browser to visit the page, or shell-exec with curl). You DO have " +
+        "access to these tools — never claim you cannot access the web.\n" +
+        "3. Never tell the user you lack capabilities that the SYSTEM INSTRUCTIONS provide. " +
+        "If a tool exists in the system instructions, assume it is available and plan to use it.\n\n" +
         "=== SYSTEM INSTRUCTIONS ===\n" + systemPrompt +
         "\n\n=== TASK ===\n" + userPrompt;
 

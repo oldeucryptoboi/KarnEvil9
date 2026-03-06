@@ -398,7 +398,10 @@ function createCodexCallFn(model: string): ModelCallFn {
         "Simply output the JSON plan text directly as your response.\n" +
         "IMPORTANT: The JSON plan you output SHOULD reference tools from the SYSTEM INSTRUCTIONS " +
         "(like shell-exec, http-request, browser, etc.) — those are the tools the plan executor " +
-        "will run. You are planning WHICH tools to use, not executing them yourself.\n\n" +
+        "will run. You are planning WHICH tools to use, not executing them yourself.\n" +
+        "CRITICAL: When the user asks for real-time information (current time, date, weather, " +
+        "live data, etc.), you MUST plan tool steps to fetch that data (e.g. shell-exec with " +
+        "'date' command). NEVER guess or answer from static context alone when live data is needed.\n\n" +
         "=== SYSTEM INSTRUCTIONS ===\n" + systemPrompt +
         "\n\n=== TASK ===\n" + userPrompt;
 

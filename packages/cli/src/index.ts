@@ -95,8 +95,9 @@ async function createRuntime(
   policy?: { allowed_paths: string[]; allowed_endpoints: string[]; allowed_commands: string[]; require_approval_for_writes: boolean },
   approvalPrompt?: (request: PermissionRequest) => Promise<ApprovalDecision>,
   browserDriver?: BrowserDriverLike,
+  journalOpts?: { lazyInit?: boolean },
 ) {
-  const journal = new Journal(JOURNAL_PATH);
+  const journal = new Journal(JOURNAL_PATH, journalOpts);
   await journal.init();
   const registry = new ToolRegistry();
   await registry.loadFromDirectory(TOOLS_DIR);
@@ -387,7 +388,7 @@ program.command("server").description("Start the API server")
       const { ManagedDriver } = await import("@karnevil9/browser-relay");
       browserDriver = new ManagedDriver({ headless: false, channel: "chrome", userDataDir: resolve("sessions/browser-profile") });
     }
-    const { journal, registry, permissions, runtime, delegateDeps } = await createRuntime(undefined, serverApprovalPrompt, browserDriver);
+    const { journal, registry, permissions, runtime, delegateDeps } = await createRuntime(undefined, serverApprovalPrompt, browserDriver, { lazyInit: true });
     const metricsCollector = new MetricsCollector();
 
     let activeMemory: ActiveMemory | undefined;

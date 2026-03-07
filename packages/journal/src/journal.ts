@@ -15,6 +15,12 @@ export interface JournalOptions {
   lock?: boolean;
   /** Maximum number of sessions to keep in the in-memory index (LRU eviction). Default: 10000 */
   maxSessionsIndexed?: number;
+  /** Maximum total bytes of event data to keep in the session index. Default: 256MB.
+   *  When exceeded during init, oldest sessions are evicted to stay under the limit. */
+  maxIndexBytes?: number;
+  /** If true, init only reads the tail of the journal to recover seq/hash state.
+   *  Sessions are loaded lazily from disk on first access. Drastically reduces startup memory. */
+  lazyInit?: boolean;
   /** How to handle corruption on init. "truncate" (default) auto-repairs; "strict" throws. */
   recovery?: "truncate" | "strict";
   /** Disk usage percentage to emit a warning event. Default: 85 */
@@ -35,6 +41,9 @@ export class Journal {
   private sessionIndex = new Map<string, JournalEvent[]>();
   private sessionAccessOrder: string[] = [];
   private maxSessionsIndexed: number;
+  private maxIndexBytes: number;
+  private currentIndexBytes = 0;
+  private lazyInit: boolean;
   private nextSeq = 0;
   private fsync: boolean;
   private redact: boolean;
@@ -57,6 +66,8 @@ export class Journal {
     this.lockEnabled = options?.lock ?? true;
     this.lockPath = `${filePath}.lock`;
     this.maxSessionsIndexed = options?.maxSessionsIndexed ?? 10000;
+    this.maxIndexBytes = options?.maxIndexBytes ?? 256 * 1024 * 1024; // 256 MB
+    this.lazyInit = options?.lazyInit ?? false;
     this.recovery = options?.recovery ?? "truncate";
     this.diskWarningPct = options?.diskWarningPct ?? 85;
     this.diskCriticalPct = options?.diskCriticalPct ?? 95;
@@ -74,6 +85,10 @@ export class Journal {
     // Initialize disk check timer so the first check respects the interval
     this.lastDiskCheckMs = Date.now();
     if (existsSync(this.filePath)) {
+      if (this.lazyInit) {
+        await this.initLazy();
+        return;
+      }
       // Stream the journal line-by-line to avoid loading the entire file into
       // memory (V8 string limit is ~512 MB; journals can exceed this).
       const fileStream = createReadStream(this.filePath, { encoding: "utf-8" });
@@ -84,7 +99,14 @@ export class Journal {
       let lastValidByteOffset = 0;
       let maxSeq = -1;
       let prevHash: string | undefined;
+      // Track per-session byte sizes so we can evict the heaviest sessions
       const tempIndex = new Map<string, JournalEvent[]>();
+      const tempSessionBytes = new Map<string, number>();
+      const tempAccessOrder: string[] = [];
+      let tempIndexBytes = 0;
+      // Sessions evicted from tempIndex during init — we still validate their
+      // hashes but don't store their events in memory.
+      const evictedSessions = new Set<string>();
       let needsTruncation = false;
 
       try {
@@ -124,14 +146,37 @@ export class Journal {
           }
 
           prevHash = this.hash(line);
-          const bucket = tempIndex.get(event.session_id);
-          if (bucket) bucket.push(event);
-          else tempIndex.set(event.session_id, [event]);
+
+          // Only store event data for sessions that haven't been evicted
+          if (!evictedSessions.has(event.session_id)) {
+            const bucket = tempIndex.get(event.session_id);
+            if (bucket) {
+              bucket.push(event);
+            } else {
+              tempIndex.set(event.session_id, [event]);
+              tempAccessOrder.push(event.session_id);
+            }
+            tempIndexBytes += lineBytes;
+            tempSessionBytes.set(event.session_id, (tempSessionBytes.get(event.session_id) ?? 0) + lineBytes);
+          }
           if (event.seq !== undefined && event.seq > maxSeq) maxSeq = event.seq;
 
           byteOffset += lineBytes;
           lastValidByteOffset = byteOffset;
           eventIndex++;
+
+          // Evict oldest sessions when memory budget exceeded.
+          // Runs every 5000 events to amortize overhead.
+          if (eventIndex % 5000 === 0 && tempIndexBytes > this.maxIndexBytes) {
+            while (tempIndexBytes > this.maxIndexBytes * 0.75 && tempAccessOrder.length > 0) {
+              const oldest = tempAccessOrder.shift()!;
+              const sessionBytes = tempSessionBytes.get(oldest) ?? 0;
+              tempIndexBytes -= sessionBytes;
+              tempIndex.delete(oldest);
+              tempSessionBytes.delete(oldest);
+              evictedSessions.add(oldest);
+            }
+          }
         }
       } catch (err) {
         this.sessionIndex.clear();
@@ -154,13 +199,21 @@ export class Journal {
         console.error(`Journal: truncated to ${lastValidByteOffset} bytes (${eventIndex} valid events)`);
       }
 
-      // Only commit to in-memory state after successful validation
+      // Only commit to in-memory state after successful validation.
+      // Apply LRU eviction: if there are more sessions than maxSessionsIndexed,
+      // only keep the most recently accessed ones to avoid OOM on large journals.
+      this.currentIndexBytes = 0;
       for (const [sid, events] of tempIndex) {
         this.trackSessionAccess(sid);
         this.sessionIndex.set(sid, events);
       }
+      this.currentIndexBytes = tempIndexBytes;
+      this.evictSessionsIfNeeded();
+      // Release tempIndex memory now that we've committed
+      tempIndex.clear();
+
       this.nextSeq = maxSeq + 1;
-      if (eventIndex > 0 && tempIndex.size > 0) {
+      if (eventIndex > 0 && this.sessionIndex.size > 0) {
         this.lastHash = prevHash;
       }
     }
@@ -231,12 +284,18 @@ export class Journal {
       this.nextSeq = seq + 1;
       this.lastHash = lineHash;
 
+      // Track new session IDs in lazy mode
+      if (this.lazySessionIds) {
+        this.lazySessionIds.add(sessionId);
+      }
+      const eventBytes = Buffer.byteLength(line, "utf-8");
       const bucket = this.sessionIndex.get(sessionId);
       if (bucket) {
         bucket.push(event);
       } else {
         this.sessionIndex.set(sessionId, [event]);
       }
+      this.currentIndexBytes += eventBytes;
       this.trackSessionAccess(sessionId);
       this.evictSessionsIfNeeded();
 
@@ -316,7 +375,12 @@ export class Journal {
   }
 
   async readSession(sessionId: string, options?: { offset?: number; limit?: number }): Promise<JournalEvent[]> {
-    const events = this.sessionIndex.get(sessionId) ?? [];
+    let events = this.sessionIndex.get(sessionId);
+    if (!events && this.lazyInit && this.lazySessionIds?.has(sessionId)) {
+      // Lazy mode: load from disk on cache miss
+      events = await this.loadSessionFromDisk(sessionId);
+    }
+    events = events ?? [];
     if (events.length > 0) {
       this.trackSessionAccess(sessionId);
     }
@@ -327,10 +391,16 @@ export class Journal {
   }
 
   getSessionEventCount(sessionId: string): number {
-    return (this.sessionIndex.get(sessionId) ?? []).length;
+    const cached = this.sessionIndex.get(sessionId);
+    if (cached) return cached.length;
+    // In lazy mode, we don't know the count without loading — return 0 if not loaded
+    return 0;
   }
 
   getKnownSessionIds(): string[] {
+    if (this.lazySessionIds) {
+      return [...this.lazySessionIds];
+    }
     return [...this.sessionIndex.keys()];
   }
 
@@ -597,10 +667,134 @@ export class Journal {
     this.sessionAccessOrder.push(sessionId);
   }
 
-  private evictSessionsIfNeeded(): void {
-    while (this.sessionIndex.size > this.maxSessionsIndexed && this.sessionAccessOrder.length > 0) {
-      const oldest = this.sessionAccessOrder.shift()!;
-      this.sessionIndex.delete(oldest);
+  /**
+   * Lazy init: read only enough to recover seq/hash state and build a lightweight
+   * session ID set. Events are loaded from disk on demand via readSession().
+   * This keeps startup memory O(1) instead of O(journal_size).
+   */
+  private async initLazy(): Promise<void> {
+    const fileStream = createReadStream(this.filePath, { encoding: "utf-8" });
+    const rl = createInterface({ input: fileStream, crlfDelay: Infinity });
+
+    let maxSeq = -1;
+    let prevHash: string | undefined;
+    let eventIndex = 0;
+    let byteOffset = 0;
+    let lastValidByteOffset = 0;
+    let needsTruncation = false;
+    const sessionIds = new Set<string>();
+
+    try {
+      for await (const line of rl) {
+        const lineBytes = Buffer.byteLength(line, "utf-8") + 1;
+        if (!line.trim()) { byteOffset += lineBytes; continue; }
+
+        let event: JournalEvent;
+        try {
+          event = JSON.parse(line) as JournalEvent;
+        } catch {
+          let isTrailing = true;
+          for await (const remaining of rl) {
+            if (remaining.trim()) { isTrailing = false; break; }
+          }
+          if (this.recovery === "strict" && !isTrailing) {
+            throw new Error(`Journal parse error at event ${eventIndex}: corrupted JSON`);
+          }
+          needsTruncation = true;
+          console.error(`Journal: corrupted JSON at event ${eventIndex}, truncating`);
+          break;
+        }
+
+        if (eventIndex > 0 && event.hash_prev !== prevHash) {
+          if (this.recovery === "strict") {
+            throw new Error(`Journal integrity violation at event ${eventIndex} (seq=${event.seq}): hash chain broken`);
+          }
+          needsTruncation = true;
+          console.error(`Journal: hash chain broken at event ${eventIndex}, truncating`);
+          break;
+        }
+
+        prevHash = this.hash(line);
+        sessionIds.add(event.session_id);
+        if (event.seq !== undefined && event.seq > maxSeq) maxSeq = event.seq;
+
+        byteOffset += lineBytes;
+        lastValidByteOffset = byteOffset;
+        eventIndex++;
+      }
+    } finally {
+      rl.close();
+      fileStream.destroy();
     }
+
+    if (needsTruncation) {
+      const fh = await open(this.filePath, "r+");
+      try { await fh.truncate(lastValidByteOffset); } finally { await fh.close(); }
+      console.error(`Journal: truncated to ${lastValidByteOffset} bytes (${eventIndex} valid events)`);
+    }
+
+    this.nextSeq = maxSeq + 1;
+    if (eventIndex > 0) {
+      this.lastHash = prevHash;
+    }
+    // Store known session IDs for getKnownSessionIds() without loading events
+    this.lazySessionIds = sessionIds;
+    console.error(`Journal: lazy init completed — ${eventIndex} events, ${sessionIds.size} sessions (index empty, on-demand loading)`);
+  }
+
+  /**
+   * Load a session's events from disk into the session index (cache).
+   * Used in lazy mode when a readSession() call misses the in-memory index.
+   */
+  private async loadSessionFromDisk(sessionId: string): Promise<JournalEvent[]> {
+    if (!existsSync(this.filePath)) return [];
+    const fileStream = createReadStream(this.filePath, { encoding: "utf-8" });
+    const rl = createInterface({ input: fileStream, crlfDelay: Infinity });
+    const events: JournalEvent[] = [];
+    let sessionBytes = 0;
+    try {
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line) as JournalEvent;
+          if (event.session_id === sessionId) {
+            events.push(event);
+            sessionBytes += Buffer.byteLength(line, "utf-8");
+          }
+        } catch { /* skip corrupted lines */ }
+      }
+    } finally {
+      rl.close();
+      fileStream.destroy();
+    }
+    // Cache the loaded session in the index
+    if (events.length > 0) {
+      this.sessionIndex.set(sessionId, events);
+      this.currentIndexBytes += sessionBytes;
+      this.trackSessionAccess(sessionId);
+      this.evictSessionsIfNeeded();
+    }
+    return events;
+  }
+
+  // Set of known session IDs for lazy mode (populated by initLazy)
+  private lazySessionIds: Set<string> | undefined;
+
+  private evictSessionsIfNeeded(): void {
+    while (
+      (this.sessionIndex.size > this.maxSessionsIndexed || this.currentIndexBytes > this.maxIndexBytes)
+      && this.sessionAccessOrder.length > 0
+    ) {
+      const oldest = this.sessionAccessOrder.shift()!;
+      const evicted = this.sessionIndex.get(oldest);
+      if (evicted) {
+        // Estimate byte size from event count × average event size (avoid re-serializing)
+        for (const e of evicted) {
+          this.currentIndexBytes -= Buffer.byteLength(JSON.stringify(e), "utf-8");
+        }
+        this.sessionIndex.delete(oldest);
+      }
+    }
+    if (this.currentIndexBytes < 0) this.currentIndexBytes = 0;
   }
 }

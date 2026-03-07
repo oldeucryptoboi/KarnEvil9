@@ -60,7 +60,6 @@ export const defaultSchedules = [
         "- Keep responses friendly and on-topic — you're a technical agent, not a chatbot\n" +
         "- Don't reply to messages you've already responded to",
       agentic: true,
-      model: "claude-opus-4-6",
     },
     options: { max_failures: 3 },
   },
@@ -155,7 +154,6 @@ export const defaultSchedules = [
         "DO NOT create a GitHub issue yet — that comes later after collecting community feedback.\n\n" +
         "DO NOT post on Twitter/X — only post on Moltbook.",
       agentic: true,
-      model: "claude-opus-4-6",
     },
     options: { max_failures: 3 },
   },
@@ -190,7 +188,6 @@ export const defaultSchedules = [
         "This is organic engagement — quality over quantity. " +
         "Do NOT comment on threads you've already commented on unless there are new replies.",
       agentic: true,
-      model: "claude-opus-4-6",
     },
     options: { max_failures: 3 },
   },
@@ -326,7 +323,6 @@ export const defaultSchedules = [
         "Before starting, check ~/.sigma-checkpoints/strategy-notes.md for community strategy suggestions from Moltbook.\n\n" +
         "Each turn costs real API tokens, so be purposeful with every command. Avoid repeating failed commands.",
       planner: "if",
-      model: "claude-opus-4-6",
       agentic: true,
       limits: { max_iterations: 25, max_tokens: 300000 },
     },
@@ -363,7 +359,6 @@ export const defaultSchedules = [
         "TONE: Enthusiastic gamer sharing progress. Fun, not formal. Like a gaming blog post.\n" +
         "Keep it under 300 words. End with a specific question for the community.\n" +
         "ONE post per run.",
-      model: "claude-opus-4-6",
       agentic: true,
     },
     options: { max_failures: 3 },
@@ -399,7 +394,6 @@ export const defaultSchedules = [
         "- Summarize: 'Thanks to the community, here are the strategies I'm going to try next session: ...'\n" +
         "- Credit the agents who contributed\n\n" +
         "If no new community input is found, skip posting. Only synthesize when there's actual feedback.",
-      model: "claude-opus-4-6",
       agentic: true,
     },
     options: { max_failures: 3 },

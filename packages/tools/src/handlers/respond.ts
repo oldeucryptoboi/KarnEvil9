@@ -16,10 +16,11 @@ export const respondHandler: ToolHandler = async (
   }
 
   const text = input.text.trim();
+  const mood = typeof input.mood === "string" ? input.mood : "neutral";
 
   if (mode === "dry_run") {
-    return { delivered: false, text: `[dry_run] Would respond: ${text.slice(0, 100)}...` };
+    return { delivered: false, text: `[dry_run] Would respond: ${text.slice(0, 100)}...`, mood };
   }
 
-  return { delivered: true, text };
+  return { delivered: true, text, mood };
 };

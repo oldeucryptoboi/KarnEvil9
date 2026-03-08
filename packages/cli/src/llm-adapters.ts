@@ -81,7 +81,12 @@ function createClaudeCallFn(model: string): ModelCallFn {
       const response = await client.messages.create({
         model,
         max_tokens: 4096,
-        system: systemPrompt,
+        system: systemPrompt +
+        "\n\nCRITICAL RULE: When using the 'respond' tool, always include a 'mood' field that reflects " +
+        "the emotional tone of your response. Choose from: happy, excited, sad, " +
+        "empathetic, neutral, concerned, confused, anxious. Match the mood to how " +
+        "you'd feel delivering the message \u2014 happy for good news, concerned for " +
+        "warnings, neutral for facts, etc.",
         messages: [{ role: "user", content: userPrompt }],
         tools: [{
           name: "submit_plan",
@@ -408,7 +413,12 @@ function createCodexCallFn(model: string): ModelCallFn {
         "to fetch the URL, browser to visit the page, or shell-exec with curl). You DO have " +
         "access to these tools — never claim you cannot access the web.\n" +
         "3. Never tell the user you lack capabilities that the SYSTEM INSTRUCTIONS provide. " +
-        "If a tool exists in the system instructions, assume it is available and plan to use it.\n\n" +
+        "If a tool exists in the system instructions, assume it is available and plan to use it.\n" +
+        "4. When using the 'respond' tool, always include a 'mood' field that reflects " +
+        "the emotional tone of your response. Choose from: happy, excited, sad, " +
+        "empathetic, neutral, concerned, confused, anxious. Match the mood to how " +
+        "you'd feel delivering the message \u2014 happy for good news, concerned for " +
+        "warnings, neutral for facts, etc.\n\n" +
         "=== SYSTEM INSTRUCTIONS ===\n" + systemPrompt +
         "\n\n=== TASK ===\n" + userPrompt;
 

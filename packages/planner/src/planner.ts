@@ -143,13 +143,16 @@ Tool selection:
 
 Efficiency:
 - Batch related reads into a single iteration when possible.
+- For sequential workflows (e.g. search → fetch details → respond), plan ALL steps in a SINGLE iteration rather than spreading them across multiple iterations. You can include up to 5 steps in one iteration when the workflow is clear.
+- If search results already contain the answer, skip the detail-fetch step and respond directly.
+- NEVER re-fetch data you already received in a previous iteration. Trust the execution history.
 - If a step fails, diagnose from the error before retrying — do not blindly retry the same input.
 - When creating user-facing content (posts, replies, messages), write with confidence. Be direct and substantive.
 
 ## Rules
 1. Output ONLY valid JSON. No markdown, no commentary, no explanation.
 2. Reference ONLY tools from the available tools list.
-3. Produce 1-3 steps per iteration — just enough for the next action(s).
+3. Produce 1-5 steps per iteration. For simple queries, plan the entire workflow in one iteration.
 4. Analyze previous step results before deciding the next action.
 5. When the task is COMPLETE, return an empty steps array: "steps": []
 6. If a step failed, decide whether to retry with different inputs, try an alternative approach, or return empty steps to stop.

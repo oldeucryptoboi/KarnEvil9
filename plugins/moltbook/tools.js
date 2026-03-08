@@ -397,11 +397,26 @@ export function createGetPostHandler(client) {
       includeComments: input.include_comments !== false,
     });
 
-    return {
-      ok: true,
-      post: res.post,
-      comments: res.comments ?? [],
+    const post = res.post;
+    const slimPost = {
+      id: post.id,
+      title: post.title,
+      content: post.content?.substring(0, 500),
+      author: post.author?.name ?? post.author,
+      submolt: post.submolt,
+      score: post.score,
+      comment_count: post.comment_count ?? post.commentCount,
+      created_at: post.created_at ?? post.createdAt,
     };
+    const slimComments = (res.comments ?? []).map(c => ({
+      id: c.id,
+      author: c.author?.name ?? c.author,
+      content: c.content?.substring(0, 300),
+      score: c.score,
+      parent_id: c.parent_id ?? c.parentId,
+      created_at: c.created_at ?? c.createdAt,
+    }));
+    return { ok: true, post: slimPost, comments: slimComments };
   };
 }
 
@@ -426,12 +441,17 @@ export function createFeedHandler(client) {
       cursor: input.cursor,
     });
 
-    return {
-      ok: true,
-      posts: res.posts ?? res.data ?? res,
-      has_more: res.has_more ?? false,
-      next_cursor: res.next_cursor ?? null,
-    };
+    const posts = (res.posts ?? res.data ?? res);
+    const slimPosts = (Array.isArray(posts) ? posts : []).map(p => ({
+      id: p.id,
+      title: p.title,
+      author: p.author?.name ?? p.author,
+      submolt: p.submolt,
+      score: p.score,
+      comment_count: p.comment_count ?? p.commentCount,
+      created_at: p.created_at ?? p.createdAt,
+    }));
+    return { ok: true, posts: slimPosts, has_more: res.has_more ?? false, next_cursor: res.next_cursor ?? null };
   };
 }
 
@@ -454,11 +474,17 @@ export function createSearchHandler(client) {
       limit: input.limit,
     });
 
-    return {
-      ok: true,
-      results: res.results ?? [],
-      count: res.count ?? res.results?.length ?? 0,
-    };
+    const slimResults = (res.results ?? []).map(r => ({
+      id: r.id,
+      type: r.type,
+      title: r.title,
+      author: r.author?.name ?? r.author,
+      submolt: r.submolt,
+      score: r.score,
+      comment_count: r.comment_count ?? r.commentCount,
+      created_at: r.created_at ?? r.createdAt,
+    }));
+    return { ok: true, results: slimResults, count: slimResults.length };
   };
 }
 

@@ -801,7 +801,7 @@ describe("LLMPlanner agentic prompt content", () => {
     const planner = new LLMPlanner(callModel, { agentic: true });
     await planner.generatePlan(makeTask(), toolSchemas, {}, {});
     expect(capturedSystem).toContain("iterative execution planner");
-    expect(capturedSystem).toContain("1-3 steps per iteration");
+    expect(capturedSystem).toContain("1-5 steps per iteration");
     expect(capturedSystem).toContain('return an empty steps array');
   });
 });

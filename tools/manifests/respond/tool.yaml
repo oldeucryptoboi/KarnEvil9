@@ -10,6 +10,9 @@ input_schema:
     text:
       type: string
       description: The response text to send to the user. Supports markdown formatting.
+    mood:
+      type: string
+      description: Emotional tone of the response (happy, excited, sad, empathetic, neutral, concerned, confused, anxious).
   additionalProperties: false
 output_schema:
   type: object
@@ -19,6 +22,8 @@ output_schema:
     delivered:
       type: boolean
     text:
+      type: string
+    mood:
       type: string
   additionalProperties: false
 permissions: []

@@ -161,6 +161,8 @@ export class CDPClient {
     });
 
     ws.on("close", () => {
+      // Ignore stale close events from a previous connection
+      if (this.ws !== ws) return;
       this._connected = false;
       // Reject all pending requests
       for (const [, pending] of this.pending) {

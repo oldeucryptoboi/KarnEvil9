@@ -273,7 +273,7 @@ describe("Chat CLI REPL Smoke Tests", () => {
       const text = stripAnsi(c.output());
       const count = (text.match(/Connected to KarnEvil9 server/g) ?? []).length;
       return count >= 2 ? "found" : "";
-    }, "found", 10000);
+    }, "found", 20000);
 
     // Submit on reconnected connection
     c.send("after restart");

@@ -61,6 +61,7 @@
     "@karnevil9/schemas": "workspace:^",
     "@karnevil9/swarm": "workspace:^",
     "@karnevil9/tools": "workspace:^",
+    "@karnevil9/vault": "workspace:^",
     "@openai/codex-sdk": "^0.99.0",
     "@playwright/test": "^1.58.2",
     "@slack/bolt": "^4.1.0",

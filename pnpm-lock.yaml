@@ -69,6 +69,9 @@ importers:
       '@karnevil9/tools':
         specifier: workspace:^
         version: link:packages/tools
+      '@karnevil9/vault':
+        specifier: workspace:^
+        version: link:packages/vault
       '@openai/codex-sdk':
         specifier: ^0.99.0
         version: 0.99.0

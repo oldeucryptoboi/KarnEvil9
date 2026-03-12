@@ -124,7 +124,7 @@ describe("CLI Binary Smoke", () => {
 
   it("run --planner with unknown type exits with error", async () => {
     try {
-      await execFileAsync(NODE, [CLI_BIN, "run", "test task", "--planner", "gemini"], {
+      await execFileAsync(NODE, [CLI_BIN, "run", "test task", "--planner", "unknown"], {
         cwd: ROOT, env: testEnv,
       });
       expect.unreachable("Should have thrown");
@@ -193,7 +193,7 @@ describe("CLI Binary Smoke", () => {
 
   it("run --agentic --planner unknown exits with error", async () => {
     try {
-      await execFileAsync(NODE, [CLI_BIN, "run", "test", "--agentic", "--planner", "gemini"], {
+      await execFileAsync(NODE, [CLI_BIN, "run", "test", "--agentic", "--planner", "unknown"], {
         cwd: ROOT, env: testEnv,
       });
       expect.unreachable("Should have thrown");

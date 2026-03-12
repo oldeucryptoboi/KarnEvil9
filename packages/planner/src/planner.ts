@@ -76,6 +76,12 @@ Tool selection:
    - "replan": would benefit from a new plan (triggers re-planning in agentic mode, treated as abort in single-shot mode)
 7. Set reasonable timeout_ms per step (default 30000 for shell/file ops, 60000 for browser actions that may need page loads).
 8. Set max_retries (0 for idempotent steps, 1-2 for flaky ones).
+9. Declare step dependencies:
+   - If step B needs the output of step A, add "depends_on": ["<step_a_id>"] to step B.
+   - If step B needs a specific field from step A's output, use "input_from": {"fieldName": "step_a_id.output_field"}.
+   - Steps without depends_on run IN PARALLEL. Only omit depends_on when steps are truly independent.
+   - Common pattern: search/fetch steps run first, then respond/synthesize steps depend on them.
+   - NEVER put a "respond" step in the same iteration as data-gathering steps unless it depends_on ALL of them.
 
 ## Available Tools
 ${JSON.stringify(toolSchemas, null, 2)}
@@ -101,6 +107,8 @@ ${JSON.stringify(constraints, null, 2)}
       "description": "<optional longer description>",
       "tool_ref": { "name": "<tool name>" },
       "input": { <matching tool input_schema> },
+      "depends_on": ["<step_id that must complete first>"],
+      "input_from": { "<input_field>": "<source_step_id.output_field>" },
       "success_criteria": ["<criterion>"],
       "failure_policy": "abort" | "continue" | "replan",
       "timeout_ms": 30000,
@@ -164,6 +172,12 @@ Efficiency:
    - "replan": failed step should trigger re-planning in the next iteration
 10. Set reasonable timeout_ms per step (default 30000 for shell/file ops, 60000 for browser actions that may need page loads).
 11. Set max_retries (0 for idempotent steps, 1-2 for flaky ones).
+12. Declare step dependencies:
+   - If step B needs the output of step A, add "depends_on": ["<step_a_id>"] to step B.
+   - If step B needs a specific field from step A's output, use "input_from": {"fieldName": "step_a_id.output_field"}.
+   - Steps without depends_on run IN PARALLEL. Only omit depends_on when steps are truly independent.
+   - Common pattern: search/fetch steps run first, then respond/synthesize steps depend on them.
+   - NEVER put a "respond" step in the same iteration as data-gathering steps unless it depends_on ALL of them.
 
 ## Available Tools
 ${JSON.stringify(toolSchemas, null, 2)}
@@ -183,6 +197,8 @@ ${JSON.stringify(constraints, null, 2)}
       "title": "<short description>",
       "tool_ref": { "name": "<tool name>" },
       "input": { <matching tool input_schema> },
+      "depends_on": ["<step_id that must complete first>"],
+      "input_from": { "<input_field>": "<source_step_id.output_field>" },
       "success_criteria": ["<criterion>"],
       "failure_policy": "abort" | "continue" | "replan",
       "timeout_ms": 30000,
@@ -245,6 +261,21 @@ function buildUserPrompt(task: Task, stateSnapshot: Record<string, unknown>): st
     }
   }
   if (stateSnapshot.has_plan) prompt += `\n## Current State (replanning context)\n${wrapUntrusted(JSON.stringify(stateSnapshot, null, 2))}\n`;
+
+  if (stateSnapshot.beam_contrastive) {
+    const bc = stateSnapshot.beam_contrastive as {
+      primary_plan_summary: string;
+      primary_tools: string[];
+      instruction: string;
+    };
+    prompt += `\n## Alternative Plan Request\n`;
+    prompt += `A primary plan has already been generated:\n`;
+    prompt += `${wrapUntrusted(bc.primary_plan_summary)}\n`;
+    prompt += `Primary tools: ${bc.primary_tools.join(", ")}\n\n`;
+    prompt += `${bc.instruction}\n`;
+    prompt += `\nYour plan MUST use a different primary approach/tool sequence.\n`;
+  }
+
   prompt += `\nProduce the plan JSON now.`;
   return prompt;
 }
@@ -355,6 +386,20 @@ function buildAgenticUserPrompt(task: Task, stateSnapshot: Record<string, unknow
       }
       prompt += `\nThe current task is a follow-up. Answer in context.\n`;
     }
+  }
+
+  if (stateSnapshot.beam_contrastive) {
+    const bc = stateSnapshot.beam_contrastive as {
+      primary_plan_summary: string;
+      primary_tools: string[];
+      instruction: string;
+    };
+    prompt += `\n## Alternative Plan Request\n`;
+    prompt += `A primary plan has already been generated:\n`;
+    prompt += `${wrapUntrusted(bc.primary_plan_summary)}\n`;
+    prompt += `Primary tools: ${bc.primary_tools.join(", ")}\n\n`;
+    prompt += `${bc.instruction}\n`;
+    prompt += `\nYour plan MUST use a different primary approach/tool sequence.\n`;
   }
 
   prompt += `\nProduce the next step(s), or return empty steps if the task is complete.`;

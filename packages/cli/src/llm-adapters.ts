@@ -1,4 +1,4 @@
-import { MockPlanner, LLMPlanner, RouterPlanner, IFPlanner, bfsPath } from "@karnevil9/planner";
+import { MockPlanner, LLMPlanner, RouterPlanner, IFPlanner, BeamPlanner, bfsPath } from "@karnevil9/planner";
 import type { ModelCallFn, ModelCallResult, IFModelCallFn } from "@karnevil9/planner";
 import type { Planner } from "@karnevil9/schemas";
 import { spawn } from "node:child_process";
@@ -563,14 +563,20 @@ function createClaudeCodeCallFn(model: string): ModelCallFn {
       const args = [
         "-p",
         "--output-format", "json",
-        "--max-turns", "3",
+        "--max-turns", "1",
+        "--tools", "",
         "--model", model === "claude-code" ? "sonnet" : model,
         "--system-prompt", systemPrompt,
       ];
 
       return new Promise<ModelCallResult>((resolve, reject) => {
         let settled = false;
-        const proc = spawn("claude", args, { stdio: ["pipe", "pipe", "pipe"] });
+        // Strip CLAUDECODE env var to avoid "nested session" rejection while
+        // preserving all other env (including auth config paths).
+        const childEnv = { ...process.env };
+        delete childEnv.CLAUDECODE;
+        delete childEnv.CLAUDE_CODE_ENTRYPOINT;
+        const proc = spawn("claude", args, { stdio: ["pipe", "pipe", "pipe"], env: childEnv });
         let stdout = "";
         let stderr = "";
 
@@ -627,20 +633,38 @@ function createClaudeCodeCallFn(model: string): ModelCallFn {
           }
 
           try {
-            const envelope = JSON.parse(stdout);
+            const parsed = JSON.parse(stdout);
+            // CLI v2+ outputs a JSON array of events; find the "result" event.
+            // Older versions output a single envelope object.
+            let envelope: Record<string, unknown>;
+            if (Array.isArray(parsed)) {
+              const resultEvent = parsed.find((e: Record<string, unknown>) => e.type === "result");
+              if (!resultEvent) {
+                reject(new Error(`Claude Code CLI returned no result event. Events: ${parsed.map((e: Record<string, unknown>) => e.type).join(", ")}`));
+                return;
+              }
+              envelope = resultEvent;
+            } else {
+              envelope = parsed;
+            }
             if (envelope.result == null) {
               reject(new Error(`Claude Code CLI returned no result (subtype: ${envelope.subtype ?? "unknown"}, is_error: ${envelope.is_error}). Output: ${stdout.slice(0, 500)}`));
               return;
             }
+            if (envelope.is_error) {
+              reject(new Error(`Claude Code CLI error: ${envelope.result}`));
+              return;
+            }
             const text = typeof envelope.result === "string" ? envelope.result : JSON.stringify(envelope.result);
+            const usage = envelope.usage as Record<string, number> | undefined;
             resolve({
               text,
               usage: {
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
+                input_tokens: usage?.input_tokens ?? 0,
+                output_tokens: usage?.output_tokens ?? 0,
+                total_tokens: (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0) + (usage?.cache_read_input_tokens ?? 0),
                 model: model === "claude-code" ? "claude-code" : model,
-                cost_usd: typeof envelope.cost_usd === "number" ? envelope.cost_usd : undefined,
+                cost_usd: typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd as number : undefined,
               },
             });
           } catch {
@@ -656,36 +680,53 @@ function createClaudeCodeCallFn(model: string): ModelCallFn {
   };
 }
 
-export function createPlanner(opts: { planner?: string; model?: string; agentic?: boolean; baseURL?: string }): Planner {
+export function createPlanner(opts: { planner?: string; model?: string; agentic?: boolean; baseURL?: string; beam?: boolean }): Planner {
   const provider = resolveProvider(opts);
   const model = resolveModel(provider, opts);
 
+  let planner: Planner;
   switch (provider) {
     case "mock":
-      return new MockPlanner({ agentic: opts.agentic });
+      planner = new MockPlanner({ agentic: opts.agentic });
+      break;
     case "claude":
-      return new LLMPlanner(createClaudeCallFn(model), { agentic: opts.agentic });
+      planner = new LLMPlanner(createClaudeCallFn(model), { agentic: opts.agentic });
+      break;
     case "claude-code":
-      return new LLMPlanner(createClaudeCodeCallFn(model), { agentic: opts.agentic });
+      planner = new LLMPlanner(createClaudeCodeCallFn(model), { agentic: opts.agentic });
+      break;
     case "codex":
-      return new LLMPlanner(createCodexCallFn(model), { agentic: opts.agentic });
+      planner = new LLMPlanner(createCodexCallFn(model), { agentic: opts.agentic });
+      break;
     case "openai":
-      return new LLMPlanner(createOpenAICallFn(model, opts.baseURL), { agentic: opts.agentic });
+      planner = new LLMPlanner(createOpenAICallFn(model, opts.baseURL), { agentic: opts.agentic });
+      break;
     case "gemini":
-      return new LLMPlanner(createGeminiCallFn(model), { agentic: opts.agentic });
+      planner = new LLMPlanner(createGeminiCallFn(model), { agentic: opts.agentic });
+      break;
     case "grok":
-      return new LLMPlanner(createGrokCallFn(model), { agentic: opts.agentic });
+      planner = new LLMPlanner(createGrokCallFn(model), { agentic: opts.agentic });
+      break;
     case "router": {
       const underlying = new LLMPlanner(createClaudeCallFn(model), { agentic: opts.agentic });
-      return new RouterPlanner({ delegate: underlying });
+      planner = new RouterPlanner({ delegate: underlying });
+      break;
     }
     case "if": {
       const ifCallModel: IFModelCallFn = createClaudeRawCallFn(model);
-      return new IFPlanner({ callModel: ifCallModel, bfsPathFinder: bfsPath });
+      planner = new IFPlanner({ callModel: ifCallModel, bfsPathFinder: bfsPath });
+      break;
     }
     default:
       throw new Error(
         `Unknown planner type: "${provider}". Valid options: mock, claude, claude-code, codex, openai, gemini, grok, router, if`
       );
   }
+
+  // Wrap in BeamPlanner if enabled
+  if (opts.beam ?? !!process.env.KARNEVIL9_BEAM) {
+    const threshold = (process.env.KARNEVIL9_BEAM_THRESHOLD === "moderate" ? "moderate" : "complex") as "moderate" | "complex";
+    return new BeamPlanner({ delegate: planner, beamThreshold: threshold });
+  }
+  return planner;
 }

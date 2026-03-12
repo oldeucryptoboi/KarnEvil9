@@ -4,5 +4,7 @@ export { RouterPlanner, classifyTask, filterToolsByDomain } from "./router-plann
 export type { TaskDomain, RouterConfig } from "./router-planner.js";
 export { IFPlanner } from "./if-planner.js";
 export type { IFPlannerConfig, IFModelCallFn, IFModelCallResult, IFGameState, BlockedPuzzle } from "./if-planner.js";
+export { BeamPlanner, classifyComplexity, scorePlan } from "./beam-planner.js";
+export type { BeamPlannerConfig, ComplexityLevel, ComplexitySignals, ScoreBreakdown, ScoringContext } from "./beam-planner.js";
 export { bfsPath } from "./bfs.js";
 export type { BfsStep } from "./bfs.js";

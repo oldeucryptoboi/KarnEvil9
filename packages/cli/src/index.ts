@@ -139,12 +139,13 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
   .option("--planner <type>", "Planner: mock, claude, claude-code, codex, openai, gemini, grok, router")
   .option("--model <name>", "Model name")
   .option("--agentic", "Enable agentic feedback loop")
+  .option("--beam", "Enable beam search (K=2 candidate plans on complex tasks)")
   .option("--context-budget", "Enable proactive context budget management (requires --agentic)")
   .option("--checkpoint-dir <dir>", "Directory for checkpoint files", "sessions/checkpoints")
   .option("--no-memory", "Disable cross-session active memory")
   .option("--browser <mode>", "Browser driver: managed, stealth, or extension", "managed")
   .option("--auto-approve", "Auto-approve all permission requests for the session")
-  .action(async (taskText: string, opts: { mode: string; maxSteps: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; contextBudget?: boolean; checkpointDir?: string; memory?: boolean; browser: string; autoApprove?: boolean }) => {
+  .action(async (taskText: string, opts: { mode: string; maxSteps: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; beam?: boolean; contextBudget?: boolean; checkpointDir?: string; memory?: boolean; browser: string; autoApprove?: boolean }) => {
     const policy = { allowed_paths: [process.cwd()], allowed_endpoints: [], allowed_commands: [], require_approval_for_writes: true };
     let browserDriver: BrowserDriverLike | undefined;
     if (opts.browser === "managed") {
@@ -158,7 +159,7 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
       ? async (_request: PermissionRequest): Promise<ApprovalDecision> => "allow_session"
       : undefined;
     // Validate planner early — fails fast before plugin loading and network auth
-    const planner = createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic });
+    const planner = createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic, beam: opts.beam });
 
     const { journal, registry, permissions, runtime, delegateDeps } = await createRuntime(policy, approvalFn, browserDriver);
     delegateDeps.planner = planner;
@@ -272,12 +273,17 @@ program.command("run").description("Run a task end-to-end").argument("<task>", "
 program.command("plan").description("Generate a plan without executing").argument("<task>", "Task description")
   .option("--planner <type>", "Planner: mock, claude, claude-code, codex, openai, gemini, grok, router")
   .option("--model <name>", "Model name")
-  .action(async (taskText: string, opts: { planner?: string; model?: string }) => {
+  .option("--beam", "Enable beam search (K=2 candidate plans)")
+  .action(async (taskText: string, opts: { planner?: string; model?: string; beam?: boolean }) => {
     const { registry } = await createRuntime();
     const task: Task = { task_id: uuid(), text: taskText, created_at: new Date().toISOString() };
-    const planner = createPlanner({ planner: opts.planner, model: opts.model });
-    const { plan, usage } = await planner.generatePlan(task, registry.getSchemasForPlanner(), {}, {});
+    const planner = createPlanner({ planner: opts.planner, model: opts.model, beam: opts.beam });
+    const { plan, usage, metadata } = await planner.generatePlan(task, registry.getSchemasForPlanner(), {}, {});
     console.log(JSON.stringify(plan, null, 2));
+    if (metadata?.beam_search) {
+      console.error(`\n── Beam Search ──`);
+      console.error(JSON.stringify(metadata.beam_search, null, 2));
+    }
     if (usage && usage.total_tokens > 0) {
       console.error(`\nTokens: ${usage.total_tokens.toLocaleString()} (${usage.input_tokens.toLocaleString()} in / ${usage.output_tokens.toLocaleString()} out)`);
       if (usage.cost_usd !== undefined && usage.cost_usd > 0) {
@@ -355,6 +361,7 @@ program.command("server").description("Start the API server")
   .option("--planner <type>", "Planner: mock, claude, claude-code, codex, openai, gemini, grok, router")
   .option("--model <name>", "Model name")
   .option("--agentic", "Enable agentic feedback loop")
+  .option("--beam", "Enable beam search (K=2 candidate plans on complex tasks)")
   .option("--insecure", "Allow running without an API token (unauthenticated)")
   .option("--no-memory", "Disable cross-session active memory")
   .option("--browser <mode>", "Browser driver: managed, stealth, or extension", "managed")
@@ -369,7 +376,7 @@ program.command("server").description("Start the API server")
   .option("--game <path>", "Path to Z-machine game file (e.g., sigma.z8)")
   .option("--game-checkpoint-dir <dir>", "Game checkpoint directory", "~/.sigma-checkpoints")
   .option("--game-turns <n>", "Max turns per game session", "20")
-  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; insecure?: boolean; memory?: boolean; browser: string; swarm?: boolean; swarmToken?: string; swarmSeeds?: string; swarmName?: string; swarmMdns?: boolean; swarmGossip?: boolean; serverName?: string; autoApprove?: boolean; game?: string; gameCheckpointDir: string; gameTurns: string }) => {
+  .action(async (opts: { port: string; pluginsDir: string; planner?: string; model?: string; agentic?: boolean; beam?: boolean; insecure?: boolean; memory?: boolean; browser: string; swarm?: boolean; swarmToken?: string; swarmSeeds?: string; swarmName?: string; swarmMdns?: boolean; swarmGossip?: boolean; serverName?: string; autoApprove?: boolean; game?: string; gameCheckpointDir: string; gameTurns: string }) => {
     // Late-binding ref: set after ApiServer is constructed
     let apiServerRef: ApiServer | null = null;
     const serverApprovalPrompt = (opts.autoApprove || opts.insecure)
@@ -437,7 +444,7 @@ program.command("server").description("Start the API server")
     }
 
     // Bootstrap scheduler before plugins so the scheduler-tool plugin can access it
-    const planner = createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic });
+    const planner = createPlanner({ planner: opts.planner, model: opts.model, agentic: opts.agentic, beam: opts.beam });
     delegateDeps.planner = planner;
     const scheduleStore = new ScheduleStore(SCHEDULER_PATH);
     const pluginsDir = resolve(opts.pluginsDir);

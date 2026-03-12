@@ -269,6 +269,20 @@ export class Kernel {
       enrichedSnapshot.conversation_history = this.config.conversationHistory;
     }
 
+    // Build tool outcome history for beam planner scoring
+    if (this.taskState) {
+      const snapshot = this.taskState.getSnapshot();
+      if (snapshot.step_results) {
+        const stepResults = snapshot.step_results as Record<string, { status: string }>;
+        const stepTitles = snapshot.step_titles as Record<string, string>;
+        const toolOutcomes: Array<{ tool: string; status: string }> = [];
+        for (const [stepId, result] of Object.entries(stepResults)) {
+          toolOutcomes.push({ tool: stepTitles?.[stepId] ?? stepId, status: result.status });
+        }
+        enrichedSnapshot.tool_outcome_history = toolOutcomes;
+      }
+    }
+
     // Merge before_plan hook data into planner snapshot (only safe keys)
     const hookData = (beforePlanResult as { data?: Record<string, unknown> }).data;
     if (hookData && typeof hookData === "object") {
@@ -417,6 +431,33 @@ export class Kernel {
     return null;
   }
 
+  /**
+   * Auto-infer depends_on for respond steps that lack explicit dependencies.
+   * If a plan has data-producing steps (anything not respond) and a respond step
+   * with no depends_on, the respond step is made to wait for all data steps.
+   */
+  private inferDependencies(plan: Plan): void {
+    const dataStepIds: string[] = [];
+    const respondSteps: Step[] = [];
+
+    for (const step of plan.steps) {
+      if (step.tool_ref.name === "respond") {
+        respondSteps.push(step);
+      } else {
+        dataStepIds.push(step.step_id);
+      }
+    }
+
+    if (dataStepIds.length === 0 || respondSteps.length === 0) return;
+
+    for (const step of respondSteps) {
+      if (!step.depends_on || step.depends_on.length === 0) {
+        step.depends_on = dataStepIds;
+        console.log(`[kernel] Auto-inferred depends_on for respond step "${step.title}": [${dataStepIds.join(", ")}]`);
+      }
+    }
+  }
+
   private async executePhase(plan: Plan): Promise<void> {
     if (!this.session || !this.taskState) return;
 
@@ -429,6 +470,9 @@ export class Kernel {
       });
       return;
     }
+
+    // Auto-infer dependencies for respond steps that lack them
+    this.inferDependencies(plan);
 
     const steps = new Map<string, Step>();
     const results = new Map<string, StepResult>();
@@ -702,6 +746,11 @@ export class Kernel {
 
         plan = planResult.plan;
         iterationUsage = planResult.usage;
+
+        // Emit beam search observability event if present
+        if (planResult.metadata?.beam_search) {
+          await this.config.journal.tryEmit(this.session.session_id, "planner.beam_search", planResult.metadata.beam_search as Record<string, unknown>);
+        }
 
         // Token limit check
         if (this.usageAccumulator && this.session.limits.max_tokens > 0) {

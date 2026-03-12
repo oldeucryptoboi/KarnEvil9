@@ -137,6 +137,7 @@ export interface UsageMetrics {
 export interface PlanResult {
   plan: Plan;
   usage?: UsageMetrics;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ModelPricing {
@@ -495,7 +496,8 @@ export type JournalEventType =
   | "auth.rate_limited"
   | "auth.key_rotated"
   | "journal.disk_warning"
-  | "journal.disk_critical";
+  | "journal.disk_critical"
+  | "planner.beam_search";
 
 // ─── Context Budget / Checkpoint ────────────────────────────────────
 

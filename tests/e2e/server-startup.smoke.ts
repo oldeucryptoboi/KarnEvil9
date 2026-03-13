@@ -36,11 +36,10 @@ describe("Server Startup Smoke", () => {
   it("boots and responds to health check", async () => {
     const apiServer = new ApiServer(registry, journal);
     const app = apiServer.getExpressApp();
-    const port = 30000 + Math.floor(Math.random() * 10000);
-
     httpServer = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
-      const s = app.listen(port, () => resolve(s));
+      const s = app.listen(0, () => resolve(s));
     });
+    const port = (httpServer.address() as import("node:net").AddressInfo).port;
 
     const res = await fetch(`http://localhost:${port}/api/health`);
     expect(res.status).toBe(200);
@@ -56,11 +55,10 @@ describe("Server Startup Smoke", () => {
   it("health check includes all subsystem checks", async () => {
     const apiServer = new ApiServer(registry, journal);
     const app = apiServer.getExpressApp();
-    const port = 30000 + Math.floor(Math.random() * 10000);
-
     httpServer = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
-      const s = app.listen(port, () => resolve(s));
+      const s = app.listen(0, () => resolve(s));
     });
+    const port = (httpServer.address() as import("node:net").AddressInfo).port;
 
     const res = await fetch(`http://localhost:${port}/api/health`);
     const body = await res.json() as { checks: Record<string, unknown> };
@@ -86,11 +84,10 @@ describe("Server Startup Smoke", () => {
   it("lists registered tools via GET /api/tools", async () => {
     const apiServer = new ApiServer(registry, journal);
     const app = apiServer.getExpressApp();
-    const port = 30000 + Math.floor(Math.random() * 10000);
-
     httpServer = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
-      const s = app.listen(port, () => resolve(s));
+      const s = app.listen(0, () => resolve(s));
     });
+    const port = (httpServer.address() as import("node:net").AddressInfo).port;
 
     const res = await fetch(`http://localhost:${port}/api/tools`);
     expect(res.status).toBe(200);
@@ -108,11 +105,10 @@ describe("Server Startup Smoke", () => {
   it("returns 404 for unknown session", async () => {
     const apiServer = new ApiServer(registry, journal);
     const app = apiServer.getExpressApp();
-    const port = 30000 + Math.floor(Math.random() * 10000);
-
     httpServer = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
-      const s = app.listen(port, () => resolve(s));
+      const s = app.listen(0, () => resolve(s));
     });
+    const port = (httpServer.address() as import("node:net").AddressInfo).port;
 
     const res = await fetch(`http://localhost:${port}/api/sessions/00000000-0000-0000-0000-000000000000`);
     expect(res.status).toBe(404);
@@ -121,11 +117,10 @@ describe("Server Startup Smoke", () => {
   it("returns empty plugins list when no plugin registry configured", async () => {
     const apiServer = new ApiServer(registry, journal);
     const app = apiServer.getExpressApp();
-    const port = 30000 + Math.floor(Math.random() * 10000);
-
     httpServer = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
-      const s = app.listen(port, () => resolve(s));
+      const s = app.listen(0, () => resolve(s));
     });
+    const port = (httpServer.address() as import("node:net").AddressInfo).port;
 
     const res = await fetch(`http://localhost:${port}/api/plugins`);
     expect(res.status).toBe(200);

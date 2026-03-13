@@ -458,11 +458,11 @@ describe("Scheduler Smoke Tests", () => {
         insecure: true,
       });
 
-      port = 30000 + Math.floor(Math.random() * 10000);
       const app = apiServer.getExpressApp();
       httpServer = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
-        const s = app.listen(port, () => resolve(s));
+        const s = app.listen(0, () => resolve(s));
       });
+      port = (httpServer.address() as import("node:net").AddressInfo).port;
     });
 
     afterEach(async () => {

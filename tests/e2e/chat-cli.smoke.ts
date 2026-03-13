@@ -101,7 +101,6 @@ describe("Chat CLI REPL Smoke Tests", () => {
     await registry.loadFromDirectory(TOOLS_DIR);
     permissions = new PermissionEngine(journal, async () => "allow_always");
     runtime = new ToolRuntime(registry, permissions, journal);
-    port = 30000 + Math.floor(Math.random() * 10000);
   });
 
   afterEach(async () => {
@@ -122,7 +121,8 @@ describe("Chat CLI REPL Smoke Tests", () => {
       planner: new MockPlanner(),
       insecure: true,
     });
-    httpServer = apiServer.listen(port);
+    httpServer = apiServer.listen(0);
+    port = (httpServer.address() as import("node:net").AddressInfo).port;
   }
 
   function startChat(extraArgs: string[] = [], env?: Record<string, string | undefined>) {

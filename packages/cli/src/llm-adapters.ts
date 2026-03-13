@@ -680,6 +680,40 @@ function createClaudeCodeCallFn(model: string): ModelCallFn {
   };
 }
 
+/**
+ * Create a lightweight LLM call for simple text completions (e.g. math solving).
+ * Uses the cheapest model for the configured provider. Returns null if no LLM available.
+ */
+export function createSimpleLLMCall(opts?: { planner?: string; model?: string }): ((prompt: string) => Promise<string>) | null {
+  const provider = resolveProvider(opts ?? {});
+  if (provider === "mock") return null;
+
+  // Use cheapest model — math problems don't need sonnet/opus
+  const solverModel = provider === "claude" ? "claude-haiku-4-5-20251001"
+    : provider === "claude-code" ? "haiku"
+    : resolveModel(provider, opts ?? {});
+
+  const system = "You solve math word problems. Return ONLY the numerical answer — no words, no units, no explanation. Example input: 'A lobster has twenty three claws and gains four more. How many claws?' Example output: 27";
+
+  try {
+    switch (provider) {
+      case "claude": {
+        const callFn = createClaudeRawCallFn(solverModel);
+        return async (prompt) => (await callFn(system, prompt)).text.trim();
+      }
+      case "claude-code": {
+        const callFn = createClaudeCodeCallFn(solverModel);
+        return async (prompt) => (await callFn(system, prompt)).text.trim();
+      }
+      default:
+        return null;
+    }
+  } catch {
+    // Provider not configured (missing API key, CLI not installed, etc.)
+    return null;
+  }
+}
+
 export function createPlanner(opts: { planner?: string; model?: string; agentic?: boolean; baseURL?: string; beam?: boolean }): Planner {
   const provider = resolveProvider(opts);
   const model = resolveModel(provider, opts);

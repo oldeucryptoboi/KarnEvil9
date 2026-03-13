@@ -42,6 +42,8 @@ export async function register(api) {
     apiKey,
     agentName,
     logger: api.logger,
+    llmCall: config.llmCall ?? null,
+    dataDir: import.meta.dirname,
   });
 
   try {
@@ -188,6 +190,7 @@ export async function register(api) {
       unreadNotifications: hb.lastResponse?.your_account?.unread_notification_count ?? 0,
       pendingDmRequests: hb.pendingDmCount ?? 0,
       failedVerifications: client.getFailedVerifications().length,
+      corpus: client.getCorpusStats(),
     });
   });
 

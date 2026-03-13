@@ -10,6 +10,7 @@ dist/
 /vault/
 packages/kernel/sessions/
 plugins/arxiv/
+*.db
 .openvger/
 *.log
 .DS_Store

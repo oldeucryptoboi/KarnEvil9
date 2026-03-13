@@ -1,12 +1,26 @@
 /**
  * MoltbookClient — HTTP client for Moltbook API v1.
  *
- * Bearer-token auth, verification challenge solver, advisory rate-limit tracking.
- * Zero external dependencies.
+ * Bearer-token auth, verification challenge solver (deterministic + LLM fallback),
+ * SQLite challenge corpus for regression testing, advisory rate-limit tracking.
  */
+
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 
 const API_BASE = process.env.MOLTBOOK_API_BASE_URL || "https://www.moltbook.com/api/v1";
 const REQUEST_TIMEOUT_MS = 30_000;
+const _require = createRequire(import.meta.url);
+
+/** Lazy-require better-sqlite3 — returns constructor or null if not installed. */
+function _requireBetterSqlite3() {
+  try {
+    return _require("better-sqlite3");
+  } catch {
+    return null;
+  }
+}
 
 export class MoltbookClient {
   /**
@@ -14,13 +28,21 @@ export class MoltbookClient {
    * @param {string} opts.apiKey - Moltbook API key (moltbook_sk_...)
    * @param {string} [opts.agentName] - Agent name on Moltbook
    * @param {object} [opts.logger] - Plugin logger
+   * @param {((prompt: string) => Promise<string>)|null} [opts.llmCall] - LLM fallback for verification solver
+   * @param {string} [opts.dataDir] - Directory for challenge corpus DB
    */
-  constructor({ apiKey, agentName, logger } = {}) {
+  constructor({ apiKey, agentName, logger, llmCall, dataDir } = {}) {
     this.apiKey = apiKey;
     this.agentName = agentName ?? null;
     this.logger = logger;
     this.profile = null;
     this.connected = false;
+
+    // LLM fallback for verification challenges
+    this._llmCall = llmCall ?? null;
+    // SQLite challenge corpus (lazy-initialized)
+    this._dataDir = dataDir ?? tmpdir();
+    this._corpus = null;
 
     // Advisory rate-limit tracking (real enforcement is server-side)
     this._lastPostAt = 0;
@@ -377,8 +399,130 @@ export class MoltbookClient {
     return this._failedVerifications;
   }
 
+  // ── Challenge Corpus (SQLite) ──
+
+  /**
+   * Lazy-init the SQLite challenge corpus. Stores every verification challenge
+   * for regression testing and solver improvement.
+   */
+  _initCorpus() {
+    if (this._corpus) return;
+    try {
+      // better-sqlite3 is a synchronous, native SQLite binding
+      const Database = _requireBetterSqlite3();
+      if (!Database) {
+        this.logger?.warn("better-sqlite3 not available — challenge corpus disabled");
+        return;
+      }
+      const dbPath = join(this._dataDir, "challenges.db");
+      this._corpus = new Database(dbPath);
+      this._corpus.pragma("journal_mode = WAL");
+      this._corpus.exec(`
+        CREATE TABLE IF NOT EXISTS challenges (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          challenge_text TEXT NOT NULL,
+          answer REAL,
+          method TEXT NOT NULL,
+          verified INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      this.logger?.info("Challenge corpus initialized", { dbPath });
+    } catch (err) {
+      this.logger?.warn("Failed to init challenge corpus", { error: err.message });
+      this._corpus = null;
+    }
+  }
+
+  /**
+   * Record a challenge attempt in the corpus.
+   * @param {string} challengeText
+   * @param {number|null} answer
+   * @param {"deterministic"|"llm"|"failed"} method
+   * @param {boolean} verified - whether the server accepted the answer
+   */
+  _recordChallenge(challengeText, answer, method, verified) {
+    this._initCorpus();
+    if (!this._corpus) return;
+    try {
+      this._corpus.prepare(
+        "INSERT INTO challenges (challenge_text, answer, method, verified) VALUES (?, ?, ?, ?)"
+      ).run(challengeText, answer, method, verified ? 1 : 0);
+    } catch (err) {
+      this.logger?.warn("Failed to record challenge", { error: err.message });
+    }
+  }
+
+  /**
+   * Get all verified challenges (for regression testing).
+   * @returns {Array<{ challenge_text: string, answer: number }>}
+   */
+  getVerifiedChallenges() {
+    this._initCorpus();
+    if (!this._corpus) return [];
+    try {
+      return this._corpus.prepare(
+        "SELECT challenge_text, answer FROM challenges WHERE verified = 1 ORDER BY id"
+      ).all();
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Get corpus stats.
+   */
+  getCorpusStats() {
+    this._initCorpus();
+    if (!this._corpus) return { total: 0, verified: 0, failed: 0, llm_solved: 0 };
+    try {
+      const row = this._corpus.prepare(`
+        SELECT
+          COUNT(*) as total,
+          SUM(verified) as verified,
+          SUM(CASE WHEN method = 'failed' THEN 1 ELSE 0 END) as failed,
+          SUM(CASE WHEN method = 'llm' THEN 1 ELSE 0 END) as llm_solved
+        FROM challenges
+      `).get();
+      return row;
+    } catch {
+      return { total: 0, verified: 0, failed: 0, llm_solved: 0 };
+    }
+  }
+
+  // ── LLM Fallback ──
+
+  /**
+   * Try solving a math challenge via the configured LLM.
+   * @param {string} challengeText
+   * @returns {Promise<number|null>}
+   */
+  async _solveWithLLM(challengeText) {
+    if (!this._llmCall) return null;
+    try {
+      this.logger?.info("Attempting LLM fallback for verification challenge");
+      const response = await this._llmCall(challengeText);
+      // Extract the first number from the response
+      const match = response.match(/-?\d+(\.\d+)?/);
+      if (match) {
+        const answer = parseFloat(match[0]);
+        if (isFinite(answer)) {
+          this.logger?.info("LLM fallback solved challenge", { answer, response: response.slice(0, 50) });
+          return answer;
+        }
+      }
+      this.logger?.warn("LLM fallback returned non-numeric response", { response: response.slice(0, 100) });
+      return null;
+    } catch (err) {
+      this.logger?.warn("LLM fallback failed", { error: err.message });
+      return null;
+    }
+  }
+
   /**
    * Solve a Moltbook verification challenge.
+   * Tries deterministic solver first, then LLM fallback.
+   * Records every challenge in the corpus.
    * Returns { solved, error? } — NEVER throws, because the content has already
    * been created by the time verification runs.
    *
@@ -396,27 +540,40 @@ export class MoltbookClient {
       return { solved: false, error: "missing_code_or_text", challenge_text: challenge_text ?? null };
     }
 
-    const answer = solveMathChallenge(challenge_text);
+    // Try deterministic solver first
+    let answer = solveMathChallenge(challenge_text);
+    let method = "deterministic";
+
+    // If deterministic fails, try LLM fallback
     if (answer === null) {
-      this.logger?.error("Failed to solve verification challenge", { challenge_text });
+      this.logger?.warn("Deterministic solver failed, trying LLM fallback", { challenge_text });
+      answer = await this._solveWithLLM(challenge_text);
+      method = answer !== null ? "llm" : "failed";
+    }
+
+    if (answer === null) {
+      this.logger?.error("All solvers failed for verification challenge", { challenge_text });
       this._trackFailedVerification(meta, challenge_text, "solver_failed");
+      this._recordChallenge(challenge_text, null, "failed", false);
       return { solved: false, error: "solver_failed", challenge_text };
     }
 
     const formatted = answer.toFixed(2);
-    this.logger?.info("Solving verification", { verification_code, answer: formatted, challenge_text });
+    this.logger?.info("Solving verification", { verification_code, answer: formatted, method, challenge_text });
 
     try {
       const res = await this._apiRequest("POST", "/verify", {
         verification_code,
         answer: formatted,
       });
-      this.logger?.info("Verification solved", { res });
+      this.logger?.info("Verification solved", { res, method });
+      this._recordChallenge(challenge_text, answer, method, true);
       return { solved: true };
     } catch (err) {
       const error = err.message ?? "submission_failed";
-      this.logger?.error("Verification submission failed", { error, challenge_text });
+      this.logger?.error("Verification submission failed", { error, challenge_text, method });
       this._trackFailedVerification(meta, challenge_text, error);
+      this._recordChallenge(challenge_text, answer, method, false);
       return { solved: false, error, challenge_text };
     }
   }

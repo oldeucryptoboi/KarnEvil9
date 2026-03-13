@@ -11,7 +11,7 @@ import type { BrowserDriverLike, EmulatorLike } from "@karnevil9/tools";
 import { PermissionEngine } from "@karnevil9/permissions";
 import { Kernel, runSubagent, extractRespondText, summarizeFindings } from "@karnevil9/kernel";
 import type { SubagentDeps } from "@karnevil9/kernel";
-import { createPlanner } from "./llm-adapters.js";
+import { createPlanner, createSimpleLLMCall } from "./llm-adapters.js";
 import { GameSessionManager } from "./game-session-manager.js";
 import { ApiServer } from "@karnevil9/api";
 import { MetricsCollector } from "@karnevil9/metrics";
@@ -634,7 +634,7 @@ program.command("server").description("Start the API server")
       pluginsDir,
       pluginConfigs: {
         "scheduler-tool": { scheduler },
-        "moltbook": { scheduler, autoSchedule: true },
+        "moltbook": { scheduler, autoSchedule: true, llmCall: createSimpleLLMCall({ planner: opts.planner, model: opts.model }) },
         "slack": {
           sessionFactory: sharedSessionFactory,
           journal,

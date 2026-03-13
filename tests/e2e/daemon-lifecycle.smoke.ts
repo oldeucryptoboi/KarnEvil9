@@ -51,13 +51,13 @@ describe("Daemon Lifecycle Smoke", () => {
       insecure: true,
     });
 
-    const port = 30000 + Math.floor(Math.random() * 10000);
     const app = apiServer.getExpressApp();
 
-    // 1. Start server
+    // 1. Start server (port 0 = OS-assigned to avoid conflicts)
     httpServer = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
-      const s = app.listen(port, () => resolve(s));
+      const s = app.listen(0, () => resolve(s));
     });
+    const port = (httpServer.address() as import("node:net").AddressInfo).port;
 
     // 2. Health check
     const healthRes = await fetch(`http://localhost:${port}/api/health`);
@@ -116,12 +116,12 @@ describe("Daemon Lifecycle Smoke", () => {
       insecure: true,
     });
 
-    const port = 30000 + Math.floor(Math.random() * 10000);
     const app = apiServer.getExpressApp();
 
     httpServer = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
-      const s = app.listen(port, () => resolve(s));
+      const s = app.listen(0, () => resolve(s));
     });
+    const port = (httpServer.address() as import("node:net").AddressInfo).port;
 
     // Create session
     const sessionRes = await fetch(`http://localhost:${port}/api/sessions`, {
@@ -158,12 +158,12 @@ describe("Daemon Lifecycle Smoke", () => {
       insecure: true,
     });
 
-    const port = 30000 + Math.floor(Math.random() * 10000);
     const app = apiServer.getExpressApp();
 
     httpServer = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
-      const s = app.listen(port, () => resolve(s));
+      const s = app.listen(0, () => resolve(s));
     });
+    const port = (httpServer.address() as import("node:net").AddressInfo).port;
 
     // Create 2 sessions (at limit)
     for (let i = 0; i < 2; i++) {

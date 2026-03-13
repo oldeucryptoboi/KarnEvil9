@@ -550,21 +550,27 @@ const KNOWN_WORDS = [
   "thousand", "hundred", "million", "billion",
   "zero", "one", "two", "six", "ten",
   // operations
-  "multiplied", "increased", "decreased", "additional", "combined", "together",
+  "multiplied", "multiplies", "multiply", "increased", "increases", "decreased", "decreases",
+  "additional", "combined", "together",
   "subtract", "subtracts", "quadrupled", "tripled", "doubled",
   "divided", "divide", "halved", "split",
   "gains", "gain", "loses", "lose", "adds", "add", "plus", "minus",
   "times", "drops", "drop", "falls", "fell", "slows", "slow", "more", "less", "fewer",
+  "reduces", "reduce", "product",
   // operations (must also be in KNOWN_WORDS so deobfuscator extracts them)
   "accelerates", "accelerate", "decelerates", "decelerate",
+  "speeds",  // "speeds up" = addition
   // context
-  "lobster", "another", "centimeters", "centimeter", "kilometers", "kilometer",
+  "lobster", "lobsters", "another", "centimeters", "centimeter", "kilometers", "kilometer",
   "temperature", "distance", "newtons", "newton", "degrees",
   "celsius", "fahrenheit", "meters", "kilograms", "kilogram", "seconds", "minutes",
   "weight", "height", "force", "power", "energy", "exerts", "strikes",
   "speed", "velocity", "second", "total", "whats", "what", "other",
   "swimming", "swims", "swim", "runs", "run", "moves", "move",
-  "new", "per", "and", "the", "has", "how", "many", "at", "is", "um", "umm", "ehh", "uh", "a",
+  "stretches", "stretch", "mechanics", "dominance", "social", "territorial", "bump",
+  "after", "but", "its", "reduces",
+  "new", "per", "and", "the", "has", "how", "many", "at", "is", "um", "umm", "ehh", "uh", "err", "a",
+  "up", "by",
   "point", "negative", "claw", "claws", "sum",
 ];
 
@@ -795,9 +801,9 @@ function parseWordNumber(tokens, startIdx) {
 
 // ── Operation detection ──
 
-const ADD_WORDS = new Set(["gains", "gain", "adds", "add", "plus", "increased", "increases", "more", "additional", "combined", "together", "total", "sum", "accelerates", "accelerate"]);
-const SUB_WORDS = new Set(["loses", "lose", "minus", "subtract", "subtracts", "decreased", "decreases", "less", "fewer", "drops", "drop", "falls", "fell", "slows", "slow", "decelerates", "decelerate"]);
-const MUL_WORDS = new Set(["times", "multiplied", "multiply", "doubled", "tripled", "quadrupled"]);
+const ADD_WORDS = new Set(["gains", "gain", "adds", "add", "plus", "increased", "increases", "more", "additional", "combined", "together", "sum", "accelerates", "accelerate", "speeds"]);
+const SUB_WORDS = new Set(["loses", "lose", "minus", "subtract", "subtracts", "decreased", "decreases", "less", "fewer", "drops", "drop", "falls", "fell", "slows", "slow", "decelerates", "decelerate", "reduces", "reduce"]);
+const MUL_WORDS = new Set(["times", "multiplied", "multiplies", "multiply", "doubled", "tripled", "quadrupled", "product"]);
 const DIV_WORDS = new Set(["divided", "divide", "halved", "split"]);
 
 const IMPLICIT_MULTIPLIERS = { doubled: 2, tripled: 3, quadrupled: 4 };

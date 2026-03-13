@@ -6,7 +6,10 @@ dist/
 .env.*
 !.env.example
 /sessions/
+/journal/
 /vault/
+packages/kernel/sessions/
+plugins/arxiv/
 .openvger/
 *.log
 .DS_Store

@@ -682,36 +682,38 @@ function createClaudeCodeCallFn(model: string): ModelCallFn {
 
 /**
  * Create a lightweight LLM call for simple text completions (e.g. math solving).
- * Uses the cheapest model for the configured provider. Returns null if no LLM available.
+ * Tries the configured planner provider first, then falls back to claude-code CLI
+ * or Claude API. Uses the cheapest model available. Returns null if no LLM available.
  */
 export function createSimpleLLMCall(opts?: { planner?: string; model?: string }): ((prompt: string) => Promise<string>) | null {
   const provider = resolveProvider(opts ?? {});
   if (provider === "mock") return null;
 
-  // Use cheapest model — math problems don't need sonnet/opus
-  const solverModel = provider === "claude" ? "claude-haiku-4-5-20251001"
-    : provider === "claude-code" ? "haiku"
-    : resolveModel(provider, opts ?? {});
-
   const system = "You solve math word problems. Return ONLY the numerical answer — no words, no units, no explanation. Example input: 'A lobster has twenty three claws and gains four more. How many claws?' Example output: 27";
 
-  try {
-    switch (provider) {
-      case "claude": {
-        const callFn = createClaudeRawCallFn(solverModel);
-        return async (prompt) => (await callFn(system, prompt)).text.trim();
+  // Try configured provider first, then fall back to alternatives
+  const candidates = [provider, "claude-code", "claude"].filter((v, i, a) => a.indexOf(v) === i);
+
+  for (const p of candidates) {
+    try {
+      switch (p) {
+        case "claude":
+          if (!process.env.ANTHROPIC_API_KEY) continue;
+          return ((fn) => async (prompt: string) => (await fn(system, prompt)).text.trim())(
+            createClaudeRawCallFn("claude-haiku-4-5-20251001")
+          );
+        case "claude-code":
+          // CLI availability is verified lazily on first call; errors caught by caller
+          return ((fn) => async (prompt: string) => (await fn(system, prompt)).text.trim())(
+            createClaudeCodeCallFn("haiku")
+          );
+        // codex/openai/gemini/grok use JSON mode — not suitable for plain text solver
+        default:
+          continue;
       }
-      case "claude-code": {
-        const callFn = createClaudeCodeCallFn(solverModel);
-        return async (prompt) => (await callFn(system, prompt)).text.trim();
-      }
-      default:
-        return null;
-    }
-  } catch {
-    // Provider not configured (missing API key, CLI not installed, etc.)
-    return null;
+    } catch { continue; }
   }
+  return null;
 }
 
 export function createPlanner(opts: { planner?: string; model?: string; agentic?: boolean; baseURL?: string; beam?: boolean }): Planner {

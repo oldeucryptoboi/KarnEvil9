@@ -319,6 +319,8 @@ export function createPostHandler(client) {
       verification_solved: hadVerification ? verificationSolved : null,
       ...(hadVerification && !verificationSolved && res._verificationResult?.error
         ? { verification_error: res._verificationResult.error } : {}),
+      ...(hadVerification && !verificationSolved && res._verificationResult?.challenge_text
+        ? { challenge_text: res._verificationResult.challenge_text } : {}),
     };
   };
 }
@@ -353,6 +355,8 @@ export function createCommentHandler(client) {
       ...(res.duplicate ? { duplicate: true } : {}),
       ...(hadVerification && !verificationSolved && res._verificationResult?.error
         ? { verification_error: res._verificationResult.error } : {}),
+      ...(hadVerification && !verificationSolved && res._verificationResult?.challenge_text
+        ? { challenge_text: res._verificationResult.challenge_text } : {}),
     };
   };
 }

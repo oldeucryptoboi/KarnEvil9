@@ -393,14 +393,14 @@ export class MoltbookClient {
 
     if (!verification_code || !challenge_text) {
       this.logger?.warn("Verification challenge missing code or text", { verification });
-      return { solved: false, error: "missing_code_or_text" };
+      return { solved: false, error: "missing_code_or_text", challenge_text: challenge_text ?? null };
     }
 
     const answer = solveMathChallenge(challenge_text);
     if (answer === null) {
       this.logger?.error("Failed to solve verification challenge", { challenge_text });
       this._trackFailedVerification(meta, challenge_text, "solver_failed");
-      return { solved: false, error: "solver_failed" };
+      return { solved: false, error: "solver_failed", challenge_text };
     }
 
     const formatted = answer.toFixed(2);
@@ -415,9 +415,9 @@ export class MoltbookClient {
       return { solved: true };
     } catch (err) {
       const error = err.message ?? "submission_failed";
-      this.logger?.error("Verification submission failed", { error });
+      this.logger?.error("Verification submission failed", { error, challenge_text });
       this._trackFailedVerification(meta, challenge_text, error);
-      return { solved: false, error };
+      return { solved: false, error, challenge_text };
     }
   }
 

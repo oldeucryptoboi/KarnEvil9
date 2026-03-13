@@ -126,7 +126,11 @@ describe("Chat CLI REPL Smoke Tests", () => {
   }
 
   function startChat(extraArgs: string[] = [], env?: Record<string, string | undefined>) {
-    chat = spawnChat(["--url", `ws://localhost:${port}/api/ws`, "--mode", "mock", ...extraArgs], env);
+    chat = spawnChat(["--url", `ws://localhost:${port}/api/ws`, "--mode", "mock", ...extraArgs], {
+      KARNEVIL9_RECONNECT_DELAY: "200",
+      KARNEVIL9_RECONNECT_MAX: "2000",
+      ...env,
+    });
     return chat;
   }
 
@@ -250,6 +254,9 @@ describe("Chat CLI REPL Smoke Tests", () => {
     // Wait for disconnect message (client receives WS close frame)
     await waitForOutput(c.output, /[Dd]isconnected|[Rr]econnect/, 8000);
 
+    // Allow time for the port to be fully released before restarting
+    await new Promise((r) => setTimeout(r, 500));
+
     // Restart a new server on the same port with fresh journal
     const journal2 = new Journal(join(testDir, "journal2.jsonl"), { fsync: false, redact: false });
     await journal2.init();
@@ -273,7 +280,7 @@ describe("Chat CLI REPL Smoke Tests", () => {
       const text = stripAnsi(c.output());
       const count = (text.match(/Connected to KarnEvil9 server/g) ?? []).length;
       return count >= 2 ? "found" : "";
-    }, "found", 20000);
+    }, "found", 15000);
 
     // Submit on reconnected connection
     c.send("after restart");

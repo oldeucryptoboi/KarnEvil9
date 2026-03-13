@@ -187,6 +187,9 @@ vi.mock("commander", () => {
     parse() {
       // no-op: don't actually parse CLI args
     }
+    parseAsync() {
+      return Promise.resolve();
+    }
   }
   return { Command: MockCommand };
 });
@@ -206,14 +209,20 @@ vi.mock("node:readline", () => ({
 
 describe("CLI index.ts module", () => {
   it("loads the module and registers Commander commands without errors", async () => {
+    // Prevent process.exit from killing the test worker
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
     // Importing the module will execute the top-level code:
     // - Function definitions (parsePort, parsePositiveInt, cliApprovalPrompt, createRuntime)
     // - Commander program setup (all .command() calls)
     // - process.on handlers
     // - Constants (JOURNAL_PATH, TOOLS_DIR, etc.)
     await import("./index.js");
+    // Allow parseAsync().then() to resolve
+    await new Promise((r) => setTimeout(r, 10));
 
     // Verify commander commands were registered
     expect(mockCommands.size).toBeGreaterThan(0);
+    exitSpy.mockRestore();
   });
 });

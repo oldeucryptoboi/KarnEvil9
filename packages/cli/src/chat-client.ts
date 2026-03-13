@@ -336,7 +336,6 @@ export class ChatClient {
     if (this._reconnectScheduled) return;
     this._reconnectScheduled = true;
     this._reconnectTimer = setTimeout(() => this.connect(), this._reconnectDelay);
-    this._reconnectTimer.unref();
     this._reconnectDelay = Math.min(this._reconnectDelay * 2, this._maxReconnectDelay);
   }
 

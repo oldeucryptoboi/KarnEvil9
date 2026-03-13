@@ -770,6 +770,8 @@ program.command("chat").description("Interactive chat session via WebSocket")
       wsFactory: (url) => new WS(url) as ChatWebSocket,
       terminal: new RealTerminalIO(),
       statusBar,
+      ...(process.env.KARNEVIL9_RECONNECT_DELAY ? { initialReconnectDelay: parseInt(process.env.KARNEVIL9_RECONNECT_DELAY, 10) } : {}),
+      ...(process.env.KARNEVIL9_RECONNECT_MAX ? { maxReconnectDelay: parseInt(process.env.KARNEVIL9_RECONNECT_MAX, 10) } : {}),
     });
     client.connect();
   });
@@ -815,7 +817,7 @@ pluginsCmd.command("list").description("List loaded plugins")
     });
     await pluginRegistry.discoverAndLoadAll();
     const plugins = pluginRegistry.listPlugins();
-    if (plugins.length === 0) { console.log("No plugins found."); return; }
+    if (plugins.length === 0) { console.log("No plugins found."); await journal.close(); return; }
     for (const p of plugins) {
       console.log(`${p.id} v${p.manifest.version} [${p.status}]`);
       console.log(`  ${p.manifest.description}`);
@@ -826,6 +828,7 @@ pluginsCmd.command("list").description("List loaded plugins")
       if (provides) console.log(`  Provides: ${provides}`);
       console.log();
     }
+    await journal.close();
   });
 
 pluginsCmd.command("info").description("Show plugin details").argument("<id>", "Plugin ID")
@@ -896,4 +899,15 @@ vaultCmd.command("sync")
     await journal.close();
   });
 
-program.parse();
+// One-shot commands should exit cleanly; long-running commands (server, relay, chat)
+// keep the process alive via their own event loops.
+const LONG_RUNNING = new Set(["server", "relay", "chat"]);
+const cmdName = process.argv[2];
+program.parseAsync().then(() => {
+  if (!LONG_RUNNING.has(cmdName ?? "")) {
+    process.exit(0);
+  }
+}).catch((err) => {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+});

@@ -60,12 +60,13 @@ karnevil9 chat
 
 ```
 --mode <mode>         Execution mode: mock, dry_run, real (default: mock)
---planner <type>      Planner backend: mock, claude, openai, router
+--planner <type>      Planner backend: mock, claude, openai, codex, router
 --model <name>        LLM model name
 --agentic             Enable iterative plan-execute-replan loop
 --context-budget      Proactive context budget management (requires --agentic)
 --max-steps <n>       Maximum steps (default: 20)
 --plugins-dir <dir>   Plugin directory (default: plugins)
+--beam                Enable beam search (K=2 contrastive plan generation)
 --no-memory           Disable cross-session learning
 --browser <mode>      Browser driver: managed or extension (default: managed)
 --insecure            Allow running without an API token
@@ -134,6 +135,8 @@ See [docs/architecture.md](docs/architecture.md) for the full architecture refer
 
 **Agentic:** Loop of plan -> execute -> observe results -> replan, until the planner signals completion or a halt condition triggers (futility detection, budget exceeded, max iterations).
 
+**Beam search (`--beam`):** For complex tasks, the planner generates two candidate plans using contrastive prompting and scores them across five dimensions (structural quality, goal advancement, strategy diversity, parsimony, tool familiarity). Simple tasks skip the second call entirely (K=1, zero overhead). Inspired by Wong's [ProbDreamer](https://arxiv.org/abs/2603.04715) finding that K=2 hypotheses reduce variance by 28%.
+
 Each step passes through: input validation -> permission check -> tool execution -> output validation -> result recording.
 
 ## Built-in Tools
@@ -181,6 +184,7 @@ The entry module exports a `register(api)` function that can call `registerTool(
 |--------|-------------|
 | `claude-code` | Delegates coding tasks to Claude Code via the Anthropic agent SDK |
 | `openai-codex` | Delegates coding tasks to OpenAI Codex via the Codex SDK |
+| `moltbook` | Social media integration for the Moltbook platform |
 | `example-logger` | Reference plugin demonstrating hooks and event logging |
 | `scheduler-tool` | Exposes the scheduler as a tool for creating scheduled jobs |
 | `slack` | Bidirectional Slack integration: receive tasks, post progress, approval buttons |
@@ -280,6 +284,9 @@ pnpm clean        # Remove dist directories
 
 # Single package
 pnpm --filter @karnevil9/kernel test
+
+# TypeScript 7 native compiler (preview) — ~5x faster type-checking
+pnpm exec tsgo -b
 ```
 
 ## Environment Variables
@@ -299,6 +306,8 @@ pnpm --filter @karnevil9/kernel test
 | `KARNEVIL9_CLAUDE_CODE_MODEL` | No | Claude Code model override |
 | `KARNEVIL9_CLAUDE_CODE_MAX_TURNS` | No | Max agentic turns per Claude Code invocation (default: 30) |
 | `KARNEVIL9_CODEX_MODEL` | No | OpenAI Codex model override |
+| `KARNEVIL9_BEAM` | No | Enable beam search planner (`true`/`false`) |
+| `KARNEVIL9_BEAM_THRESHOLD` | No | Beam search trigger: `moderate` or `complex` (default: `complex`) |
 | `SLACK_BOT_TOKEN` | For Slack plugin | Slack bot token |
 | `SLACK_APP_TOKEN` | For Slack socket mode | Slack app-level token |
 | `KARNEVIL9_SWARM_ENABLED` | No | Enable swarm mesh (`true`/`false`) |
@@ -324,6 +333,7 @@ Deep dives, experiment writeups, and development notes are published on the [old
 - [When Eddie, My AI Agent, Ran Out of Credits and Invented Its Own Cost-Cutting Strategy](https://oldeucryptoboi.substack.com/p/when-eddie-my-ai-agent-ran-out-of) — How KarnEvil9's futility monitor turned an API credit crisis into autonomous cost optimization
 - [From Self-Play to Safety: The Six-Year Arc Between Two DeepMind Papers](https://oldeucryptoboi.substack.com/p/from-self-play-to-safety-the-six) — How "Imitating Interactive Intelligence" (2020) connects to "Intelligent AI Delegation" (2026)
 - [Anthropic Just Validated What KarnEvil9 Has Been Building](https://oldeucryptoboi.substack.com/p/anthropic-just-validated-what-karnevil9) — Agent Skills vs KarnEvil9: capability packaging vs execution governance
+- [Beam Search for Agentic Planning: What Happens When You Give an AI Agent a Second Opinion](https://oldeucryptoboi.substack.com/p/beam-search-for-agentic-planning) — How K=2 contrastive plan generation reduces mode collapse in LLM planning
 
 ## Author
 

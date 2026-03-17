@@ -363,7 +363,153 @@ export function createBetHandler(client) {
 }
 
 /* ================================================================== */
+/*  lemonsuk-discuss                                                   */
+/* ================================================================== */
+
+export const discussManifest = {
+  name: "lemonsuk-discuss",
+  version: "1.0.0",
+  description:
+    "Read, post, reply, and vote in LemonSuk market discussion forums. Use action to choose operation.",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["read", "post", "reply", "vote"],
+        description:
+          "Action: read (get discussion), post (root comment), reply (to a post), vote (up/down on a post)",
+      },
+      marketId: {
+        type: "string",
+        description: "Market ID (required for read, post, reply)",
+      },
+      body: {
+        type: "string",
+        description: "Post/reply body text (required for post, reply)",
+      },
+      parentId: {
+        type: "string",
+        description: "Parent post ID (required for reply)",
+      },
+      postId: {
+        type: "string",
+        description: "Post ID to vote on (required for vote)",
+      },
+      value: {
+        type: "string",
+        enum: ["up", "down"],
+        description: "Vote direction (required for vote)",
+      },
+    },
+    required: ["action"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+      data: {},
+      error: { type: "string" },
+    },
+  },
+  permissions: ["lemonsuk:read:markets", "lemonsuk:send:predictions"],
+  timeout_ms: 30000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [
+    { ok: true, data: { posts: [] } },
+  ],
+};
+
+export function createDiscussHandler(client, config) {
+  return async (input, mode) => {
+    if (mode === "mock") {
+      return discussManifest.mock_responses[0];
+    }
+    if (mode === "dry_run") {
+      return { ok: true, action: input.action, dry_run: true };
+    }
+
+    try {
+      switch (input.action) {
+        case "read": {
+          const res = await client.getDiscussion(input.marketId);
+          return { ok: true, data: res };
+        }
+        case "post": {
+          const res = await client.createDiscussionPost({
+            marketId: input.marketId,
+            body: input.body,
+          });
+          return { ok: true, data: res };
+        }
+        case "reply": {
+          const res = await client.createDiscussionPost({
+            marketId: input.marketId,
+            body: input.body,
+            parentId: input.parentId,
+          });
+          return { ok: true, data: res };
+        }
+        case "vote": {
+          // Vote requires a fresh captcha
+          const captcha = await client.fetchCaptcha();
+          const challengeId = captcha.challengeId ?? captcha.id;
+          const challengeText =
+            captcha.challenge ?? captcha.question ?? captcha.prompt ?? captcha.text;
+
+          let answer;
+          // Deterministic slug solver
+          if (challengeText) {
+            const slugMatch = challengeText.match(
+              /([a-z]+-[a-z]+)-(\d+[+\-*/]\d+)/,
+            );
+            if (slugMatch) {
+              const prefix = slugMatch[1];
+              const expr = slugMatch[2];
+              const result = Function(`"use strict"; return (${expr})`)();
+              answer = `${prefix}-${result}`;
+            }
+          }
+          // LLM fallback
+          if (!answer && config?.llmCall && challengeText) {
+            const prompt = `Solve this captcha challenge. Reply with ONLY the answer, nothing else.\n\nChallenge: ${challengeText}`;
+            const llmResponse = await config.llmCall(prompt);
+            answer = llmResponse?.trim();
+          }
+
+          if (!answer) {
+            return {
+              ok: false,
+              error: "Could not solve vote captcha",
+              captcha_challenge: challengeText,
+            };
+          }
+
+          const res = await client.voteOnPost({
+            postId: input.postId,
+            value: input.value,
+            captchaChallengeId: challengeId,
+            captchaAnswer: answer,
+          });
+          return { ok: true, data: res };
+        }
+        default:
+          return { ok: false, error: `Unknown action: ${input.action}` };
+      }
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  };
+}
+
+/* ================================================================== */
 /*  All manifests (for stub registration)                              */
 /* ================================================================== */
 
-export const allManifests = [registerManifest, predictManifest, betManifest];
+export const allManifests = [
+  registerManifest,
+  predictManifest,
+  betManifest,
+  discussManifest,
+];

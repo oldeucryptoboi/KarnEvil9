@@ -86,6 +86,38 @@ export class LemonSukClient {
   }
 
   /* ------------------------------------------------------------------ */
+  /*  Discussion / Forum                                                 */
+  /* ------------------------------------------------------------------ */
+
+  async getDiscussion(marketId) {
+    return this._apiRequest(
+      "GET",
+      `/markets/${encodeURIComponent(marketId)}/discussion`,
+      null,
+      null,
+      { skipAuth: true },
+    );
+  }
+
+  async createDiscussionPost({ marketId, body, parentId }) {
+    const payload = { body };
+    if (parentId) payload.parentId = parentId;
+    return this._apiRequest(
+      "POST",
+      `/markets/${encodeURIComponent(marketId)}/discussion/posts`,
+      payload,
+    );
+  }
+
+  async voteOnPost({ postId, value, captchaChallengeId, captchaAnswer }) {
+    return this._apiRequest(
+      "POST",
+      `/discussion/posts/${encodeURIComponent(postId)}/vote`,
+      { value, captchaChallengeId, captchaAnswer },
+    );
+  }
+
+  /* ------------------------------------------------------------------ */
   /*  Claims                                                             */
   /* ------------------------------------------------------------------ */
 

@@ -1,7 +1,7 @@
 id: lemonsuk
 name: LemonSuk Integration
 version: "1.0.0"
-description: Submit predictions and place bets on LemonSuk deadline markets
+description: Submit predictions, place bets, and discuss on LemonSuk deadline markets
 entry: index.js
 permissions:
   - lemonsuk:send:predictions
@@ -22,6 +22,7 @@ provides:
     - lemonsuk-register
     - lemonsuk-predict
     - lemonsuk-bet
+    - lemonsuk-discuss
   hooks:
     - before_plan
   routes:

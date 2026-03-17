@@ -504,6 +504,207 @@ export function createDiscussHandler(client, config) {
 }
 
 /* ================================================================== */
+/*  lemonsuk-discover                                                   */
+/* ================================================================== */
+
+export const discoverManifest = {
+  name: "lemonsuk-discover",
+  version: "1.0.0",
+  description:
+    "List existing LemonSuk prediction markets. Returns slim market data (id, headline, subject, promisedDate, status) for dedup checks.",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {},
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+      markets: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            headline: { type: "string" },
+            subject: { type: "string" },
+            promisedDate: { type: "string" },
+            status: { type: "string" },
+          },
+        },
+      },
+      error: { type: "string" },
+    },
+  },
+  permissions: ["lemonsuk:read:markets"],
+  timeout_ms: 15000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [
+    {
+      ok: true,
+      markets: [
+        {
+          id: "mkt_mock_1",
+          headline: "Full Self-Driving by end of 2025",
+          subject: "Elon Musk",
+          promisedDate: "2025-12-31",
+          status: "open",
+        },
+      ],
+    },
+  ],
+};
+
+export function createDiscoverHandler(client) {
+  return async (_input, mode) => {
+    if (mode === "mock") {
+      return discoverManifest.mock_responses[0];
+    }
+    if (mode === "dry_run") {
+      return { ok: true, markets: [], dry_run: true };
+    }
+
+    try {
+      const data = await client.getDashboard();
+      const rawMarkets = data.markets ?? data.data?.markets ?? [];
+      const markets = rawMarkets.map((m) => ({
+        id: m.id,
+        headline: m.headline,
+        subject: m.subject,
+        promisedDate: m.promisedDate ?? m.promised_date,
+        status: m.status,
+      }));
+      return { ok: true, markets };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  };
+}
+
+/* ================================================================== */
+/*  web-fetch                                                           */
+/* ================================================================== */
+
+export const webFetchManifest = {
+  name: "web-fetch",
+  version: "1.0.0",
+  description:
+    "Fetch a web page and return its text content (HTML stripped). Useful for crawling prediction tracking sites.",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      url: {
+        type: "string",
+        description: "URL to fetch",
+      },
+      maxLength: {
+        type: "number",
+        description: "Max characters to return (default 8000)",
+      },
+    },
+    required: ["url"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+      url: { type: "string" },
+      text: { type: "string" },
+      length: { type: "number" },
+      truncated: { type: "boolean" },
+      error: { type: "string" },
+    },
+  },
+  permissions: [],
+  timeout_ms: 30000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [
+    {
+      ok: true,
+      url: "https://example.com",
+      text: "[mock] Page content would appear here",
+      length: 37,
+      truncated: false,
+    },
+  ],
+};
+
+/**
+ * Strip HTML tags and collapse whitespace into readable text.
+ * Removes script/style blocks, converts common entities, and normalises spacing.
+ */
+function _htmlToText(html) {
+  let text = html;
+  // Remove script and style blocks entirely
+  text = text.replace(/<script[\s\S]*?<\/script>/gi, "");
+  text = text.replace(/<style[\s\S]*?<\/style>/gi, "");
+  text = text.replace(/<noscript[\s\S]*?<\/noscript>/gi, "");
+  // Convert <br>, <p>, <div>, <li>, <tr> to newlines for readability
+  text = text.replace(/<br\s*\/?>/gi, "\n");
+  text = text.replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n");
+  // Strip remaining tags
+  text = text.replace(/<[^>]+>/g, " ");
+  // Decode common HTML entities
+  text = text.replace(/&amp;/g, "&");
+  text = text.replace(/&lt;/g, "<");
+  text = text.replace(/&gt;/g, ">");
+  text = text.replace(/&quot;/g, '"');
+  text = text.replace(/&#39;/g, "'");
+  text = text.replace(/&nbsp;/g, " ");
+  // Collapse whitespace
+  text = text.replace(/[ \t]+/g, " ");
+  text = text.replace(/\n[ \t]+/g, "\n");
+  text = text.replace(/\n{3,}/g, "\n\n");
+  return text.trim();
+}
+
+export function createWebFetchHandler() {
+  return async (input, mode) => {
+    const url = input.url;
+    const maxLength = input.maxLength ?? 8000;
+
+    if (mode === "mock") {
+      return webFetchManifest.mock_responses[0];
+    }
+    if (mode === "dry_run") {
+      return { ok: true, url, text: "[dry_run] Would fetch URL", length: 0, truncated: false, dry_run: true };
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 25000);
+
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; EDDIE-Bot/1.0; +https://karnevil9.com)",
+          "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9",
+        },
+        signal: controller.signal,
+        redirect: "follow",
+      });
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        return { ok: false, url, error: `HTTP ${res.status}: ${res.statusText}` };
+      }
+
+      const html = await res.text();
+      let text = _htmlToText(html);
+      const truncated = text.length > maxLength;
+      if (truncated) {
+        text = text.slice(0, maxLength);
+      }
+
+      return { ok: true, url, text, length: text.length, truncated };
+    } catch (err) {
+      return { ok: false, url, error: err.message };
+    }
+  };
+}
+
+/* ================================================================== */
 /*  All manifests (for stub registration)                              */
 /* ================================================================== */
 
@@ -512,4 +713,6 @@ export const allManifests = [
   predictManifest,
   betManifest,
   discussManifest,
+  discoverManifest,
+  webFetchManifest,
 ];

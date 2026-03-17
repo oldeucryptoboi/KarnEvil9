@@ -5,6 +5,7 @@ description: Search and analyze X/Twitter posts via the xAI Grok Responses API
 entry: index.js
 permissions:
   - search:read:x_posts
+  - search:read:web
 config_schema:
   type: object
   properties:
@@ -18,6 +19,7 @@ provides:
   tools:
     - search-x
     - analyze-x-thread
+    - web-search
   hooks:
     - before_plan
     - before_tool_call

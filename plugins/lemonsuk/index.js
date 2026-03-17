@@ -8,6 +8,10 @@ import {
   createBetHandler,
   discussManifest,
   createDiscussHandler,
+  discoverManifest,
+  createDiscoverHandler,
+  webFetchManifest,
+  createWebFetchHandler,
   allManifests,
 } from "./tools.js";
 
@@ -31,6 +35,8 @@ export async function register(api) {
   api.registerTool(predictManifest, createPredictHandler(client));
   api.registerTool(betManifest, createBetHandler(client));
   api.registerTool(discussManifest, createDiscussHandler(client, config));
+  api.registerTool(discoverManifest, createDiscoverHandler(client));
+  api.registerTool(webFetchManifest, createWebFetchHandler());
 
   // ── before_plan hook — inject LemonSuk context ─────────────────────
   api.registerHook("before_plan", async () => {
@@ -39,6 +45,8 @@ export async function register(api) {
         `Use lemonsuk-predict to submit predictions with sources (headline, subject, category, promisedDate, summary, sourceUrl, sourceLabel). ` +
         `Use lemonsuk-bet to bet against deadlines (marketId, stakeCredits). ` +
         `Use lemonsuk-discuss to read and post in market discussion forums (actions: read, post, reply, vote). ` +
+        `Use lemonsuk-discover to list existing markets before submitting new predictions (dedup check). ` +
+        `Use web-fetch to crawl web pages for Musk deadline claims (strips HTML, returns text). ` +
         `When you find a Musk deadline claim from news or social media, submit it as a prediction with a credible source URL.`,
     ];
     return { action: "modify", data: { hints } };
@@ -49,7 +57,7 @@ export async function register(api) {
     res.json({ connected: true, agent: config.agentHandle ?? "unknown" });
   });
 
-  api.logger.info("[LemonSuk] Plugin registered (4 tools, 1 hook, 1 route)");
+  api.logger.info("[LemonSuk] Plugin registered (6 tools, 1 hook, 1 route)");
 }
 
 /* ------------------------------------------------------------------ */

@@ -7,8 +7,10 @@
 import {
   searchXManifest,
   analyzeXThreadManifest,
+  webSearchManifest,
   createSearchXHandler,
   createAnalyzeXThreadHandler,
+  createWebSearchHandler,
   abortSessionSearches,
   getActiveCount,
 } from "./tool.js";
@@ -37,6 +39,9 @@ export async function register(api) {
   const analyzeHandler = createAnalyzeXThreadHandler({ journal, apiKey, model });
   api.registerTool(analyzeXThreadManifest, analyzeHandler);
 
+  const webSearchHandler = createWebSearchHandler({ journal, apiKey, model });
+  api.registerTool(webSearchManifest, webSearchHandler);
+
   // ── Register hooks ──
 
   // before_plan: inform planner that Grok X search is available
@@ -46,7 +51,7 @@ export async function register(api) {
       data: {
         grok_search_context: {
           available: true,
-          hint: "You can use the search-x tool to search X/Twitter posts and the analyze-x-thread tool to analyze specific X posts/threads. Both use Grok with real-time X data access.",
+          hint: "You can use the search-x tool to search X/Twitter posts, the analyze-x-thread tool to analyze specific X posts/threads, and the web-search tool to search the general web. All use Grok with real-time data access.",
           model: model ?? "grok-4-1-fast-reasoning",
         },
       },
@@ -55,7 +60,7 @@ export async function register(api) {
 
   // before_tool_call: inject session/invocation IDs into both tool calls
   api.registerHook("before_tool_call", async (context) => {
-    if (context.tool_name === "search-x" || context.tool_name === "analyze-x-thread") {
+    if (context.tool_name === "search-x" || context.tool_name === "analyze-x-thread" || context.tool_name === "web-search") {
       return {
         action: "modify",
         data: {
@@ -150,6 +155,29 @@ function _registerStubs(api) {
       status: "failed",
       result: "Grok Search not configured — XAI_API_KEY not set",
       citations: [],
+      is_error: true,
+      duration_ms: 0,
+      usage: {},
+    };
+  });
+
+  api.registerTool(webSearchManifest, async (input, mode) => {
+    if (mode === "mock") {
+      return {
+        status: "completed",
+        result: `[mock] Grok would web-search: ${input.query}`,
+        citations: [],
+        search_calls: 0,
+        is_error: false,
+        duration_ms: 0,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      };
+    }
+    return {
+      status: "failed",
+      result: "Grok Search not configured — XAI_API_KEY not set",
+      citations: [],
+      search_calls: 0,
       is_error: true,
       duration_ms: 0,
       usage: {},

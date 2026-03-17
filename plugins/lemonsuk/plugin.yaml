@@ -23,6 +23,8 @@ provides:
     - lemonsuk-predict
     - lemonsuk-bet
     - lemonsuk-discuss
+    - lemonsuk-discover
+    - web-fetch
   hooks:
     - before_plan
   routes:

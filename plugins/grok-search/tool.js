@@ -268,6 +268,37 @@ async function _callGrokResponses({ apiKey, model, input, tools, signal }) {
   return { result, citations, search_calls: searchCalls, usage };
 }
 
+export const webSearchManifest = {
+  name: "web-search",
+  version: "1.0.0",
+  description: "Search the web using Grok. Returns analysis and citations from web results.",
+  runner: "internal",
+  timeout_ms: 120000,
+  input_schema: {
+    type: "object",
+    required: ["query"],
+    properties: {
+      query: { type: "string", description: "Web search query" },
+      _session_id: { type: "string", description: "Auto-injected by before_tool_call hook" },
+      _invocation_id: { type: "string", description: "Auto-injected by before_tool_call hook" },
+    },
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["completed", "failed"] },
+      result: { type: "string" },
+      citations: { type: "array", items: { type: "object" } },
+      search_calls: { type: "number" },
+      is_error: { type: "boolean" },
+      duration_ms: { type: "number" },
+      usage: { type: "object" },
+    },
+  },
+  permissions: ["search:read:web"],
+  supports: { mock: true, dry_run: true },
+};
+
 // ─── Handler Factories ────────────────────────────────────────────
 
 /**
@@ -595,6 +626,145 @@ export function createAnalyzeXThreadHandler({ journal, apiKey, model }) {
         result: errorMessage,
         structured: null,
         citations: [],
+        is_error: true,
+        duration_ms: duration,
+        usage: {},
+      };
+    } finally {
+      clearTimeout(internalTimeout);
+      _activeSearches.delete(invocationId);
+    }
+  };
+}
+
+/**
+ * Create a web-search tool handler.
+ *
+ * @param {{ journal: import("@karnevil9/journal").Journal; apiKey?: string; model?: string }} opts
+ * @returns {(input: Record<string, unknown>, mode: string) => Promise<Record<string, unknown>>}
+ */
+export function createWebSearchHandler({ journal, apiKey, model }) {
+  const resolvedApiKey = _resolveApiKey(apiKey);
+  const resolvedModel = model ?? process.env.KARNEVIL9_GROK_MODEL ?? DEFAULT_MODEL;
+
+  return async (input, mode) => {
+    const query = /** @type {string} */ (input.query);
+    const sessionId = /** @type {string} */ (input._session_id ?? "unknown");
+    const invocationId = /** @type {string} */ (input._invocation_id ?? `${sessionId}:${Date.now()}`);
+
+    if (mode === "mock") {
+      return {
+        status: "completed",
+        result: `[mock] Grok would web-search: ${query}`,
+        citations: [],
+        search_calls: 0,
+        is_error: false,
+        duration_ms: 0,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      };
+    }
+
+    if (mode === "dry_run") {
+      return {
+        status: "completed",
+        result: `[dry_run] Would web-search via Grok (model: ${resolvedModel}): ${query}`,
+        citations: [],
+        search_calls: 0,
+        is_error: false,
+        duration_ms: 0,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      };
+    }
+
+    if (!resolvedApiKey) {
+      return {
+        status: "failed",
+        result: "XAI_API_KEY / XAI_KEY not set — cannot invoke Grok web search",
+        citations: [],
+        search_calls: 0,
+        is_error: true,
+        duration_ms: 0,
+        usage: {},
+      };
+    }
+
+    const startTime = Date.now();
+    const ac = new AbortController();
+    _activeSearches.set(invocationId, ac);
+    const internalTimeout = setTimeout(() => ac.abort(), 110000);
+
+    try {
+      await emitSearchEvent(journal, sessionId, "agent.started", {
+        agent_type: "grok-search",
+        tool: "web-search",
+        query,
+        model: resolvedModel,
+        invocation_id: invocationId,
+      });
+
+      const apiResult = await _callGrokResponses({
+        apiKey: resolvedApiKey,
+        model: resolvedModel,
+        input: [{ role: "user", content: query }],
+        tools: [{ type: "web_search" }],
+        signal: ac.signal,
+      });
+
+      const duration = Date.now() - startTime;
+
+      await emitSearchEvent(journal, sessionId, "agent.completed", {
+        agent_type: "grok-search",
+        tool: "web-search",
+        invocation_id: invocationId,
+        duration_ms: duration,
+        search_calls: apiResult.search_calls,
+        citations_count: apiResult.citations.length,
+      });
+
+      return {
+        status: "completed",
+        result: apiResult.result,
+        citations: apiResult.citations,
+        search_calls: apiResult.search_calls,
+        is_error: false,
+        duration_ms: duration,
+        usage: apiResult.usage,
+      };
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      const errorMessage = err instanceof Error ? err.message : String(err);
+
+      if (ac.signal.aborted) {
+        await emitSearchEvent(journal, sessionId, "agent.aborted", {
+          agent_type: "grok-search",
+          tool: "web-search",
+          invocation_id: invocationId,
+          duration_ms: duration,
+        });
+        return {
+          status: "failed",
+          result: "Web search was aborted",
+          citations: [],
+          search_calls: 0,
+          is_error: true,
+          duration_ms: duration,
+          usage: {},
+        };
+      }
+
+      await emitSearchEvent(journal, sessionId, "agent.failed", {
+        agent_type: "grok-search",
+        tool: "web-search",
+        invocation_id: invocationId,
+        error: errorMessage,
+        duration_ms: duration,
+      });
+
+      return {
+        status: "failed",
+        result: errorMessage,
+        citations: [],
+        search_calls: 0,
         is_error: true,
         duration_ms: duration,
         usage: {},

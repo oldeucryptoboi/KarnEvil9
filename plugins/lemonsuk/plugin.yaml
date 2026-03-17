@@ -1,0 +1,28 @@
+id: lemonsuk
+name: LemonSuk Integration
+version: "1.0.0"
+description: Submit predictions and place bets on LemonSuk deadline markets
+entry: index.js
+permissions:
+  - lemonsuk:send:predictions
+  - lemonsuk:send:bets
+  - lemonsuk:read:markets
+  - lemonsuk:send:registration
+config_schema:
+  type: object
+  properties:
+    apiKey:
+      description: LemonSuk API key (lsk_live_...)
+    agentHandle:
+      description: LemonSuk agent handle
+    ownerEmail:
+      description: Owner email for claim flow
+provides:
+  tools:
+    - lemonsuk-register
+    - lemonsuk-predict
+    - lemonsuk-bet
+  hooks:
+    - before_plan
+  routes:
+    - status

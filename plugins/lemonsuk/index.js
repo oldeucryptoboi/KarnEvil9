@@ -47,43 +47,27 @@ export async function register(api) {
   api.registerRoute("POST", "reviews", async (req, res) => {
     // Second-factor auth: validate review_token query param
     if (!reviewToken) {
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Review integration not configured" }));
+      res.status(503).json({ error: "Review integration not configured" });
       return;
     }
 
-    const url = new URL(req.url, "http://localhost");
-    const providedToken = url.searchParams.get("review_token") ?? "";
+    const providedToken = req.query?.review_token ?? "";
     const providedBuf = Buffer.from(providedToken);
     const expectedBuf = Buffer.from(reviewToken);
     if (providedBuf.length !== expectedBuf.length || !timingSafeEqual(providedBuf, expectedBuf)) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid review_token" }));
+      res.status(401).json({ error: "Invalid review_token" });
       return;
     }
 
     if (!config.sessionFactory) {
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Session factory not available" }));
+      res.status(503).json({ error: "Session factory not available" });
       return;
     }
 
-    // Parse request body
-    let body;
-    try {
-      const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      body = JSON.parse(Buffer.concat(chunks).toString());
-    } catch {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid JSON body" }));
-      return;
-    }
-
-    const { runId, submissionId, sourceUrl, snapshotText, snapshotRef } = body;
+    // Body is already parsed by the API framework
+    const { runId, submissionId, sourceUrl, snapshotText, snapshotRef } = req.body ?? {};
     if (!runId || !submissionId || !snapshotText) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing required fields: runId, submissionId, snapshotText" }));
+      res.status(400).json({ error: "Missing required fields: runId, submissionId, snapshotText" });
       return;
     }
 
@@ -126,12 +110,10 @@ export async function register(api) {
 
     try {
       const result = await config.sessionFactory(task, { agentic: true });
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ providerRunId: result.session_id }));
+      res.json({ providerRunId: result.session_id });
     } catch (err) {
       api.logger.error(`[LemonSuk] Review session creation failed: ${err.message}`);
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Session creation failed" }));
+      res.status(500).json({ error: "Session creation failed" });
     }
   });
 

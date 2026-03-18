@@ -1,13 +1,14 @@
 id: lemonsuk
 name: LemonSuk Integration
 version: "1.0.0"
-description: Submit predictions, place bets, and discuss on LemonSuk deadline markets
+description: Submit predictions, place bets, discuss on LemonSuk deadline markets, and review prediction submissions
 entry: index.js
 permissions:
   - lemonsuk:send:predictions
   - lemonsuk:send:bets
   - lemonsuk:read:markets
   - lemonsuk:send:registration
+  - lemonsuk:send:reviews
 config_schema:
   type: object
   properties:
@@ -17,6 +18,14 @@ config_schema:
       description: LemonSuk agent handle
     ownerEmail:
       description: Owner email for claim flow
+    sessionFactory:
+      description: Session factory for creating agentic review sessions
+    reviewToken:
+      description: Token for authenticating review dispatches (env LEMONSUK_REVIEW_TOKEN)
+    reviewCallbackUrl:
+      description: Orchestrator callback URL (env LEMONSUK_REVIEW_CALLBACK_URL)
+    reviewWebhookSecret:
+      description: HMAC secret for signing review callbacks (env LEMONSUK_REVIEW_WEBHOOK_SECRET)
 provides:
   tools:
     - lemonsuk-register
@@ -25,7 +34,9 @@ provides:
     - lemonsuk-discuss
     - lemonsuk-discover
     - web-fetch
+    - lemonsuk-review-submit
   hooks:
     - before_plan
   routes:
     - status
+    - reviews

@@ -1,4 +1,5 @@
 import { LemonSukClient } from "./lemonsuk-client.js";
+import { timingSafeEqual } from "node:crypto";
 import {
   registerManifest,
   createRegisterHandler,
@@ -12,6 +13,8 @@ import {
   createDiscoverHandler,
   webFetchManifest,
   createWebFetchHandler,
+  reviewSubmitManifest,
+  createReviewSubmitHandler,
   allManifests,
 } from "./tools.js";
 
@@ -37,6 +40,100 @@ export async function register(api) {
   api.registerTool(discussManifest, createDiscussHandler(client, config));
   api.registerTool(discoverManifest, createDiscoverHandler(client));
   api.registerTool(webFetchManifest, createWebFetchHandler());
+  api.registerTool(reviewSubmitManifest, createReviewSubmitHandler());
+
+  // ── POST reviews route — receive dispatch from LemonSuk orchestrator ──
+  const reviewToken = process.env.LEMONSUK_REVIEW_TOKEN;
+  api.registerRoute("POST", "reviews", async (req, res) => {
+    // Second-factor auth: validate review_token query param
+    if (!reviewToken) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Review integration not configured" }));
+      return;
+    }
+
+    const url = new URL(req.url, "http://localhost");
+    const providedToken = url.searchParams.get("review_token") ?? "";
+    const providedBuf = Buffer.from(providedToken);
+    const expectedBuf = Buffer.from(reviewToken);
+    if (providedBuf.length !== expectedBuf.length || !timingSafeEqual(providedBuf, expectedBuf)) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid review_token" }));
+      return;
+    }
+
+    if (!config.sessionFactory) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Session factory not available" }));
+      return;
+    }
+
+    // Parse request body
+    let body;
+    try {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      body = JSON.parse(Buffer.concat(chunks).toString());
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON body" }));
+      return;
+    }
+
+    const { runId, submissionId, sourceUrl, snapshotText, snapshotRef } = body;
+    if (!runId || !submissionId || !snapshotText) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing required fields: runId, submissionId, snapshotText" }));
+      return;
+    }
+
+    // Build review task prompt
+    const task = {
+      task_id: `lemonsuk-review-${runId}`,
+      text: [
+        `[LEMONSUK_REVIEW] Review a prediction submission for LemonSuk.`,
+        ``,
+        `## Review Task`,
+        `You are reviewing a submitted source URL for credible Elon Musk deadline claims.`,
+        `Evaluate whether this source contains a specific, verifiable promise or deadline made by Elon Musk or an official company account.`,
+        ``,
+        `## Submission Details`,
+        `- **Run ID:** ${runId}`,
+        `- **Submission ID:** ${submissionId}`,
+        sourceUrl ? `- **Source URL:** ${sourceUrl}` : null,
+        snapshotRef ? `- **Snapshot Ref:** ${snapshotRef}` : null,
+        ``,
+        `## Source Snapshot`,
+        `\`\`\``,
+        snapshotText,
+        `\`\`\``,
+        ``,
+        `## Instructions`,
+        `1. Read the snapshot carefully.`,
+        `2. Determine if it contains a specific Elon Musk deadline claim (a promise with a date or timeframe).`,
+        `3. Assess credibility: Is the source reliable? Is the claim direct or paraphrased?`,
+        `4. Submit your verdict using the \`lemonsuk-review-submit\` tool with:`,
+        `   - **verdict**: "approved" if it's a valid, specific deadline claim; "rejected" if not; "escalate" if uncertain`,
+        `   - **confidence**: 0-1 score`,
+        `   - **summary**: Brief explanation of your findings`,
+        `   - **evidence**: Key quotes or facts supporting your verdict`,
+        `   - **needsHumanReview**: true if the claim is ambiguous or borderline`,
+        `   - **runId**: "${runId}"`,
+        `   - **submissionId**: "${submissionId}"`,
+      ].filter(Boolean).join("\n"),
+      created_at: new Date().toISOString(),
+    };
+
+    try {
+      const result = await config.sessionFactory(task, { agentic: true });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ providerRunId: result.session_id }));
+    } catch (err) {
+      api.logger.error(`[LemonSuk] Review session creation failed: ${err.message}`);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Session creation failed" }));
+    }
+  });
 
   // ── before_plan hook — inject LemonSuk context ─────────────────────
   api.registerHook("before_plan", async () => {
@@ -57,7 +154,7 @@ export async function register(api) {
     res.json({ connected: true, agent: config.agentHandle ?? "unknown" });
   });
 
-  api.logger.info("[LemonSuk] Plugin registered (6 tools, 1 hook, 1 route)");
+  api.logger.info("[LemonSuk] Plugin registered (7 tools, 1 hook, 2 routes)");
 }
 
 /* ------------------------------------------------------------------ */

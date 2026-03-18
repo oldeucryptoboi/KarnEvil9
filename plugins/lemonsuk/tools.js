@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto";
+
 /* ================================================================== */
 /*  lemonsuk-register                                                  */
 /* ================================================================== */
@@ -705,6 +707,125 @@ export function createWebFetchHandler() {
 }
 
 /* ================================================================== */
+/*  lemonsuk-review-submit                                             */
+/* ================================================================== */
+
+export const reviewSubmitManifest = {
+  name: "lemonsuk-review-submit",
+  version: "1.0.0",
+  description:
+    "Submit a review verdict for a LemonSuk prediction submission back to the orchestrator. " +
+    "Called after reviewing a source snapshot for credible Elon Musk deadline claims.",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      runId: {
+        type: "string",
+        description: "The review run ID from the dispatch payload",
+      },
+      submissionId: {
+        type: "string",
+        description: "The prediction submission ID being reviewed",
+      },
+      verdict: {
+        type: "string",
+        enum: ["approved", "rejected", "escalate"],
+        description: "Review verdict: approved (valid claim), rejected (not valid), escalate (needs human review)",
+      },
+      confidence: {
+        type: "number",
+        description: "Confidence score 0-1 in the verdict",
+      },
+      summary: {
+        type: "string",
+        description: "Brief summary of the review findings (1-3 sentences)",
+      },
+      evidence: {
+        type: "array",
+        items: { type: "string" },
+        description: "Key evidence points supporting the verdict",
+      },
+      needsHumanReview: {
+        type: "boolean",
+        description: "Whether this submission should be flagged for human review",
+      },
+    },
+    required: ["runId", "submissionId", "verdict", "confidence", "summary"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+      status: { type: "number" },
+      error: { type: "string" },
+    },
+  },
+  permissions: ["lemonsuk:send:reviews"],
+  timeout_ms: 15000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [
+    { ok: true, status: 200 },
+  ],
+};
+
+export function createReviewSubmitHandler() {
+  return async (input, mode) => {
+    if (mode === "mock") {
+      return reviewSubmitManifest.mock_responses[0];
+    }
+    if (mode === "dry_run") {
+      return { ok: true, status: 200, dry_run: true };
+    }
+
+    const callbackUrl = process.env.LEMONSUK_REVIEW_CALLBACK_URL;
+    const webhookSecret = process.env.LEMONSUK_REVIEW_WEBHOOK_SECRET;
+
+    if (!callbackUrl || !webhookSecret) {
+      return { ok: false, error: "LEMONSUK_REVIEW_CALLBACK_URL or LEMONSUK_REVIEW_WEBHOOK_SECRET not configured" };
+    }
+
+    try {
+      const payload = {
+        status: "completed",
+        runId: input.runId,
+        submissionId: input.submissionId,
+        verdict: input.verdict,
+        confidence: input.confidence,
+        summary: input.summary,
+        evidence: input.evidence ?? [],
+        needsHumanReview: input.needsHumanReview ?? false,
+      };
+
+      const rawBody = JSON.stringify(payload);
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const signature = createHmac("sha256", webhookSecret)
+        .update(`${timestamp}.${rawBody}`)
+        .digest("hex");
+
+      const res = await fetch(callbackUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Eddie-Timestamp": timestamp,
+          "X-Eddie-Signature": signature,
+          "X-Eddie-Run-Id": input.runId,
+        },
+        body: rawBody,
+      });
+
+      if (!res.ok) {
+        return { ok: false, status: res.status, error: `Callback failed: HTTP ${res.status}` };
+      }
+
+      return { ok: true, status: res.status };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  };
+}
+
+/* ================================================================== */
 /*  All manifests (for stub registration)                              */
 /* ================================================================== */
 
@@ -715,4 +836,5 @@ export const allManifests = [
   discussManifest,
   discoverManifest,
   webFetchManifest,
+  reviewSubmitManifest,
 ];

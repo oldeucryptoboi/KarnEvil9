@@ -634,6 +634,9 @@ program.command("server").description("Start the API server")
       pluginsDir,
       pluginConfigs: {
         "scheduler-tool": { scheduler },
+        "lemonsuk": {
+          sessionFactory: sharedSessionFactory,
+        },
         "moltbook": { scheduler, autoSchedule: true, llmCall: createSimpleLLMCall({ planner: opts.planner, model: opts.model }) },
         "slack": {
           sessionFactory: sharedSessionFactory,

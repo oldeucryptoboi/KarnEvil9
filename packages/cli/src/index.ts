@@ -472,8 +472,16 @@ program.command("server").description("Start the API server")
 
       let sessionPlanner = planner;
       if (sessionOpts?.planner || sessionOpts?.model) {
-        const provider = sessionOpts.planner ?? opts.planner ?? "mock";
         const model = sessionOpts.model ?? opts.model;
+        // Infer provider from model name when no explicit planner override —
+        // prevents e.g. sending "claude-opus-4-6" to the Codex CLI
+        let provider = sessionOpts.planner ?? opts.planner ?? "mock";
+        if (!sessionOpts?.planner && model) {
+          if (model.startsWith("claude-")) provider = "claude";
+          else if (model.startsWith("gpt-") || model.startsWith("o1") || model.startsWith("o3") || model.startsWith("o4")) provider = "openai";
+          else if (model.startsWith("gemini-")) provider = "gemini";
+          else if (model.startsWith("grok-")) provider = "grok";
+        }
         const cacheKey = `${provider}:${model ?? "default"}`;
         let cached = plannerCache.get(cacheKey);
         if (!cached) {

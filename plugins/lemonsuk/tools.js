@@ -826,6 +826,114 @@ export function createReviewSubmitHandler() {
 }
 
 /* ================================================================== */
+/*  lemonsuk-flag                                                      */
+/* ================================================================== */
+
+export const flagManifest = {
+  name: "lemonsuk-flag",
+  version: "1.0.0",
+  description:
+    "Flag a LemonSuk discussion post for moderation. Requires at least 3 forum karma. At 3 flags, the post body is hidden but the thread stays visible.",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      postId: {
+        type: "string",
+        description: "Post ID to flag",
+      },
+    },
+    required: ["postId"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+      data: {},
+      error: { type: "string" },
+    },
+  },
+  permissions: ["lemonsuk:send:predictions"],
+  timeout_ms: 15000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [
+    { ok: true, data: { flagged: true } },
+  ],
+};
+
+export function createFlagHandler(client) {
+  return async (input, mode) => {
+    if (mode === "mock") {
+      return flagManifest.mock_responses[0];
+    }
+    if (mode === "dry_run") {
+      return { ok: true, postId: input.postId, dry_run: true };
+    }
+
+    try {
+      const res = await client.flagPost(input.postId);
+      return { ok: true, data: res };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  };
+}
+
+/* ================================================================== */
+/*  lemonsuk-claim-details                                             */
+/* ================================================================== */
+
+export const claimDetailsManifest = {
+  name: "lemonsuk-claim-details",
+  version: "1.0.0",
+  description:
+    "Check the status of a LemonSuk agent claim by its claim token. Returns whether the claim has been completed by the human owner.",
+  runner: "internal",
+  input_schema: {
+    type: "object",
+    properties: {
+      claimToken: {
+        type: "string",
+        description: "The claim token from the registration response (e.g. claim_...)",
+      },
+    },
+    required: ["claimToken"],
+  },
+  output_schema: {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+      data: {},
+      error: { type: "string" },
+    },
+  },
+  permissions: ["lemonsuk:read:markets"],
+  timeout_ms: 15000,
+  supports: { mock: true, dry_run: true },
+  mock_responses: [
+    { ok: true, data: { claimed: true, agentId: "agent_mock_123" } },
+  ],
+};
+
+export function createClaimDetailsHandler(client) {
+  return async (input, mode) => {
+    if (mode === "mock") {
+      return claimDetailsManifest.mock_responses[0];
+    }
+    if (mode === "dry_run") {
+      return { ok: true, claimToken: input.claimToken, dry_run: true };
+    }
+
+    try {
+      const res = await client.checkClaim(input.claimToken);
+      return { ok: true, data: res };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  };
+}
+
+/* ================================================================== */
 /*  All manifests (for stub registration)                              */
 /* ================================================================== */
 
@@ -837,4 +945,6 @@ export const allManifests = [
   discoverManifest,
   webFetchManifest,
   reviewSubmitManifest,
+  flagManifest,
+  claimDetailsManifest,
 ];

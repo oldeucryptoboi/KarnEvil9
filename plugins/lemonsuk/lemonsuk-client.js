@@ -117,6 +117,14 @@ export class LemonSukClient {
     );
   }
 
+  async flagPost(postId) {
+    return this._apiRequest(
+      "POST",
+      `/discussion/posts/${encodeURIComponent(postId)}/flag`,
+      {},
+    );
+  }
+
   /* ------------------------------------------------------------------ */
   /*  Dashboard (public — no auth)                                       */
   /* ------------------------------------------------------------------ */

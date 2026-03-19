@@ -35,6 +35,8 @@ provides:
     - lemonsuk-discover
     - web-fetch
     - lemonsuk-review-submit
+    - lemonsuk-flag
+    - lemonsuk-claim-details
   hooks:
     - before_plan
   routes:

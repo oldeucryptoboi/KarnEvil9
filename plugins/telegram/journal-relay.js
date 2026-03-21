@@ -64,7 +64,7 @@ export class JournalRelay {
     this.approvalHandler = approvalHandler;
     this.logger = logger;
     this._unsubscribe = null;
-    /** @type {Map<number, { messageId: number, lines: string[] }>} chatId -> progress tracker */
+    /** @type {Map<number, { messageId: number|null, lines: string[], sendPromise: Promise<void>|null }>} chatId -> progress tracker */
     this._progressMessages = new Map();
     /** @type {Map<number, ReturnType<typeof setTimeout>>} chatId -> debounce timer */
     this._editTimers = new Map();
@@ -119,9 +119,9 @@ export class JournalRelay {
       return;
     }
 
-    // Terminal events → standalone message, clear tracker
+    // Terminal events → final flush progress, then standalone message
     if (TERMINAL_EVENTS.has(event.type)) {
-      this._clearProgress(chatId);
+      await this._finalFlush(chatId);
       const formatted = formatJournalEvent(event);
       if (formatted) {
         await this.telegramClient.sendMessage({ chatId, text: formatted });
@@ -155,19 +155,20 @@ export class JournalRelay {
       // Create tracker synchronously to prevent race conditions —
       // subsequent events that arrive before sendMessage resolves will
       // append to this tracker and schedule edits instead of sending new messages.
-      tracker = { messageId: null, lines: [line] };
+      tracker = { messageId: null, lines: [line], sendPromise: null };
       this._progressMessages.set(chatId, tracker);
-      try {
-        const messageId = await this.telegramClient.sendMessage({ chatId, text: line });
-        tracker.messageId = messageId;
-        // If lines accumulated while we were awaiting, flush an edit now
-        if (tracker.lines.length > 1) {
-          this._scheduleEdit(chatId);
-        }
-      } catch (err) {
-        this.logger?.error("Failed to send progress message", { error: err.message });
-        this._progressMessages.delete(chatId);
-      }
+      tracker.sendPromise = this.telegramClient.sendMessage({ chatId, text: line })
+        .then((messageId) => {
+          tracker.messageId = messageId;
+          // If lines accumulated while we were awaiting, flush an edit now
+          if (tracker.lines.length > 1) {
+            this._scheduleEdit(chatId);
+          }
+        })
+        .catch((err) => {
+          this.logger?.error("Failed to send progress message", { error: err.message });
+          this._progressMessages.delete(chatId);
+        });
       return;
     }
 
@@ -231,6 +232,45 @@ export class JournalRelay {
     const first = lines[0];
     const tail = lines.slice(-(MAX_PROGRESS_LINES - 2));
     return [first, "...", ...tail].join("\n");
+  }
+
+  /**
+   * Final flush: await the initial send (if still pending), edit the progress
+   * message with all accumulated lines, then clear the tracker.
+   * Called by terminal events so no progress lines are lost.
+   * @param {number} chatId
+   */
+  async _finalFlush(chatId) {
+    // Cancel any pending debounce timer
+    const timer = this._editTimers.get(chatId);
+    if (timer) {
+      clearTimeout(timer);
+      this._editTimers.delete(chatId);
+    }
+
+    const tracker = this._progressMessages.get(chatId);
+    if (!tracker) return;
+
+    // Wait for the initial sendMessage to resolve if still in flight
+    if (tracker.sendPromise) {
+      await tracker.sendPromise;
+    }
+
+    // Edit the progress message with all accumulated lines
+    if (tracker.messageId && tracker.lines.length > 1) {
+      const text = this._renderProgressLines(tracker.lines);
+      try {
+        await this.telegramClient.editMessage({
+          chatId,
+          messageId: tracker.messageId,
+          text,
+        });
+      } catch {
+        // Silently handle edit errors
+      }
+    }
+
+    this._progressMessages.delete(chatId);
   }
 
   /**

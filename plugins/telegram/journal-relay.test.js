@@ -216,9 +216,9 @@ describe("JournalRelay", () => {
     });
   });
 
-  // ── Terminal events: standalone messages ──
+  // ── Terminal events: final flush + standalone messages ──
 
-  describe("terminal events (standalone)", () => {
+  describe("terminal events (final flush + standalone)", () => {
     it("sends session.completed as a standalone message", async () => {
       // Start progress first
       journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 1 }));
@@ -254,6 +254,61 @@ describe("JournalRelay", () => {
       });
     });
 
+    it("final flushes progress before sending terminal message", async () => {
+      // Build up progress with multiple lines
+      journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 3 }));
+      await vi.advanceTimersByTimeAsync(100);
+      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "search" }));
+      await vi.advanceTimersByTimeAsync(100);
+      journal._emit(makeEvent("step.succeeded", "sess-1", { step_id: "s1" }));
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Terminal event — should flush progress edit BEFORE standalone message
+      journal._emit(makeEvent("session.completed", "sess-1"));
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Progress message was edited with all accumulated lines
+      expect(telegramClient.editMessage).toHaveBeenCalledTimes(1);
+      const editText = telegramClient.editMessage.mock.calls[0][0].text;
+      expect(editText).toContain("Plan accepted");
+      expect(editText).toContain("Running search");
+      expect(editText).toContain("s1");
+
+      // Terminal message sent as standalone
+      expect(telegramClient.sendMessage).toHaveBeenCalledWith({
+        chatId: 42,
+        text: expect.stringContaining("Session completed"),
+      });
+    });
+
+    it("final flush awaits pending sendMessage before editing", async () => {
+      // Simulate slow sendMessage
+      let resolveSend;
+      telegramClient.sendMessage.mockImplementationOnce(() => {
+        return new Promise((resolve) => { resolveSend = resolve; });
+      });
+
+      // Fire progress events before sendMessage resolves
+      journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 3 }));
+      await vi.advanceTimersByTimeAsync(10);
+      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "tool1" }));
+      await vi.advanceTimersByTimeAsync(10);
+
+      // Terminal event arrives while sendMessage still pending
+      journal._emit(makeEvent("session.completed", "sess-1"));
+      await vi.advanceTimersByTimeAsync(10);
+
+      // Resolve the initial sendMessage — final flush should now edit
+      resolveSend(1001);
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Final flush should have edited with accumulated lines
+      expect(telegramClient.editMessage).toHaveBeenCalledTimes(1);
+      const editText = telegramClient.editMessage.mock.calls[0][0].text;
+      expect(editText).toContain("Plan accepted");
+      expect(editText).toContain("Running tool1");
+    });
+
     it("clears progress tracker on terminal event", async () => {
       // Build up progress
       journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 3 }));
@@ -261,11 +316,11 @@ describe("JournalRelay", () => {
       journal._emit(makeEvent("step.started", "sess-1", { tool_name: "test" }));
       await vi.advanceTimersByTimeAsync(100);
 
-      // Terminal event
+      // Terminal event (triggers final flush + clears tracker)
       journal._emit(makeEvent("session.completed", "sess-1"));
       await vi.advanceTimersByTimeAsync(100);
 
-      // Advancing past debounce should NOT trigger an edit (tracker cleared)
+      // Advancing past debounce should NOT trigger another edit (tracker cleared)
       telegramClient.editMessage.mockClear();
       await vi.advanceTimersByTimeAsync(2000);
       expect(telegramClient.editMessage).not.toHaveBeenCalled();

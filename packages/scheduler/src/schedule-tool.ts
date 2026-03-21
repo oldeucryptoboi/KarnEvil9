@@ -136,7 +136,7 @@ export function createScheduleToolHandler(scheduler: Scheduler): ToolHandler {
 /** Slim a schedule for tool output — truncate task_text to avoid blowing up the planner context. */
 function slimSchedule(s: Schedule): Record<string, unknown> {
   const obj: Record<string, unknown> = { ...s };
-  if (s.action.type === "createSession" && s.action.task_text.length > 120) {
+  if (s.action.type === "createSession" && s.action.task_text && s.action.task_text.length > 120) {
     obj.action = { ...s.action, task_text: s.action.task_text.slice(0, 120) + "..." };
   }
   return obj;

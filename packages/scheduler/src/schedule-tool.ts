@@ -1,4 +1,4 @@
-import type { ToolManifest, ToolHandler, ScheduleTrigger, JobAction, ScheduleOptions } from "@karnevil9/schemas";
+import type { ToolManifest, ToolHandler, ScheduleTrigger, JobAction, ScheduleOptions, Schedule } from "@karnevil9/schemas";
 import type { Scheduler } from "./scheduler.js";
 
 export const scheduleToolManifest: ToolManifest = {
@@ -82,7 +82,7 @@ export function createScheduleToolHandler(scheduler: Scheduler): ToolHandler {
       }
 
       case "list": {
-        const schedules = scheduler.listSchedules();
+        const schedules = scheduler.listSchedules().map(slimSchedule);
         return { schedules };
       }
 
@@ -91,7 +91,7 @@ export function createScheduleToolHandler(scheduler: Scheduler): ToolHandler {
         if (!id) throw new Error("schedule_id is required for get operation");
         const schedule = scheduler.getSchedule(id);
         if (!schedule) throw new Error(`Schedule not found: ${id}`);
-        return { schedule };
+        return { schedule: slimSchedule(schedule) };
       }
 
       case "update": {
@@ -131,6 +131,15 @@ export function createScheduleToolHandler(scheduler: Scheduler): ToolHandler {
         throw new Error(`Unknown operation: ${op}`);
     }
   };
+}
+
+/** Slim a schedule for tool output — truncate task_text to avoid blowing up the planner context. */
+function slimSchedule(s: Schedule): Record<string, unknown> {
+  const obj: Record<string, unknown> = { ...s };
+  if (s.action.type === "createSession" && s.action.task_text.length > 120) {
+    obj.action = { ...s.action, task_text: s.action.task_text.slice(0, 120) + "..." };
+  }
+  return obj;
 }
 
 /** Parse an interval string (e.g. "5m", "30s", "1h") to milliseconds. Returns null if unparseable or overflows. */

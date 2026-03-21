@@ -281,12 +281,14 @@ export class PluginRegistry {
     if (manifest.config_schema) {
       const configValidation = validateToolInput(pluginConfig, manifest.config_schema);
       if (!configValidation.valid) {
+        const error = `Config validation failed: ${configValidation.errors.join(", ")}`;
+        console.error(`[plugin:${manifest.id}] FAILED TO LOAD — ${error}`);
         const state: PluginState = {
           id: manifest.id,
           manifest,
           status: "failed",
           failed_at: new Date().toISOString(),
-          error: `Config validation failed: ${configValidation.errors.join(", ")}`,
+          error,
           config: pluginConfig,
         };
         this.plugins.set(manifest.id, state);
@@ -308,6 +310,7 @@ export class PluginRegistry {
     const result = await this.loader.load(discovered, api, { cacheBust: options?.cacheBust });
 
     if (!result.success) {
+      console.error(`[plugin:${manifest.id}] FAILED TO LOAD — ${result.error}`);
       state.status = "failed";
       state.failed_at = new Date().toISOString();
       state.error = result.error;

@@ -733,9 +733,14 @@ program.command("server").description("Start the API server")
       },
     });
     await pluginRegistry.discoverAndLoadAll();
-    const active = pluginRegistry.listPlugins().filter((p) => p.status === "active");
+    const allPlugins = pluginRegistry.listPlugins();
+    const active = allPlugins.filter((p) => p.status === "active");
+    const failed = allPlugins.filter((p) => p.status === "failed");
     if (active.length > 0) {
       console.log(`Plugins loaded: ${active.map((p) => p.id).join(", ")}`);
+    }
+    if (failed.length > 0) {
+      console.error(`Plugins FAILED (${failed.length}): ${failed.map((p) => `${p.id} — ${p.error}`).join("; ")}`);
     }
 
     const corsOrigins = process.env.KARNEVIL9_CORS_ORIGINS;

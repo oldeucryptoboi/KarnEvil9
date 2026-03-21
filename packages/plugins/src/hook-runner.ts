@@ -116,6 +116,7 @@ export class HookRunner {
         ]);
         result = validateHookResult(raw, hookName, reg.plugin_id);
       } catch (err) {
+        console.error(`[plugin:${reg.plugin_id}] Hook "${hookName}" failed: ${err instanceof Error ? err.message : String(err)}`);
         breaker.recordFailure(reg.plugin_id);
         await this.journal.tryEmit(context.session_id, "plugin.hook_failed", {
           plugin_id: reg.plugin_id,

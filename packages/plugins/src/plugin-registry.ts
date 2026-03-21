@@ -89,6 +89,7 @@ export class PluginRegistry {
             service: service.name,
           });
         } catch (err) {
+          console.error(`[plugin:${pluginId}] Service "${service.name}" failed to stop: ${err instanceof Error ? err.message : String(err)}`);
           await this.config.journal.tryEmit(pluginId, "plugin.service_failed", {
             plugin_id: pluginId,
             service: service.name,
@@ -188,7 +189,9 @@ export class PluginRegistry {
         if (this.config.toolRuntime) {
           this.config.toolRuntime.registerHandler(toolManifest.name, handler);
         }
-      } catch { /* tool may already be registered */ }
+      } catch (err) {
+        console.warn(`[plugin:${pluginId}] Failed to restore tool "${toolManifest.name}": ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     // Re-register hooks
@@ -349,6 +352,7 @@ export class PluginRegistry {
           service: service.name,
         });
       } catch (err) {
+        console.error(`[plugin:${manifest.id}] Service "${service.name}" failed to start: ${err instanceof Error ? err.message : String(err)}`);
         await this.config.journal.tryEmit(manifest.id, "plugin.service_failed", {
           plugin_id: manifest.id,
           service: service.name,

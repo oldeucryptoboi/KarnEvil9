@@ -152,13 +152,21 @@ export class JournalRelay {
     let tracker = this._progressMessages.get(chatId);
 
     if (!tracker) {
-      // First progress event for this chat — send a new message
+      // Create tracker synchronously to prevent race conditions —
+      // subsequent events that arrive before sendMessage resolves will
+      // append to this tracker and schedule edits instead of sending new messages.
+      tracker = { messageId: null, lines: [line] };
+      this._progressMessages.set(chatId, tracker);
       try {
         const messageId = await this.telegramClient.sendMessage({ chatId, text: line });
-        tracker = { messageId, lines: [line] };
-        this._progressMessages.set(chatId, tracker);
+        tracker.messageId = messageId;
+        // If lines accumulated while we were awaiting, flush an edit now
+        if (tracker.lines.length > 1) {
+          this._scheduleEdit(chatId);
+        }
       } catch (err) {
         this.logger?.error("Failed to send progress message", { error: err.message });
+        this._progressMessages.delete(chatId);
       }
       return;
     }
@@ -166,8 +174,10 @@ export class JournalRelay {
     // Append line to tracker
     tracker.lines.push(line);
 
-    // Debounce the edit
-    this._scheduleEdit(chatId);
+    // Debounce the edit (only if we have a message_id to edit)
+    if (tracker.messageId) {
+      this._scheduleEdit(chatId);
+    }
   }
 
   /**
@@ -194,7 +204,7 @@ export class JournalRelay {
    */
   async _flushEdit(chatId) {
     const tracker = this._progressMessages.get(chatId);
-    if (!tracker) return;
+    if (!tracker || !tracker.messageId) return;
 
     const text = this._renderProgressLines(tracker.lines);
 

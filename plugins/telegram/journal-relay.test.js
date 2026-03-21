@@ -162,6 +162,38 @@ describe("JournalRelay", () => {
       expect(editText).toContain("Running tool2");
     });
 
+    it("handles rapid events arriving before first sendMessage resolves (race condition)", async () => {
+      // Simulate slow sendMessage — resolves after a delay
+      let resolveSend;
+      telegramClient.sendMessage.mockImplementationOnce(() => {
+        return new Promise((resolve) => { resolveSend = resolve; });
+      });
+
+      // Fire 3 events rapidly — all before sendMessage resolves
+      journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 3 }));
+      await vi.advanceTimersByTimeAsync(10);
+      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "tool1" }));
+      await vi.advanceTimersByTimeAsync(10);
+      journal._emit(makeEvent("step.succeeded", "sess-1", { step_id: "s1" }));
+      await vi.advanceTimersByTimeAsync(10);
+
+      // Only 1 sendMessage call (the first event), not 3
+      expect(telegramClient.sendMessage).toHaveBeenCalledTimes(1);
+
+      // Now resolve the first sendMessage
+      resolveSend(1001);
+      await vi.advanceTimersByTimeAsync(10);
+
+      // After resolving, the accumulated lines should schedule an edit
+      await vi.advanceTimersByTimeAsync(1500);
+
+      expect(telegramClient.editMessage).toHaveBeenCalledTimes(1);
+      const editText = telegramClient.editMessage.mock.calls[0][0].text;
+      expect(editText).toContain("Plan accepted");
+      expect(editText).toContain("Running tool1");
+      expect(editText).toContain("s1");
+    });
+
     it("truncates lines beyond MAX_PROGRESS_LINES (10)", async () => {
       journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 20 }));
       await vi.advanceTimersByTimeAsync(100);

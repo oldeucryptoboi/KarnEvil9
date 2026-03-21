@@ -644,7 +644,7 @@ export class ApiServer {
     // Abort all running kernels
     const abortPromises: Promise<void>[] = [];
     for (const kernel of this.kernels.values()) {
-      abortPromises.push(kernel.abort().catch(() => { /* best effort */ }));
+      abortPromises.push(kernel.abort().catch((err) => { console.warn(`[api] Kernel abort failed during shutdown: ${err instanceof Error ? err.message : String(err)}`); }));
     }
     await Promise.allSettled(abortPromises);
     // Close all SSE connections
@@ -989,7 +989,7 @@ export class ApiServer {
       .catch((err) => {
         const errorMsg = err instanceof Error ? err.message : String(err);
         // Persist failure to journal so replays/reconnects can see it
-        this.journal.emit(sessionId, "session.failed", { error: errorMsg }).catch(() => {});
+        this.journal.emit(sessionId, "session.failed", { error: errorMsg }).catch((e) => console.warn(`[api] Failed to journal session.failed: ${e instanceof Error ? e.message : String(e)}`));
         try {
           this.broadcastEvent(sessionId, {
             type: "session.failed",

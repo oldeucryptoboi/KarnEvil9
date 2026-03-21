@@ -378,10 +378,11 @@ export class Scheduler {
     try {
       await this.store.save();
     } catch (err) {
+      console.error(`[scheduler] Failed to save schedules (${context}): ${err instanceof Error ? err.message : String(err)}`);
       await this.journal.emit(this.sessionId, "scheduler.save_failed", {
         context,
         error: err instanceof Error ? err.message : String(err),
-      }).catch(() => {});
+      }).catch((e) => console.warn(`[scheduler] Also failed to journal save_failed: ${e instanceof Error ? e.message : String(e)}`));
     }
   }
 

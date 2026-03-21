@@ -21,6 +21,7 @@ provides:
   tools:
     - send-telegram-message
   hooks:
+    - before_plan
     - after_session_end
   routes:
     - status

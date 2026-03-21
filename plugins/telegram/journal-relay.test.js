@@ -84,7 +84,7 @@ describe("JournalRelay", () => {
   });
 
   it("ignores events for unknown sessions", async () => {
-    journal._emit(makeEvent("step.started", "unknown-session", { tool_name: "test" }));
+    journal._emit(makeEvent("step.started", "unknown-session", { tool: "test" }));
     await vi.advanceTimersByTimeAsync(100);
     expect(telegramClient.sendMessage).not.toHaveBeenCalled();
   });
@@ -92,7 +92,7 @@ describe("JournalRelay", () => {
   // ── Permission delegation ──
 
   it("delegates permission.requested to approval handler", async () => {
-    journal._emit(makeEvent("permission.requested", "sess-1", { tool_name: "test" }));
+    journal._emit(makeEvent("permission.requested", "sess-1", { tool: "test" }));
     await vi.advanceTimersByTimeAsync(100);
     expect(approvalHandler.handlePermissionRequest).toHaveBeenCalledWith(
       expect.objectContaining({ type: "permission.requested" }),
@@ -101,17 +101,68 @@ describe("JournalRelay", () => {
     expect(telegramClient.sendMessage).not.toHaveBeenCalled();
   });
 
+  // ── Response delivery ──
+
+  describe("response delivery", () => {
+    it("sends respond tool output as a standalone message", async () => {
+      journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 1 }));
+      await vi.advanceTimersByTimeAsync(100);
+      telegramClient.sendMessage.mockClear();
+
+      journal._emit(makeEvent("step.succeeded", "sess-1", {
+        step_id: "step_respond",
+        output: { delivered: true, text: "Hello! How can I help you today?" },
+      }));
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Response text sent as standalone message
+      expect(telegramClient.sendMessage).toHaveBeenCalledWith({
+        chatId: 42,
+        text: "Hello! How can I help you today?",
+      });
+    });
+
+    it("does not send standalone message for non-respond steps", async () => {
+      journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 1 }));
+      await vi.advanceTimersByTimeAsync(100);
+      telegramClient.sendMessage.mockClear();
+
+      journal._emit(makeEvent("step.succeeded", "sess-1", {
+        step_id: "step_search",
+        output: { results: ["a", "b"] },
+      }));
+      await vi.advanceTimersByTimeAsync(100);
+
+      // No standalone message for non-respond output
+      expect(telegramClient.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("does not send standalone message when output.text is empty", async () => {
+      journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 1 }));
+      await vi.advanceTimersByTimeAsync(100);
+      telegramClient.sendMessage.mockClear();
+
+      journal._emit(makeEvent("step.succeeded", "sess-1", {
+        step_id: "step_respond",
+        output: { delivered: true, text: "" },
+      }));
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(telegramClient.sendMessage).not.toHaveBeenCalled();
+    });
+  });
+
   // ── Progress events: edit-in-place ──
 
   describe("progress events (edit-in-place)", () => {
     it("sends a new message for first progress event", async () => {
-      journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 3 }));
+      journal._emit(makeEvent("plan.accepted", "sess-1", { plan: { steps: [{}, {}, {}] } }));
       await vi.advanceTimersByTimeAsync(100);
 
       expect(telegramClient.sendMessage).toHaveBeenCalledTimes(1);
       expect(telegramClient.sendMessage).toHaveBeenCalledWith({
         chatId: 42,
-        text: expect.stringContaining("Plan accepted"),
+        text: expect.stringContaining("3 steps"),
       });
     });
 
@@ -121,7 +172,7 @@ describe("JournalRelay", () => {
       await vi.advanceTimersByTimeAsync(100);
 
       // Second event → appends to tracker, schedules edit
-      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "search" }));
+      journal._emit(makeEvent("step.started", "sess-1", { tool: "search" }));
       await vi.advanceTimersByTimeAsync(100);
 
       // Not yet edited (debounce = 1500ms)
@@ -143,11 +194,11 @@ describe("JournalRelay", () => {
       await vi.advanceTimersByTimeAsync(100);
 
       // Rapid-fire 3 events within debounce window
-      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "tool1" }));
+      journal._emit(makeEvent("step.started", "sess-1", { tool: "tool1" }));
       await vi.advanceTimersByTimeAsync(100);
       journal._emit(makeEvent("step.succeeded", "sess-1", { step_id: "s1" }));
       await vi.advanceTimersByTimeAsync(100);
-      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "tool2" }));
+      journal._emit(makeEvent("step.started", "sess-1", { tool: "tool2" }));
       await vi.advanceTimersByTimeAsync(100);
 
       // Advance past debounce
@@ -172,7 +223,7 @@ describe("JournalRelay", () => {
       // Fire 3 events rapidly — all before sendMessage resolves
       journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 3 }));
       await vi.advanceTimersByTimeAsync(10);
-      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "tool1" }));
+      journal._emit(makeEvent("step.started", "sess-1", { tool: "tool1" }));
       await vi.advanceTimersByTimeAsync(10);
       journal._emit(makeEvent("step.succeeded", "sess-1", { step_id: "s1" }));
       await vi.advanceTimersByTimeAsync(10);
@@ -200,7 +251,7 @@ describe("JournalRelay", () => {
 
       // Emit 12 more events (total 13 lines)
       for (let i = 1; i <= 12; i++) {
-        journal._emit(makeEvent("step.started", "sess-1", { tool_name: `tool${i}` }));
+        journal._emit(makeEvent("step.started", "sess-1", { tool: `tool${i}` }));
         await vi.advanceTimersByTimeAsync(100);
       }
 
@@ -258,7 +309,7 @@ describe("JournalRelay", () => {
       // Build up progress with multiple lines
       journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 3 }));
       await vi.advanceTimersByTimeAsync(100);
-      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "search" }));
+      journal._emit(makeEvent("step.started", "sess-1", { tool: "search" }));
       await vi.advanceTimersByTimeAsync(100);
       journal._emit(makeEvent("step.succeeded", "sess-1", { step_id: "s1" }));
       await vi.advanceTimersByTimeAsync(100);
@@ -291,7 +342,7 @@ describe("JournalRelay", () => {
       // Fire progress events before sendMessage resolves
       journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 3 }));
       await vi.advanceTimersByTimeAsync(10);
-      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "tool1" }));
+      journal._emit(makeEvent("step.started", "sess-1", { tool: "tool1" }));
       await vi.advanceTimersByTimeAsync(10);
 
       // Terminal event arrives while sendMessage still pending
@@ -313,7 +364,7 @@ describe("JournalRelay", () => {
       // Build up progress
       journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 3 }));
       await vi.advanceTimersByTimeAsync(100);
-      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "test" }));
+      journal._emit(makeEvent("step.started", "sess-1", { tool: "test" }));
       await vi.advanceTimersByTimeAsync(100);
 
       // Terminal event (triggers final flush + clears tracker)
@@ -371,7 +422,7 @@ describe("JournalRelay", () => {
       expect(telegramClient.sendMessage).toHaveBeenCalledTimes(1);
 
       // More progress still edits the original
-      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "retry" }));
+      journal._emit(makeEvent("step.started", "sess-1", { tool: "retry" }));
       await vi.advanceTimersByTimeAsync(1600);
 
       expect(telegramClient.editMessage).toHaveBeenCalledWith(
@@ -388,7 +439,7 @@ describe("JournalRelay", () => {
 
       journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 1 }));
       await vi.advanceTimersByTimeAsync(100);
-      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "test" }));
+      journal._emit(makeEvent("step.started", "sess-1", { tool: "test" }));
       await vi.advanceTimersByTimeAsync(1600);
 
       // Should not throw, relay continues operating
@@ -401,7 +452,7 @@ describe("JournalRelay", () => {
   describe("stop", () => {
     it("clears all timers and progress trackers", () => {
       journal._emit(makeEvent("plan.accepted", "sess-1", { step_count: 1 }));
-      journal._emit(makeEvent("step.started", "sess-1", { tool_name: "test" }));
+      journal._emit(makeEvent("step.started", "sess-1", { tool: "test" }));
 
       relay.stop();
 

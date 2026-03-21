@@ -116,6 +116,10 @@ export class JournalRelay {
     // Progress events → edit-in-place consolidated message
     if (PROGRESS_EVENTS.has(event.type)) {
       await this._appendProgress(chatId, event);
+      // Deliver respond tool output as a standalone message
+      if (event.type === "step.succeeded" && event.payload.output?.delivered === true && event.payload.output.text) {
+        await this.telegramClient.sendMessage({ chatId, text: event.payload.output.text });
+      }
       return;
     }
 
@@ -294,11 +298,11 @@ export class JournalRelay {
   _formatProgressLine(event) {
     switch (event.type) {
       case "plan.accepted": {
-        const stepCount = event.payload.step_count ?? event.payload.steps?.length ?? "?";
-        return `\uD83D\uDCCB Plan accepted \u2014 ${stepCount} steps`;
+        const stepCount = event.payload.step_count ?? event.payload.plan?.steps?.length ?? event.payload.steps?.length ?? "?";
+        return `\uD83D\uDCCB Plan accepted \u2014 ${stepCount} step${stepCount === 1 ? "" : "s"}`;
       }
       case "step.started": {
-        const tool = event.payload.tool_name ?? event.payload.step_id ?? "unknown";
+        const tool = event.payload.tool_name ?? event.payload.tool ?? event.payload.step_id ?? "unknown";
         return `\u2699\uFE0F Running ${tool}...`;
       }
       case "step.succeeded": {

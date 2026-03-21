@@ -161,6 +161,22 @@ export async function register(api) {
   // ── Register tool: send-telegram-message ──
   api.registerTool(sendTelegramMessageManifest, createSendTelegramMessageHandler(telegramClient));
 
+  // ── Register hook: before_plan (inject Telegram chat context) ──
+  api.registerHook("before_plan", async (context) => {
+    const chatId = sessionBridge.getChatIdForSession(context.session_id);
+    if (chatId === undefined) return { action: "continue" };
+    return {
+      action: "modify",
+      data: {
+        hints: [
+          `[Telegram] This task was sent from Telegram chat_id ${chatId}. ` +
+          `When using send-telegram-message, use chat_id: ${chatId}. ` +
+          `Do NOT ask the user for their chat ID.`,
+        ],
+      },
+    };
+  });
+
   // ── Register hook: after_session_end ──
   api.registerHook("after_session_end", async (context) => {
     if (context.session_id) {

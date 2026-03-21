@@ -367,11 +367,60 @@ describe("register (index.js)", () => {
   // ── Hook registration ──
 
   describe("hook registration", () => {
+    it("registers before_plan hook", async () => {
+      const api = makeApi();
+      await register(api);
+
+      expect(api.registerHook).toHaveBeenCalledWith("before_plan", expect.any(Function));
+    });
+
     it("registers after_session_end hook", async () => {
       const api = makeApi();
       await register(api);
 
       expect(api.registerHook).toHaveBeenCalledWith("after_session_end", expect.any(Function));
+    });
+  });
+
+  // ── before_plan hook behavior ──
+
+  describe("before_plan hook (chat ID injection)", () => {
+    it("injects chat_id hint for Telegram-originated sessions", async () => {
+      process.env.TELEGRAM_ALLOWED_USERS = "12345";
+      const api = makeApi();
+      const { botOnHandler } = await registerAndStart(api);
+
+      // Create a session so sessionBridge knows the chatId
+      await botOnHandler({
+        chat: { id: 100 },
+        from: { id: 12345 },
+        message: { text: "do something", date: Math.floor(Date.now() / 1000) },
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Find the before_plan hook handler
+      const hookCall = api.registerHook.mock.calls.find(([name]) => name === "before_plan");
+      const beforePlanHandler = hookCall[1];
+
+      // Call it with the session_id from sessionFactory
+      const result = await beforePlanHandler({ session_id: "s-123" });
+
+      expect(result.action).toBe("modify");
+      expect(result.data.hints).toHaveLength(1);
+      expect(result.data.hints[0]).toContain("chat_id 100");
+      expect(result.data.hints[0]).toContain("send-telegram-message");
+    });
+
+    it("returns continue for non-Telegram sessions", async () => {
+      const api = makeApi();
+      await register(api);
+
+      const hookCall = api.registerHook.mock.calls.find(([name]) => name === "before_plan");
+      const beforePlanHandler = hookCall[1];
+
+      const result = await beforePlanHandler({ session_id: "unknown-session" });
+
+      expect(result.action).toBe("continue");
     });
   });
 });

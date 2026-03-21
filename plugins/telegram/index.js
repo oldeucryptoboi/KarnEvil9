@@ -170,10 +170,9 @@ export async function register(api) {
       data: {
         hints: [
           `[Telegram] This task was sent from Telegram chat_id ${chatId}. ` +
-          `You MUST use the respond tool to deliver your answer — the user can only see ` +
-          `what you send via respond. If a task asks for information (list, check, status, etc.), ` +
-          `always respond with the results. ` +
-          `For proactive messages, use send-telegram-message with chat_id: ${chatId}.`,
+          `The user is on Telegram and can only see output from the respond tool. ` +
+          `After gathering data, always use respond to deliver results to the user. ` +
+          `For proactive/out-of-band messages, use send-telegram-message with chat_id: ${chatId}.`,
         ],
       },
     };

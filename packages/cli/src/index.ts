@@ -570,7 +570,19 @@ program.command("server").description("Start the API server")
     await scheduler.start();
     console.log(`Scheduler started (${scheduleStore.size} schedules loaded)`);
 
-    const apiToken = process.env.KARNEVIL9_API_TOKEN;
+    let apiToken = process.env.KARNEVIL9_API_TOKEN;
+    if (!apiToken && !opts.insecure) {
+      // Auto-generate a token so the server can start without --insecure
+      const { randomBytes } = await import("node:crypto");
+      apiToken = randomBytes(32).toString("hex");
+      console.log(`\n╔══════════════════════════════════════════════════════════════════════╗`);
+      console.log(`║  No KARNEVIL9_API_TOKEN set — generated a temporary token:          ║`);
+      console.log(`║  ${apiToken}  ║`);
+      console.log(`║                                                                      ║`);
+      console.log(`║  Add to .env to persist:  KARNEVIL9_API_TOKEN=${apiToken}  ║`);
+      console.log(`║  Or use --insecure for unauthenticated access.                       ║`);
+      console.log(`╚══════════════════════════════════════════════════════════════════════╝\n`);
+    }
 
     // Bootstrap swarm if enabled
     const swarmEnabled = opts.swarm || process.env.KARNEVIL9_SWARM_ENABLED === "true";
@@ -671,6 +683,12 @@ program.command("server").description("Start the API server")
           apiToken,
         },
         "twitter": {
+          sessionFactory: sharedSessionFactory,
+          journal,
+          apiBaseUrl: `http://localhost:${port}`,
+          apiToken,
+        },
+        "telegram": {
           sessionFactory: sharedSessionFactory,
           journal,
           apiBaseUrl: `http://localhost:${port}`,

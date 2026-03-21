@@ -101,10 +101,6 @@ export async function register(api) {
     logger: api.logger,
   });
 
-  // ── Pending task confirmations (chatId -> { taskText, expiresAt }) ──
-  const pendingConfirmations = new Map();
-  const CONFIRMATION_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
   // ── Wire message handler ──
   telegramClient.onMessage(async ({ chatId, userId, text }) => {
     // 1. Access control check
@@ -128,7 +124,7 @@ export async function register(api) {
       return;
     }
 
-    // 3. Check for text commands (status/cancel/help)
+    // 3. Check for text commands (/status, /cancel, /help)
     if (commandHandler.isCommand(text)) {
       await commandHandler.handle(chatId, text);
       return;
@@ -143,50 +139,23 @@ export async function register(api) {
       return;
     }
 
-    // 5. Check for confirmation of a pending task
-    const pending = pendingConfirmations.get(chatId);
-    if (pending && Date.now() < pending.expiresAt) {
-      const reply = text.trim().toLowerCase();
-      if (reply === "yes" || reply === "y" || reply === "confirm") {
-        pendingConfirmations.delete(chatId);
-        if (!sessionFactory) {
-          await telegramClient.sendMessage({ chatId, text: "\u26A0\uFE0F KarnEvil9 session factory not configured" });
-          return;
-        }
-        try {
-          await telegramClient.sendTyping(chatId);
-          const result = await sessionBridge.createSession({ taskText: pending.taskText, chatId });
-          await telegramClient.sendMessage({ chatId, text: `\u2705 Session ${result.session_id} started` });
-        } catch (err) {
-          api.logger.error("Failed to create session from Telegram", { error: err.message });
-          await telegramClient.sendMessage({ chatId, text: `\u274C Failed to start session: ${err.message}` });
-        }
-        return;
-      } else if (reply === "no" || reply === "n" || reply === "cancel") {
-        pendingConfirmations.delete(chatId);
-        await telegramClient.sendMessage({ chatId, text: "Task cancelled." });
-        return;
-      }
-      // Not yes/no — treat as new task request (fall through)
-      pendingConfirmations.delete(chatId);
-    } else if (pending) {
-      pendingConfirmations.delete(chatId);
-    }
-
-    // 6. New task — require confirmation before creating session
+    // 5. Create session directly — user is on the allowlist, no confirmation needed
     const taskText = text.trim();
     if (!taskText) return;
 
-    pendingConfirmations.set(chatId, {
-      taskText,
-      expiresAt: Date.now() + CONFIRMATION_TTL_MS,
-    });
+    if (!sessionFactory) {
+      await telegramClient.sendMessage({ chatId, text: "\u26A0\uFE0F KarnEvil9 session factory not configured" });
+      return;
+    }
 
-    const preview = taskText.length > 200 ? taskText.substring(0, 200) + "..." : taskText;
-    await telegramClient.sendMessage({
-      chatId,
-      text: `\u2753 Run this task?\n\n"${preview}"\n\nReply YES to confirm or NO to cancel. (Expires in 5 min)`,
-    });
+    try {
+      await telegramClient.sendTyping(chatId);
+      const result = await sessionBridge.createSession({ taskText, chatId });
+      await telegramClient.sendMessage({ chatId, text: `\u2705 Session ${result.session_id} started` });
+    } catch (err) {
+      api.logger.error("Failed to create session from Telegram", { error: err.message });
+      await telegramClient.sendMessage({ chatId, text: `\u274C Failed to start session: ${err.message}` });
+    }
   });
 
   // ── Register tool: send-telegram-message ──

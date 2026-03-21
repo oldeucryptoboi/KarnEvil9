@@ -314,7 +314,7 @@ describe("register (index.js)", () => {
       expect(grammy._api.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("allows pre-approved user to send messages", async () => {
+    it("creates session directly for allowed user (no confirmation)", async () => {
       process.env.TELEGRAM_ALLOWED_USERS = "12345";
       const api = makeApi();
       const { grammy, botOnHandler } = await registerAndStart(api);
@@ -326,12 +326,14 @@ describe("register (index.js)", () => {
         message: { text: "do something", date: Math.floor(Date.now() / 1000) },
       });
 
-      // Should have sent a confirmation message (the task confirmation prompt)
-      expect(grammy._api.sendMessage).toHaveBeenCalledWith(
-        100,
-        expect.stringContaining("Run this task?"),
-        expect.any(Object),
-      );
+      // Handler runs fire-and-forget — flush microtasks
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should have sent typing indicator then "Session ... started" — no "Run this task?" prompt
+      expect(grammy._api.sendChatAction).toHaveBeenCalledWith(100, "typing");
+      const sentTexts = grammy._api.sendMessage.mock.calls.map(([, text]) => text);
+      expect(sentTexts.some((t) => t.includes("Session"))).toBe(true);
+      expect(sentTexts.every((t) => !t.includes("Run this task?"))).toBe(true);
     });
   });
 
